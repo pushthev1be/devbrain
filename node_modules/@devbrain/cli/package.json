@@ -1,0 +1,32 @@
+{
+    "name": "@devbrain/cli",
+    "version": "1.0.0",
+    "description": "DevBrain CLI - Your intelligent developer memory",
+    "main": "dist/index.js",
+    "bin": {
+        "devbrain": "dist/index.js"
+    },
+    "scripts": {
+        "dev": "ts-node src/index.ts",
+        "build": "tsc",
+        "start": "node dist/index.js"
+    },
+    "dependencies": {
+        "@devbrain/core": "*",
+        "chalk": "^5.6.2",
+        "chokidar": "^3.6.0",
+        "commander": "^11.1.0",
+        "conf": "^11.0.2",
+        "cors": "^2.8.6",
+        "express": "^5.2.1",
+        "inquirer": "^9.3.8",
+        "node-pty": "^1.1.0"
+    },
+    "devDependencies": {
+        "@types/cors": "^2.8.17",
+        "@types/express": "^4.17.21",
+        "@types/inquirer": "^9.0.7",
+        "@types/node": "^20.0.0",
+        "typescript": "^5.0.0"
+    }
+}

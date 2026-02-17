@@ -1,0 +1,6 @@
+import { Fix, Stats } from './types.js';
+export declare const storage: {
+    getFixes: () => Promise<Fix[]>;
+    saveFix: (fix: Fix) => Promise<void>;
+    getStats: () => Promise<Stats>;
+};

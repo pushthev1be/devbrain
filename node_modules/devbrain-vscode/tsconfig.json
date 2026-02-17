@@ -1,0 +1,19 @@
+{
+    "compilerOptions": {
+        "module": "NodeNext",
+        "target": "ESNext",
+        "lib": [
+            "ESNext"
+        ],
+        "sourceMap": true,
+        "rootDir": "src",
+        "outDir": "dist",
+        "strict": true,
+        "esModuleInterop": true,
+        "moduleResolution": "NodeNext"
+    },
+    "exclude": [
+        "node_modules",
+        ".vscode-test"
+    ]
+}

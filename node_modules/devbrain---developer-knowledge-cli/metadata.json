@@ -1,0 +1,5 @@
+{
+  "name": "DevBrain - Developer Knowledge CLI",
+  "description": "A local-first developer tool for instant recall of past bug fixes and error patterns using Gemini AI.",
+  "requestFramePermissions": []
+}

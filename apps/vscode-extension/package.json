@@ -1,0 +1,53 @@
+{
+    "name": "devbrain-vscode",
+    "displayName": "DevBrain",
+    "description": "Intelligent local developer memory in your IDE",
+    "version": "1.0.0",
+    "publisher": "devbrain",
+    "engines": {
+        "vscode": "^1.80.0"
+    },
+    "categories": [
+        "Other"
+    ],
+    "activationEvents": [],
+    "main": "./dist/extension.js",
+    "contributes": {
+        "commands": [
+            {
+                "command": "devbrain.openDashboard",
+                "title": "DevBrain: Open Dashboard"
+            }
+        ],
+        "viewsContainers": {
+            "activitybar": [
+                {
+                    "id": "devbrain-explorer",
+                    "title": "DevBrain",
+                    "icon": "media/icon.svg"
+                }
+            ]
+        },
+        "views": {
+            "devbrain-explorer": [
+                {
+                    "id": "devbrain-wisdom",
+                    "name": "Local Wisdom"
+                }
+            ]
+        }
+    },
+    "scripts": {
+        "vscode:prepublish": "npm run compile",
+        "compile": "tsc -p ./",
+        "watch": "tsc -watch -p ./"
+    },
+    "devDependencies": {
+        "@types/vscode": "^1.80.0",
+        "@types/node": "^20.0.0",
+        "typescript": "^5.0.0"
+    },
+    "dependencies": {
+        "@devbrain/core": "*"
+    }
+}

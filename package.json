@@ -1,0 +1,19 @@
+{
+    "name": "devbrain-monorepo",
+    "private": true,
+    "version": "1.0.0",
+    "workspaces": [
+        "apps/*",
+        "packages/*"
+    ],
+    "scripts": {
+        "dashboard:dev": "npm run dev -w apps/dashboard",
+        "cli:dev": "npm run dev -w packages/cli",
+        "cli:build": "npm run build -w packages/cli",
+        "core:build": "npm run build -w packages/core"
+    },
+    "devDependencies": {
+        "typescript": "^5.0.0",
+        "ts-node": "^10.9.1"
+    }
+}
