@@ -48,7 +48,8 @@ const App: React.FC = () => {
             { id: AppState.ANTI_PATTERNS, label: '0x03_GUARD' },
             { id: AppState.MASTERY, label: '0x04_LOG' },
             { id: AppState.INSIGHTS, label: '0x05_METRICS' },
-            { id: AppState.CLI_EXPORT, label: '0x06_DEPLOY' }
+            { id: AppState.CLI_EXPORT, label: '0x06_DEPLOY' },
+            { id: AppState.HELP, label: '0x07_HELP' }
           ].map(tab => (
             <button
               key={tab.id}
@@ -183,6 +184,122 @@ const App: React.FC = () => {
           )}
 
           {activeView === AppState.CLI_EXPORT && <CliExport />}
+
+          {activeView === AppState.HELP && (
+            <div className="p-6">
+              <div className="border-b-2 border-blue-500 pb-2 mb-8">
+                <h2 className="text-2xl font-black text-white italic uppercase tracking-tighter">COMMAND_REFERENCE</h2>
+                <p className="text-[9px] text-gray-500 mt-1">DevBrain CLI - Complete Command Guide</p>
+              </div>
+
+              <div className="space-y-6">
+                {/* RUN Command */}
+                <div className="border border-[#30363d] bg-[#161b22] p-4">
+                  <div className="flex justify-between items-start mb-3">
+                    <div>
+                      <h3 className="text-sm font-bold text-green-400">devbrain run &lt;cmd...&gt;</h3>
+                      <p className="text-[9px] text-gray-400 mt-1">Execute a command and monitor for errors</p>
+                    </div>
+                  </div>
+                  <p className="text-[9px] text-gray-300 leading-relaxed">
+                    Runs your command and captures any errors. Automatically searches the knowledge base for similar issues and alerts you with solutions that worked before. Perfect for catching recurring problems.
+                  </p>
+                  <p className="text-[9px] text-blue-300 mt-2 font-mono">$ devbrain run "npm test"</p>
+                </div>
+
+                {/* DAEMON Command */}
+                <div className="border border-[#30363d] bg-[#161b22] p-4">
+                  <div className="flex justify-between items-start mb-3">
+                    <div>
+                      <h3 className="text-sm font-bold text-green-400">devbrain daemon --path &lt;path&gt;</h3>
+                      <p className="text-[9px] text-gray-400 mt-1">Watch directory for code changes</p>
+                    </div>
+                  </div>
+                  <p className="text-[9px] text-gray-300 leading-relaxed">
+                    Continuously monitors a directory for changes. Analyzes TypeScript, JavaScript, and Python files to detect patterns, code complexity, and potential issues. Stores findings to your local knowledge base.
+                  </p>
+                  <p className="text-[9px] text-blue-300 mt-2 font-mono">$ devbrain daemon --path ./src</p>
+                </div>
+
+                {/* SERVER Command */}
+                <div className="border border-[#30363d] bg-[#161b22] p-4">
+                  <div className="flex justify-between items-start mb-3">
+                    <div>
+                      <h3 className="text-sm font-bold text-green-400">devbrain server --port &lt;number&gt;</h3>
+                      <p className="text-[9px] text-gray-400 mt-1">Start the API backend server</p>
+                    </div>
+                  </div>
+                  <p className="text-[9px] text-gray-300 leading-relaxed">
+                    Launches the backend API that powers the dashboard. Exposes endpoints for retrieving fixes, stats, and storing new insights. Default port is 3000.
+                  </p>
+                  <p className="text-[9px] text-blue-300 mt-2 font-mono">$ devbrain server --port 3000</p>
+                </div>
+
+                {/* SEARCH Command */}
+                <div className="border border-[#30363d] bg-[#161b22] p-4">
+                  <div className="flex justify-between items-start mb-3">
+                    <div>
+                      <h3 className="text-sm font-bold text-green-400">devbrain search &lt;query&gt;</h3>
+                      <p className="text-[9px] text-gray-400 mt-1">Search knowledge base</p>
+                    </div>
+                  </div>
+                  <p className="text-[9px] text-gray-300 leading-relaxed">
+                    Searches your accumulated knowledge base for matching issues, patterns, or tags. Works across all projects and GitHub insights you've learned from.
+                  </p>
+                  <p className="text-[9px] text-blue-300 mt-2 font-mono">$ devbrain search "error handling"</p>
+                </div>
+
+                {/* STATS Command */}
+                <div className="border border-[#30363d] bg-[#161b22] p-4">
+                  <div className="flex justify-between items-start mb-3">
+                    <div>
+                      <h3 className="text-sm font-bold text-green-400">devbrain stats</h3>
+                      <p className="text-[9px] text-gray-400 mt-1">View your brain metrics</p>
+                    </div>
+                  </div>
+                  <p className="text-[9px] text-gray-300 leading-relaxed">
+                    Displays statistics about your DevBrain: total blocks indexed, time saved, and recall precision. Shows how much knowledge you've accumulated.
+                  </p>
+                  <p className="text-[9px] text-blue-300 mt-2 font-mono">$ devbrain stats</p>
+                </div>
+
+                {/* GITHUB Command */}
+                <div className="border border-[#30363d] bg-[#161b22] p-4">
+                  <div className="flex justify-between items-start mb-3">
+                    <div>
+                      <h3 className="text-sm font-bold text-green-400">devbrain github &lt;owner&gt; &lt;repo&gt; [--token]</h3>
+                      <p className="text-[9px] text-gray-400 mt-1">Learn from GitHub repositories</p>
+                    </div>
+                  </div>
+                  <p className="text-[9px] text-gray-300 leading-relaxed">
+                    Analyzes a GitHub repository's commit history and closed issues. Learns patterns and solutions from open-source projects. Perfect for studying best practices and common mistakes.
+                  </p>
+                  <p className="text-[9px] text-blue-300 mt-2 font-mono">$ devbrain github facebook react</p>
+                  <p className="text-[9px] text-blue-300 font-mono">$ devbrain github mycompany backend --token $GITHUB_TOKEN</p>
+                </div>
+              </div>
+
+              <div className="mt-8 pt-6 border-t border-[#30363d]">
+                <h3 className="text-sm font-bold text-cyan-400 mb-4">TYPICAL WORKFLOW</h3>
+                <div className="bg-[#0d1117] p-4 border border-[#30363d] text-[9px] text-gray-300 font-mono space-y-1">
+                  <p className="text-blue-400"># Terminal 1: Start backend</p>
+                  <p>npm run cli:dev -- server --port 3000</p>
+                  <p></p>
+                  <p className="text-blue-400"># Terminal 2: Start dashboard</p>
+                  <p>npm run dashboard:dev</p>
+                  <p></p>
+                  <p className="text-blue-400"># Terminal 3: Monitor your code</p>
+                  <p>devbrain daemon --path ./src</p>
+                  <p></p>
+                  <p className="text-blue-400"># Then learn from others</p>
+                  <p>devbrain github facebook react</p>
+                  <p></p>
+                  <p className="text-blue-400"># Execute commands with error alerts</p>
+                  <p>devbrain run "npm test"</p>
+                </div>
+              </div>
+            </div>
+          )}
         </main>
       </div>
 
