@@ -60,31 +60,28 @@ async function analyzeCodeFile(filePath: string): Promise<AnalysisResult> {
 
 async function storeAnalysisAsKnowledge(filePath: string, analysis: AnalysisResult, projectName: string) {
     try {
-        if (analysis.potentialIssues.length === 0 && analysis.patterns.length === 0) {
-            return; // Nothing interesting to store
-        }
-        
+        // Save even if minimal issues, just to track file complexity
         const fix = {
             id: uuidv4(),
             projectName,
-            errorMessage: `Pattern detected: ${analysis.potentialIssues.join(', ') || 'code-review'}`,
+            errorMessage: `Pattern detected: ${analysis.potentialIssues.join(', ') || analysis.patterns.join(', ') || 'file-complexity'}`,
             rootCause: `File: ${path.basename(filePath)} (${analysis.fileType})`,
             mentalModel: `Complexity: ${analysis.complexity}, Patterns: ${analysis.patterns.join(', ')}`,
             fixDescription: analysis.insights,
             beforeCodeSnippet: filePath,
-            afterCodeSnippet: `Review recommended for: ${analysis.potentialIssues.join(', ')}`,
+            afterCodeSnippet: `Review recommended for: ${analysis.potentialIssues.join(', ') || 'general-review'}`,
             filePaths: [filePath],
             tags: [...analysis.patterns, ...analysis.potentialIssues],
             frameworkContext: analysis.fileType,
             createdAt: Date.now(),
-            confidence: analysis.potentialIssues.length > 0 ? 85 : 60,
+            confidence: analysis.potentialIssues.length > 0 ? 85 : (analysis.patterns.length > 0 ? 70 : 50),
             timeSavedMinutes: 5,
             usageCount: 0,
             successCount: 0
         };
         
         await storage.saveFix(fix);
-        console.log(chalk.green(`[SAVED] Analysis for ${path.basename(filePath)}`));
+        console.log(chalk.green(`[SAVED] ${path.basename(filePath)} - Tags: ${fix.tags.join(', ')}`));
     } catch (error) {
         console.error(chalk.red(`[ERROR] Failed to store analysis:`), error);
     }
