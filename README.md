@@ -4,7 +4,7 @@
 
 ## About
 
-DevBrain is a comprehensive developer knowledge management system that combines a powerful CLI, a beautiful dashboard, and AI capabilities to help developers organize, search, and access development resources efficiently.
+DevBrain is a comprehensive developer knowledge management system that combines a powerful CLI, a beautiful dashboard, and AI capabilities to help developers organize, search, and access development resources efficiently.it  the main problem it solves is idetiifying user patterns, errors, techniques, stack and recording all those events against future re occurence of bugs errors etc. it recognizes errors and comes up with matches it has from its database.
 
 ## Features
 
