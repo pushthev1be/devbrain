@@ -1,10 +1,11 @@
 export interface Fix {
     id: string;
+    type: 'bugfix' | 'pattern' | 'optimization';
     projectName: string;
-    errorMessage: string;
-    rootCause: string;
-    mentalModel: string;
-    fixDescription: string;
+    errorMessage: string; // Title or problem description
+    rootCause: string;    // Rationale or why this pattern is used
+    mentalModel: string;  // The underlying engineering principle
+    fixDescription: string; // Implementation details
     beforeCodeSnippet: string;
     afterCodeSnippet: string;
     filePaths: string[];

@@ -54,20 +54,24 @@ class AiService {
       ${diff.substring(0, 10000)} // Limit size
       
       CRITERIA:
-      1. ONLY extract if this is a bug fix, a solution to a technical problem, or a significant architectural change.
-      2. IGNORE trivial changes (chores, documentation, formatting, simple refactors).
-      3. If it IS a fix, extract the following JSON:
+      1. Extract if this is:
+         - A BUG FIX (resolves a specific error or symptom)
+         - An ENGINEERING PATTERN (implements a best practice, architectural improvement, or reusable logic)
+         - A SIGNIFICANT OPTIMIZATION (performance boost, resource reduction)
+      2. IGNORE trivial changes (chores, documentation, formatting, minor variable renames).
+      3. Return ONLY a JSON object:
       {
-        "isFix": true,
-        "errorMessage": "The specific error or symptom being addressed",
-        "rootCause": "Why did this happen? (e.g. 'off-by-one in loop', 'missing null check in X lifecycle')",
-        "mentalModel": "The deeper technical principle or pattern (e.g. 'Immutable state prevents race conditions in Y')",
-        "fixDescription": "Concise summary of how it was solved",
+        "isWorthRecording": true,
+        "type": "bugfix" | "pattern" | "optimization",
+        "title": "Clear, technical summary of the insight",
+        "problemContext": "The issue or state before the change (the 'why')",
+        "mentalModel": "The deeper technical principle or pattern (e.g. 'Single Responsibility Principle avoids X', 'Memoization prevents redundant Y calculations')",
+        "implementationDetails": "Concise summary of how the logic was structured",
         "tags": ["relevant", "technologies", "patterns"],
         "confidence": 0-100
       }
-      4. If it is NOT a fix/significant insight, return { "isFix": false }.
-      5. BE DEEP. Avoid generic answers like "fixed syntax". Explain the mechanics.
+      4. If it is NOT worth recording, return { "isWorthRecording": false }.
+      5. BE DEEP. Avoid generic answers. Explain the engineering mechanics.
     `;
         const result = await this.genAI.models.generateContent({
             model: 'gemini-1.5-flash',

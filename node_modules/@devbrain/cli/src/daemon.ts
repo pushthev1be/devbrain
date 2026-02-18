@@ -1,7 +1,7 @@
 import chokidar from 'chokidar';
 import path from 'path';
 import fs from 'fs';
-import { storage, AiService } from '@devbrain/core';
+import { storage, AiService, Fix } from '@devbrain/core';
 import chalk from 'chalk';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -146,8 +146,9 @@ async function detectAntiPatterns(filePath: string, content: string, projectName
 async function storeAnalysisAsKnowledge(filePath: string, analysis: AnalysisResult, projectName: string) {
     try {
         // Save even if minimal issues, just to track file complexity
-        const fix = {
+        const fix: Fix = {
             id: uuidv4(),
+            type: 'pattern',
             projectName,
             errorMessage: `Pattern detected: ${analysis.potentialIssues.join(', ') || analysis.patterns.join(', ') || 'file-complexity'}`,
             rootCause: `File: ${path.basename(filePath)} (${analysis.fileType})`,

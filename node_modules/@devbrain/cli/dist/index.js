@@ -13,6 +13,7 @@ const core_1 = require("@devbrain/core");
 const uuid_1 = require("uuid");
 const conf_1 = __importDefault(require("conf"));
 const path_1 = __importDefault(require("path"));
+const child_process_1 = require("child_process");
 const config = new conf_1.default({
     projectName: 'devbrain',
     defaults: {
@@ -114,13 +115,7 @@ program
     console.log(`Time Recovered: ${stats.timeSavedHours}h`);
     console.log(`Recall Precision: ${stats.accuracyRate}%`);
 });
-program
-    .command('github <owner> <repo>')
-    .description('Learn from a GitHub repository')
-    .option('-t, --token <token>', 'GitHub token (optional, for private repos)')
-    .option('-d, --deep', 'Perform deep AI analysis of commit diffs', false)
-    .option('-l, --limit <number>', 'Number of commits to analyze', '10')
-    .action(async (owner, repo, options) => {
+async function learnFromRepo(owner, repo, options) {
     try {
         const token = options.token || process.env.GITHUB_TOKEN || '';
         const aiApiKey = process.env.GEMINI_API_KEY;
@@ -134,25 +129,27 @@ program
         const limit = parseInt(options.limit);
         const commits = await github.monitorRepo(owner, repo);
         for (const commit of commits.slice(0, limit)) {
-            let fix;
+            let block;
             if (options.deep && ai) {
                 process.stdout.write(chalk_1.default.gray(` Analyzing commit ${commit.sha.substring(0, 7)}... `));
                 try {
                     const diff = await github.getCommitDiff(owner, repo, commit.sha);
                     const analysis = await ai.analyzeCommit(commit.message, diff);
-                    if (analysis.isFix) {
-                        process.stdout.write(chalk_1.default.green('WISDOM FOUND\n'));
-                        fix = {
+                    if (analysis.isWorthRecording) {
+                        const typeLabel = (analysis.type || 'insight').toUpperCase();
+                        process.stdout.write(chalk_1.default.green(`${typeLabel} FOUND\n`));
+                        block = {
                             id: (0, uuid_1.v4)(),
+                            type: analysis.type || 'bugfix',
                             projectName: `${owner}/${repo}`,
-                            errorMessage: analysis.errorMessage,
-                            rootCause: analysis.rootCause,
-                            mentalModel: analysis.mentalModel,
-                            fixDescription: analysis.fixDescription,
+                            errorMessage: analysis.title || analysis.errorMessage || 'Untitled Insight',
+                            rootCause: analysis.problemContext || analysis.rootCause || 'N/A',
+                            mentalModel: analysis.mentalModel || 'General Engineering Principle',
+                            fixDescription: analysis.implementationDetails || analysis.fixDescription || 'See commit diff',
                             beforeCodeSnippet: `SHA: ${commit.sha}`,
                             afterCodeSnippet: `Author: ${commit.author || 'unknown'}`,
                             filePaths: [`https://github.com/${owner}/${repo}/commit/${commit.sha}`],
-                            tags: [...(analysis.tags || []), 'github-deep'],
+                            tags: [...(analysis.tags || []), 'github-deep', analysis.type],
                             frameworkContext: 'git',
                             createdAt: Date.now(),
                             confidence: analysis.confidence || 80,
@@ -162,7 +159,7 @@ program
                         };
                     }
                     else {
-                        process.stdout.write(chalk_1.default.dim('No fix detected\n'));
+                        process.stdout.write(chalk_1.default.dim('Skipped\n'));
                         continue;
                     }
                 }
@@ -172,8 +169,9 @@ program
                 }
             }
             else {
-                fix = {
+                block = {
                     id: (0, uuid_1.v4)(),
+                    type: 'bugfix',
                     projectName: `${owner}/${repo}`,
                     errorMessage: `Commit: ${commit.message.split('\n')[0]}`,
                     rootCause: `GitHub Repository: ${owner}/${repo}`,
@@ -191,15 +189,23 @@ program
                     successCount: 0
                 };
             }
-            if (fix)
-                await core_1.storage.saveFix(fix);
+            if (block)
+                await core_1.storage.saveFix(block);
         }
         console.log(chalk_1.default.green(`✓ Operation complete for ${owner}/${repo}`));
     }
     catch (error) {
-        console.error(chalk_1.default.red(`[ERROR] Failed to fetch GitHub data:`), error.message);
-        process.exit(1);
+        console.error(chalk_1.default.red(`[ERROR] Failed to fetch GitHub data for ${owner}/${repo}:`), error.message);
     }
+}
+program
+    .command('github <owner> <repo>')
+    .description('Learn from a GitHub repository')
+    .option('-t, --token <token>', 'GitHub token (optional, for private repos)')
+    .option('-d, --deep', 'Perform deep AI analysis of commit diffs', false)
+    .option('-l, --limit <number>', 'Number of commits to analyze', '10')
+    .action(async (owner, repo, options) => {
+    await learnFromRepo(owner, repo, options);
 });
 program
     .command('learn')
@@ -219,50 +225,49 @@ program
         console.log(chalk_1.default.gray(`Found ${repos.length} repositories. Starting bulk learning (Deep Mode enabled).`));
         for (const repo of repos) {
             console.log(chalk_1.default.cyan(`\nProcessing ${repo.fullName}...`));
-            const commits = await github.monitorRepo(repo.owner, repo.name);
-            const aiApiKey = process.env.GEMINI_API_KEY;
-            const ai = aiApiKey ? new core_1.AiService(aiApiKey) : null;
-            for (const commit of commits.slice(0, parseInt(options.limit))) {
-                if (ai) {
-                    process.stdout.write(chalk_1.default.gray(` Analyzing ${commit.sha.substring(0, 7)}... `));
-                    try {
-                        const diff = await github.getCommitDiff(repo.owner, repo.name, commit.sha);
-                        const analysis = await ai.analyzeCommit(commit.message, diff);
-                        if (analysis.isFix) {
-                            process.stdout.write(chalk_1.default.green('Wisdom extracted\n'));
-                            await core_1.storage.saveFix({
-                                id: (0, uuid_1.v4)(),
-                                projectName: repo.fullName,
-                                errorMessage: analysis.errorMessage,
-                                rootCause: analysis.rootCause,
-                                mentalModel: analysis.mentalModel,
-                                fixDescription: analysis.fixDescription,
-                                beforeCodeSnippet: `SHA: ${commit.sha}`,
-                                afterCodeSnippet: `Author: ${commit.author || 'unknown'}`,
-                                filePaths: [`https://github.com/${repo.fullName}/commit/${commit.sha}`],
-                                tags: [...(analysis.tags || []), 'bulk-learn'],
-                                frameworkContext: 'git',
-                                createdAt: Date.now(),
-                                confidence: analysis.confidence || 80,
-                                timeSavedMinutes: 15,
-                                usageCount: 0,
-                                successCount: 0
-                            });
-                        }
-                        else {
-                            process.stdout.write(chalk_1.default.dim('Skipped\n'));
-                        }
-                    }
-                    catch (e) {
-                        process.stdout.write(chalk_1.default.red('Error\n'));
-                    }
-                }
-            }
+            await learnFromRepo(repo.owner, repo.name, { deep: true, limit: options.limit, token });
         }
         console.log(chalk_1.default.green('\n✓ Bulk learning complete!'));
     }
     catch (error) {
         console.error(chalk_1.default.red(`[ERROR] Bulk learn failed:`), error.message);
     }
+});
+program
+    .command('activate')
+    .description('Instantly activate DevBrain for this project')
+    .option('-l, --limit <number>', 'Number of commits to analyze for history discovery', '10')
+    .action(async (options) => {
+    const targetPath = process.cwd();
+    console.log(chalk_1.default.blue(`[DevBrain] Activating in: ${targetPath}`));
+    // 1. Add to monitored projects
+    const projects = config.get('projects');
+    if (!projects.includes(targetPath)) {
+        config.set('projects', [...projects, targetPath]);
+        console.log(chalk_1.default.green(`✓ Project added to monitoring list.`));
+    }
+    else {
+        console.log(chalk_1.default.yellow(`! Project already in monitoring list.`));
+    }
+    // 2. Detect Git Remote
+    try {
+        const remoteUrl = (0, child_process_1.execSync)('git remote get-url origin', { encoding: 'utf8' }).trim();
+        // Parse owner/repo from URL
+        const match = remoteUrl.match(/github\.com[:/]([^/]+)\/([^/.]+)(\.git)?$/);
+        if (match) {
+            const [, owner, repo] = match;
+            console.log(chalk_1.default.cyan(`[DevBrain] GitHub detected: ${owner}/${repo}`));
+            // 3. Trigger initial Discovery
+            console.log(chalk_1.default.gray(`Starting initial history discovery...`));
+            await learnFromRepo(owner, repo, { deep: true, limit: options.limit });
+        }
+        else {
+            console.log(chalk_1.default.yellow('! Found remote URL but could not parse GitHub owner/repo.'));
+        }
+    }
+    catch (e) {
+        console.log(chalk_1.default.yellow('! No GitHub remote found. DevBrain will only monitor local changes.'));
+    }
+    console.log(chalk_1.default.gray('\nHint: Ensure "devbrain daemon" is running to capture active development.'));
 });
 program.parse();

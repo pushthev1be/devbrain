@@ -142,6 +142,7 @@ async function storeAnalysisAsKnowledge(filePath, analysis, projectName) {
         // Save even if minimal issues, just to track file complexity
         const fix = {
             id: (0, uuid_1.v4)(),
+            type: 'pattern',
             projectName,
             errorMessage: `Pattern detected: ${analysis.potentialIssues.join(', ') || analysis.patterns.join(', ') || 'file-complexity'}`,
             rootCause: `File: ${path_1.default.basename(filePath)} (${analysis.fileType})`,

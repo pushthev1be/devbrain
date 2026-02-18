@@ -83,6 +83,7 @@ async function runWithMonitoring(command) {
                 const wisdom = await ai.generateWisdom(lastFailedRun.output, "User successfully ran: " + command);
                 const newFix = {
                     id: crypto_1.default.randomUUID(),
+                    type: 'bugfix',
                     projectName: path_1.default.basename(process.cwd()),
                     errorMessage: lastFailedRun.output.substring(0, 500),
                     rootCause: wisdom.rootCause || "Unknown",

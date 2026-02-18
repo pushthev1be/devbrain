@@ -1,5 +1,6 @@
 export interface Fix {
     id: string;
+    type: 'bugfix' | 'pattern' | 'optimization';
     projectName: string;
     errorMessage: string;
     rootCause: string;

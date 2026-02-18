@@ -1,6 +1,6 @@
 import os from 'os';
 import * as pty from 'node-pty';
-import { AiService, storage } from '@devbrain/core';
+import { AiService, storage, Fix } from '@devbrain/core';
 import chalk from 'chalk';
 
 import path from 'path';
@@ -51,8 +51,9 @@ export async function runWithMonitoring(command: string) {
 
             if (ai) {
                 const wisdom = await ai.generateWisdom(lastFailedRun.output, "User successfully ran: " + command);
-                const newFix = {
+                const newFix: Fix = {
                     id: crypto.randomUUID(),
+                    type: 'bugfix',
                     projectName: path.basename(process.cwd()),
                     errorMessage: lastFailedRun.output.substring(0, 500),
                     rootCause: wisdom.rootCause || "Unknown",
