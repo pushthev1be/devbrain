@@ -143,6 +143,20 @@ devbrain stats
 # - Top patterns detected
 ```
 
+#### `devbrain github <owner> <repo>`
+Learn from a GitHub repository's commits and issues.
+```bash
+devbrain github torvalds linux
+devbrain github facebook react
+devbrain github pushthev1be devbrain --token $GITHUB_TOKEN
+
+# Fetches:
+# - Recent commits (up to 10)
+# - Closed bug issues
+# Stores as insights in knowledge base
+# Use for: Learning from popular repos, analyzing error patterns across projects
+```
+
 ### Workflow Example
 
 ```bash
@@ -154,18 +168,25 @@ npm run dashboard:dev
 cd ~/my-project
 devbrain daemon --path ./src
 
-# Step 3: Open dashboard
+# Step 3: Learn from GitHub
+# Learn from popular repos to build knowledge
+devbrain github facebook react
+devbrain github google/go-github google go-github
+devbrain github torvalds linux
+
+# Step 4: Open dashboard
 # Visit http://localhost:5173
 # See real-time analysis in "0x02_BLOCKS" tab
 
-# Step 4: Search or view stats
-devbrain search "any"          # Find loose typing
-devbrain stats                 # View collected metrics
+# Step 5: Search your knowledge
+devbrain search "error handling"          # Find error patterns
+devbrain search "react"                   # Find React-related insights
+devbrain stats                            # View collected metrics
 
-# Step 5: Use in other projects (same database!)
+# Step 6: Use in other projects (same database!)
 cd ~/another-project
 devbrain daemon --path ./src
-# Dashboard automatically shows insights from both projects
+# Dashboard automatically shows insights from all projects + GitHub data
 ```
 
 ### Knowledge Base
@@ -203,6 +224,10 @@ The project is organized as a monorepo with the following main packages:
 ### Environment Variables
 
 - `GEMINI_API_KEY` - Your Google Gemini API key (required for AI features)
+- `GITHUB_TOKEN` - GitHub personal access token (optional, for accessing private repos and higher rate limits)
+  - Get one at: https://github.com/settings/tokens
+  - Scopes needed: `public_repo` (minimum)
+  - Used by: `devbrain github` command
 - `PORT` - Server port (default: 3000 for API)
 
 ### Database
