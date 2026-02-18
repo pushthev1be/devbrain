@@ -7,6 +7,12 @@ export declare class GitHubService {
         date: string | undefined;
         sha: string;
     }[]>;
+    getCommitDiff(owner: string, repo: string, sha: string): Promise<string>;
+    listUserRepos(): Promise<{
+        name: string;
+        owner: string;
+        fullName: string;
+    }[]>;
     getRecentErrorsInIssues(owner: string, repo: string): Promise<{
         id: number;
         node_id: string;

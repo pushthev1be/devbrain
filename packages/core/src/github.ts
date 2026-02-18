@@ -23,6 +23,32 @@ export class GitHubService {
         }));
     }
 
+    async getCommitDiff(owner: string, repo: string, sha: string) {
+        const { data: commit } = await this.octokit.rest.repos.getCommit({
+            owner,
+            repo,
+            ref: sha,
+            headers: {
+                accept: 'application/vnd.github.v3.diff'
+            }
+        });
+
+        return commit as unknown as string;
+    }
+
+    async listUserRepos() {
+        const { data: repos } = await this.octokit.rest.repos.listForAuthenticatedUser({
+            sort: 'updated',
+            per_page: 100
+        });
+
+        return repos.map(r => ({
+            name: r.name,
+            owner: r.owner.login,
+            fullName: r.full_name
+        }));
+    }
+
     async getRecentErrorsInIssues(owner: string, repo: string) {
         const { data: issues } = await this.octokit.rest.issues.listForRepo({
             owner,

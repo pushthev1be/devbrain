@@ -45,7 +45,9 @@ const path_1 = __importDefault(require("path"));
 const crypto_1 = __importDefault(require("crypto"));
 const shell = os_1.default.platform() === 'win32' ? 'powershell.exe' : 'bash';
 let lastFailedRun = null;
+let capturedErrors = [];
 async function runWithMonitoring(command) {
+    capturedErrors = [];
     const ptyProcess = pty.spawn(shell, [], {
         name: 'xterm-color',
         cols: 80,
@@ -59,7 +61,7 @@ async function runWithMonitoring(command) {
     ptyProcess.onData((data) => {
         process.stdout.write(data);
         fullOutput += data;
-        checkForErrors(data, ai);
+        checkForErrors(data);
     });
     ptyProcess.write(`${command}\r`);
     ptyProcess.onExit(async ({ exitCode }) => {
@@ -67,6 +69,11 @@ async function runWithMonitoring(command) {
         if (exitCode !== 0) {
             // Store failure context
             lastFailedRun = { command, output: fullOutput, timestamp: Date.now() };
+            // Search database for similar errors
+            if (capturedErrors.length > 0) {
+                console.log(chalk_1.default.yellow.bold('\n[DevBrain] Searching knowledge base for similar issues...'));
+                await alertOnMatchingErrors(capturedErrors, fullOutput, command);
+            }
         }
         else if (lastFailedRun && (Date.now() - lastFailedRun.timestamp < 300000)) { // 5 min window
             // If we just fixed a failure!
@@ -99,11 +106,81 @@ async function runWithMonitoring(command) {
         }
     });
 }
-function checkForErrors(data, ai) {
-    const errorKeywords = ['Error', 'Exception', 'Failed', 'fatal', 'Traceback'];
-    if (errorKeywords.some(kw => data.includes(kw))) {
-        // In a real implementation, we'd buffer and dedup
-        // For now just log a highlight
-        console.log(chalk_1.default.red.bold('\n[DevBrain] Potential anomaly detected in stream...'));
+async function alertOnMatchingErrors(errors, fullOutput, command) {
+    try {
+        // Get all fixes from database
+        const allFixes = await core_1.storage.getFixes();
+        if (allFixes.length === 0) {
+            console.log(chalk_1.default.gray('  No knowledge in database yet. Run more commands to build wisdom.'));
+            return;
+        }
+        // Search for matches
+        const matches = [];
+        const searchTerms = errors.concat([
+            fullOutput.split('\n')[0], // First line of output
+            fullOutput.split('\n').slice(-3).join(' ') // Last 3 lines
+        ]);
+        for (const fix of allFixes) {
+            for (const term of searchTerms) {
+                if (!term || term.length < 3)
+                    continue;
+                // Check if error message or tags match
+                if (fix.errorMessage.toLowerCase().includes(term.toLowerCase()) ||
+                    fix.mentalModel.toLowerCase().includes(term.toLowerCase()) ||
+                    fix.tags.some(t => t.toLowerCase().includes(term.toLowerCase()))) {
+                    // Avoid duplicates
+                    if (!matches.find(m => m.id === fix.id)) {
+                        matches.push(fix);
+                    }
+                    break;
+                }
+            }
+        }
+        if (matches.length === 0) {
+            console.log(chalk_1.default.gray('  No matching issues found in knowledge base.'));
+            return;
+        }
+        // Alert user with matching solutions
+        console.log(chalk_1.default.yellow.bold(`\n⚠️  Found ${matches.length} similar issue(s) in knowledge base!\n`));
+        matches.slice(0, 5).forEach((fix, idx) => {
+            console.log(chalk_1.default.cyan(`[Match ${idx + 1}] ${fix.errorMessage.split('\n')[0]}`));
+            console.log(chalk_1.default.gray(`  Project: ${fix.projectName}`));
+            console.log(chalk_1.default.gray(`  Root Cause: ${fix.rootCause}`));
+            console.log(chalk_1.default.gray(`  Mental Model: ${fix.mentalModel}`));
+            console.log(chalk_1.default.green(`  Solution: ${fix.fixDescription?.substring(0, 100)}...`));
+            console.log(chalk_1.default.gray(`  Confidence: ${fix.confidence}%, Success Rate: ${fix.successCount}/${fix.usageCount}`));
+            console.log('');
+        });
+        if (matches.length > 5) {
+            console.log(chalk_1.default.yellow(`  ... and ${matches.length - 5} more matches. Run 'devbrain search' for details.\n`));
+        }
+    }
+    catch (error) {
+        console.error(chalk_1.default.red('[ERROR] Failed to search knowledge base:'), error);
+    }
+}
+function checkForErrors(data) {
+    const errorPatterns = [
+        /(?:^|\s)Error:/m,
+        /(?:^|\s)TypeError:/m,
+        /(?:^|\s)SyntaxError:/m,
+        /(?:^|\s)ReferenceError:/m,
+        /(?:^|\s)Exception:/m,
+        /at\s+.*:\d+:\d+/m, // Stack trace
+        /^\[ERROR\]/m,
+        /^FAIL/m,
+        /uncaught/i,
+        /unhandled/i,
+        /undefined is not/i,
+        /cannot read property/i
+    ];
+    for (const pattern of errorPatterns) {
+        const matches = data.match(pattern);
+        if (matches) {
+            const errorLine = data.split('\n').find(line => pattern.test(line));
+            if (errorLine && !capturedErrors.includes(errorLine)) {
+                capturedErrors.push(errorLine);
+            }
+        }
     }
 }

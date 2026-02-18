@@ -1,7 +1,6 @@
 {
     "name": "@devbrain/cli",
     "version": "1.0.0",
-    "type": "module",
     "description": "DevBrain CLI - Your intelligent developer memory",
     "main": "dist/index.js",
     "bin": {

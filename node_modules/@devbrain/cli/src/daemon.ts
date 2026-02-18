@@ -17,28 +17,28 @@ async function analyzeCodeFile(filePath: string): Promise<AnalysisResult> {
     try {
         const content = fs.readFileSync(filePath, 'utf-8');
         const lines = content.split('\n');
-        
+
         // Basic analysis
         const patterns: string[] = [];
         const potentialIssues: string[] = [];
-        
+
         // Detect patterns
         if (content.includes('try-catch')) patterns.push('error-handling');
         if (content.includes('async') && content.includes('await')) patterns.push('async-await');
         if (content.includes('console.log') && content.includes('DEBUG') === false) patterns.push('logging');
         if (content.match(/\.map\(|\.filter\(|\.reduce\(/)) patterns.push('functional-programming');
         if (content.includes('interface') || content.includes('type ')) patterns.push('typescript');
-        
+
         // Detect potential issues
         if (content.includes('any')) potentialIssues.push('loose-typing');
         if (content.match(/console\.error|throw new Error/)) potentialIssues.push('error-handling');
         if (content.length > 5000) potentialIssues.push('file-too-large');
         if (content.match(/while\s*\(/)) potentialIssues.push('potential-infinite-loop');
         if (content.includes('==') && !content.includes('===')) potentialIssues.push('loose-comparison');
-        
+
         const complexity = lines.length > 500 ? 'high' : lines.length > 200 ? 'medium' : 'low';
         const fileType = path.extname(filePath).slice(1) || 'unknown';
-        
+
         return {
             fileType,
             complexity,
@@ -59,8 +59,8 @@ async function analyzeCodeFile(filePath: string): Promise<AnalysisResult> {
 }
 
 async function detectAntiPatterns(filePath: string, content: string, projectName: string) {
-    const antiPatterns: Array<{name: string, symptoms: string, betterApproach: string}> = [];
-    
+    const antiPatterns: Array<{ name: string, symptoms: string, betterApproach: string }> = [];
+
     // Callback Hell detection - nested callbacks
     const callbackNestingDepth = (content.match(/\.then\(/g) || []).length + (content.match(/\.catch\(/g) || []).length;
     if (callbackNestingDepth > 3) {
@@ -70,7 +70,7 @@ async function detectAntiPatterns(filePath: string, content: string, projectName
             betterApproach: 'Use async/await syntax instead of .then().catch() chains for cleaner, more readable code.'
         });
     }
-    
+
     // Overly Complex Function - too many lines in single function
     const functions = content.match(/function\s+\w+|const\s+\w+\s*=\s*(?=\(|async)/g) || [];
     const lines = content.split('\n');
@@ -81,7 +81,7 @@ async function detectAntiPatterns(filePath: string, content: string, projectName
             betterApproach: 'Split file into smaller, focused modules. Aim for 100-200 lines per file.'
         });
     }
-    
+
     // Missing Error Handling
     const asyncAwaitCount = (content.match(/await\s+/g) || []).length;
     const tryCatchCount = (content.match(/try\s*\{/g) || []).length;
@@ -92,7 +92,7 @@ async function detectAntiPatterns(filePath: string, content: string, projectName
             betterApproach: 'Wrap async operations in try-catch blocks to handle errors gracefully.'
         });
     }
-    
+
     // Magic Numbers - hardcoded numeric values
     const magicNumbers = content.match(/[^a-zA-Z_](\d{3,})[^a-zA-Z_]/g) || [];
     if (magicNumbers.length > 5) {
@@ -102,7 +102,7 @@ async function detectAntiPatterns(filePath: string, content: string, projectName
             betterApproach: 'Extract magic numbers to named constants with clear meanings.'
         });
     }
-    
+
     // Deep Nesting - multiple levels of indentation
     const deepNesting = content.match(/^\s{16,}/gm) || [];
     if (deepNesting.length > 5) {
@@ -112,7 +112,7 @@ async function detectAntiPatterns(filePath: string, content: string, projectName
             betterApproach: 'Extract nested logic into separate functions or use early returns to reduce nesting.'
         });
     }
-    
+
     // Silent Failures - try-catch that doesn't re-throw
     const silentCatches = (content.match(/catch\s*\([^)]*\)\s*\{\s*\}/g) || []).length;
     if (silentCatches > 0) {
@@ -122,7 +122,7 @@ async function detectAntiPatterns(filePath: string, content: string, projectName
             betterApproach: 'Log errors, handle them appropriately, or re-throw if they cannot be handled.'
         });
     }
-    
+
     // Save detected anti-patterns to database
     for (const pattern of antiPatterns) {
         try {
@@ -134,14 +134,16 @@ async function detectAntiPatterns(filePath: string, content: string, projectName
                 projectsAffected: [filePath],
                 createdAt: Date.now()
             };
-            
+
             await storage.saveAntiPattern(antiPatternRecord);
             console.log(chalk.red(`  ⚠️  Anti-Pattern: ${pattern.name}`));
         } catch (error) {
             console.error(chalk.red(`[ERROR] Failed to save anti-pattern:`), error);
         }
     }
-}\n\nasync function storeAnalysisAsKnowledge(filePath: string, analysis: AnalysisResult, projectName: string) {
+}
+
+async function storeAnalysisAsKnowledge(filePath: string, analysis: AnalysisResult, projectName: string) {
     try {
         // Save even if minimal issues, just to track file complexity
         const fix = {
@@ -162,7 +164,7 @@ async function detectAntiPatterns(filePath: string, content: string, projectName
             usageCount: 0,
             successCount: 0
         };
-        
+
         await storage.saveFix(fix);
         console.log(chalk.green(`[SAVED] ${path.basename(filePath)} - Tags: ${fix.tags.join(', ')}`));
     } catch (error) {
@@ -173,13 +175,17 @@ async function detectAntiPatterns(filePath: string, content: string, projectName
 const fileAnalysisQueue = new Map<string, NodeJS.Timeout>();
 const ANALYSIS_DEBOUNCE_MS = 2000; // Wait 2s after last change before analyzing
 
-export function startDaemon(watchPath: string) {
-    const projectName = path.basename(path.resolve(watchPath));
-    console.log(chalk.blue(`[DevBrain Daemon] Watching ${watchPath}`));
-    console.log(chalk.gray(`Project: ${projectName}`));
+export function startDaemon(watchPath: string | string[]) {
+    const paths = Array.isArray(watchPath) ? watchPath : [watchPath];
+    const resolvedPaths = paths.map(p => path.resolve(p));
+
+    console.log(chalk.blue(`[DevBrain Daemon] Starting monitoring...`));
+    resolvedPaths.forEach(p => {
+        console.log(chalk.gray(` Watching: ${p}`));
+    });
     console.log(chalk.dim('Press Ctrl+C to stop\n'));
 
-    const watcher = chokidar.watch(watchPath, {
+    const watcher = chokidar.watch(resolvedPaths, {
         ignored: [
             /(^|[\/\\])\./,  // ignore dotfiles
             /node_modules/,   // ignore node_modules
@@ -193,16 +199,20 @@ export function startDaemon(watchPath: string) {
     watcher.on('change', (filePath) => {
         const ext = path.extname(filePath);
         const isCodeFile = ['.ts', '.js', '.tsx', '.jsx', '.py', '.go'].includes(ext);
-        
+
         if (!isCodeFile) return;
-        
-        console.log(chalk.gray(`[FS_EVENT] ${path.relative(watchPath, filePath)}`));
-        
+
+        // Find which project this file belongs to
+        const projectPath = resolvedPaths.find(p => filePath.startsWith(p));
+        const projectName = projectPath ? path.basename(projectPath) : 'unknown';
+
+        console.log(chalk.gray(`[FS_EVENT] ${path.relative(process.cwd(), filePath)} (${projectName})`));
+
         // Debounce analysis - if file keeps changing, wait until it settles
         if (fileAnalysisQueue.has(filePath)) {
             clearTimeout(fileAnalysisQueue.get(filePath));
         }
-        
+
         const timeoutId = setTimeout(async () => {
             const analysis = await analyzeCodeFile(filePath);
             if (analysis.potentialIssues.length > 0 || analysis.patterns.length > 0) {
@@ -215,7 +225,7 @@ export function startDaemon(watchPath: string) {
             await detectAntiPatterns(filePath, content, projectName);
             fileAnalysisQueue.delete(filePath);
         }, ANALYSIS_DEBOUNCE_MS);
-        
+
         fileAnalysisQueue.set(filePath, timeoutId);
     });
 

@@ -6,19 +6,221 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.startDaemon = startDaemon;
 const chokidar_1 = __importDefault(require("chokidar"));
 const path_1 = __importDefault(require("path"));
+const fs_1 = __importDefault(require("fs"));
+const core_1 = require("@devbrain/core");
 const chalk_1 = __importDefault(require("chalk"));
+const uuid_1 = require("uuid");
+async function analyzeCodeFile(filePath) {
+    try {
+        const content = fs_1.default.readFileSync(filePath, 'utf-8');
+        const lines = content.split('\n');
+        // Basic analysis
+        const patterns = [];
+        const potentialIssues = [];
+        // Detect patterns
+        if (content.includes('try-catch'))
+            patterns.push('error-handling');
+        if (content.includes('async') && content.includes('await'))
+            patterns.push('async-await');
+        if (content.includes('console.log') && content.includes('DEBUG') === false)
+            patterns.push('logging');
+        if (content.match(/\.map\(|\.filter\(|\.reduce\(/))
+            patterns.push('functional-programming');
+        if (content.includes('interface') || content.includes('type '))
+            patterns.push('typescript');
+        // Detect potential issues
+        if (content.includes('any'))
+            potentialIssues.push('loose-typing');
+        if (content.match(/console\.error|throw new Error/))
+            potentialIssues.push('error-handling');
+        if (content.length > 5000)
+            potentialIssues.push('file-too-large');
+        if (content.match(/while\s*\(/))
+            potentialIssues.push('potential-infinite-loop');
+        if (content.includes('==') && !content.includes('==='))
+            potentialIssues.push('loose-comparison');
+        const complexity = lines.length > 500 ? 'high' : lines.length > 200 ? 'medium' : 'low';
+        const fileType = path_1.default.extname(filePath).slice(1) || 'unknown';
+        return {
+            fileType,
+            complexity,
+            patterns: [...new Set(patterns)],
+            potentialIssues: [...new Set(potentialIssues)],
+            insights: `Analyzed ${lines.length} lines of ${fileType} code`
+        };
+    }
+    catch (error) {
+        console.error(chalk_1.default.red(`[ERROR] Failed to analyze ${filePath}:`), error);
+        return {
+            fileType: path_1.default.extname(filePath).slice(1) || 'unknown',
+            complexity: 'low',
+            patterns: [],
+            potentialIssues: ['analysis-failed'],
+            insights: 'Analysis failed'
+        };
+    }
+}
+async function detectAntiPatterns(filePath, content, projectName) {
+    const antiPatterns = [];
+    // Callback Hell detection - nested callbacks
+    const callbackNestingDepth = (content.match(/\.then\(/g) || []).length + (content.match(/\.catch\(/g) || []).length;
+    if (callbackNestingDepth > 3) {
+        antiPatterns.push({
+            name: 'Callback Hell',
+            symptoms: `${callbackNestingDepth} chained promise callbacks detected. Hard to read and maintain.`,
+            betterApproach: 'Use async/await syntax instead of .then().catch() chains for cleaner, more readable code.'
+        });
+    }
+    // Overly Complex Function - too many lines in single function
+    const functions = content.match(/function\s+\w+|const\s+\w+\s*=\s*(?=\(|async)/g) || [];
+    const lines = content.split('\n');
+    if (lines.length > 300) {
+        antiPatterns.push({
+            name: 'Overly Complex File',
+            symptoms: `${lines.length} lines in single file. Difficult to maintain and test.`,
+            betterApproach: 'Split file into smaller, focused modules. Aim for 100-200 lines per file.'
+        });
+    }
+    // Missing Error Handling
+    const asyncAwaitCount = (content.match(/await\s+/g) || []).length;
+    const tryCatchCount = (content.match(/try\s*\{/g) || []).length;
+    if (asyncAwaitCount > 3 && tryCatchCount === 0) {
+        antiPatterns.push({
+            name: 'Missing Error Handling',
+            symptoms: `${asyncAwaitCount} await statements but no try-catch blocks. Unhandled promise rejections likely.`,
+            betterApproach: 'Wrap async operations in try-catch blocks to handle errors gracefully.'
+        });
+    }
+    // Magic Numbers - hardcoded numeric values
+    const magicNumbers = content.match(/[^a-zA-Z_](\d{3,})[^a-zA-Z_]/g) || [];
+    if (magicNumbers.length > 5) {
+        antiPatterns.push({
+            name: 'Magic Numbers',
+            symptoms: `${magicNumbers.length} hardcoded numbers without explanation. Makes code hard to understand.`,
+            betterApproach: 'Extract magic numbers to named constants with clear meanings.'
+        });
+    }
+    // Deep Nesting - multiple levels of indentation
+    const deepNesting = content.match(/^\s{16,}/gm) || [];
+    if (deepNesting.length > 5) {
+        antiPatterns.push({
+            name: 'Deeply Nested Code',
+            symptoms: `${deepNesting.length} deeply nested blocks detected (>4 levels). Reduces readability.`,
+            betterApproach: 'Extract nested logic into separate functions or use early returns to reduce nesting.'
+        });
+    }
+    // Silent Failures - try-catch that doesn't re-throw
+    const silentCatches = (content.match(/catch\s*\([^)]*\)\s*\{\s*\}/g) || []).length;
+    if (silentCatches > 0) {
+        antiPatterns.push({
+            name: 'Silent Failures',
+            symptoms: `${silentCatches} empty catch block(s). Errors are being silently ignored.`,
+            betterApproach: 'Log errors, handle them appropriately, or re-throw if they cannot be handled.'
+        });
+    }
+    // Save detected anti-patterns to database
+    for (const pattern of antiPatterns) {
+        try {
+            const antiPatternRecord = {
+                id: (0, uuid_1.v4)(),
+                patternName: pattern.name,
+                symptoms: pattern.symptoms,
+                betterApproach: pattern.betterApproach,
+                projectsAffected: [filePath],
+                createdAt: Date.now()
+            };
+            await core_1.storage.saveAntiPattern(antiPatternRecord);
+            console.log(chalk_1.default.red(`  ⚠️  Anti-Pattern: ${pattern.name}`));
+        }
+        catch (error) {
+            console.error(chalk_1.default.red(`[ERROR] Failed to save anti-pattern:`), error);
+        }
+    }
+}
+async function storeAnalysisAsKnowledge(filePath, analysis, projectName) {
+    try {
+        // Save even if minimal issues, just to track file complexity
+        const fix = {
+            id: (0, uuid_1.v4)(),
+            projectName,
+            errorMessage: `Pattern detected: ${analysis.potentialIssues.join(', ') || analysis.patterns.join(', ') || 'file-complexity'}`,
+            rootCause: `File: ${path_1.default.basename(filePath)} (${analysis.fileType})`,
+            mentalModel: `Complexity: ${analysis.complexity}, Patterns: ${analysis.patterns.join(', ')}`,
+            fixDescription: analysis.insights,
+            beforeCodeSnippet: filePath,
+            afterCodeSnippet: `Review recommended for: ${analysis.potentialIssues.join(', ') || 'general-review'}`,
+            filePaths: [filePath],
+            tags: [...analysis.patterns, ...analysis.potentialIssues],
+            frameworkContext: analysis.fileType,
+            createdAt: Date.now(),
+            confidence: analysis.potentialIssues.length > 0 ? 85 : (analysis.patterns.length > 0 ? 70 : 50),
+            timeSavedMinutes: 5,
+            usageCount: 0,
+            successCount: 0
+        };
+        await core_1.storage.saveFix(fix);
+        console.log(chalk_1.default.green(`[SAVED] ${path_1.default.basename(filePath)} - Tags: ${fix.tags.join(', ')}`));
+    }
+    catch (error) {
+        console.error(chalk_1.default.red(`[ERROR] Failed to store analysis:`), error);
+    }
+}
+const fileAnalysisQueue = new Map();
+const ANALYSIS_DEBOUNCE_MS = 2000; // Wait 2s after last change before analyzing
 function startDaemon(watchPath) {
-    console.log(chalk_1.default.blue(`[DevBrain Daemon] Watching ${watchPath}...`));
-    const watcher = chokidar_1.default.watch(watchPath, {
-        ignored: /(^|[\/\\])\../, // ignore dotfiles
-        persistent: true
+    const paths = Array.isArray(watchPath) ? watchPath : [watchPath];
+    const resolvedPaths = paths.map(p => path_1.default.resolve(p));
+    console.log(chalk_1.default.blue(`[DevBrain Daemon] Starting monitoring...`));
+    resolvedPaths.forEach(p => {
+        console.log(chalk_1.default.gray(` Watching: ${p}`));
+    });
+    console.log(chalk_1.default.dim('Press Ctrl+C to stop\n'));
+    const watcher = chokidar_1.default.watch(resolvedPaths, {
+        ignored: [
+            /(^|[\/\\])\./, // ignore dotfiles
+            /node_modules/, // ignore node_modules
+            /dist/, // ignore build output
+            /\.git/ // ignore git
+        ],
+        persistent: true,
+        awaitWriteFinish: true
     });
     watcher.on('change', (filePath) => {
-        console.log(chalk_1.default.gray(`[FS_EVENT] File changed: ${path_1.default.basename(filePath)}`));
-        // Trigger analysis if it's a code file
-        if (filePath.endsWith('.ts') || filePath.endsWith('.js') || filePath.endsWith('.tsx')) {
-            // TODO: Automatic background analysis
+        const ext = path_1.default.extname(filePath);
+        const isCodeFile = ['.ts', '.js', '.tsx', '.jsx', '.py', '.go'].includes(ext);
+        if (!isCodeFile)
+            return;
+        // Find which project this file belongs to
+        const projectPath = resolvedPaths.find(p => filePath.startsWith(p));
+        const projectName = projectPath ? path_1.default.basename(projectPath) : 'unknown';
+        console.log(chalk_1.default.gray(`[FS_EVENT] ${path_1.default.relative(process.cwd(), filePath)} (${projectName})`));
+        // Debounce analysis - if file keeps changing, wait until it settles
+        if (fileAnalysisQueue.has(filePath)) {
+            clearTimeout(fileAnalysisQueue.get(filePath));
         }
+        const timeoutId = setTimeout(async () => {
+            const analysis = await analyzeCodeFile(filePath);
+            if (analysis.potentialIssues.length > 0 || analysis.patterns.length > 0) {
+                console.log(chalk_1.default.yellow(`  📊 Issues: ${analysis.potentialIssues.join(', ')}`));
+                console.log(chalk_1.default.cyan(`  🔍 Patterns: ${analysis.patterns.join(', ')}`));
+                await storeAnalysisAsKnowledge(filePath, analysis, projectName);
+            }
+            // Detect and save anti-patterns
+            const content = fs_1.default.readFileSync(filePath, 'utf-8');
+            await detectAntiPatterns(filePath, content, projectName);
+            fileAnalysisQueue.delete(filePath);
+        }, ANALYSIS_DEBOUNCE_MS);
+        fileAnalysisQueue.set(filePath, timeoutId);
+    });
+    watcher.on('error', (error) => {
+        console.error(chalk_1.default.red('[ERROR]'), error);
+    });
+    // Graceful shutdown
+    process.on('SIGINT', () => {
+        console.log(chalk_1.default.blue('\n[DevBrain] Shutting down daemon...'));
+        watcher.close();
+        fileAnalysisQueue.forEach(timeout => clearTimeout(timeout));
+        process.exit(0);
     });
     return watcher;
 }

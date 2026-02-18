@@ -4,9 +4,18 @@ import chalk from 'chalk';
 import { runWithMonitoring } from './pty.js';
 import { startDaemon } from './daemon.js';
 import { startServer } from './server.js';
-import { storage, GitHubService } from '@devbrain/core';
+import { storage, GitHubService, AiService } from '@devbrain/core';
 import inquirer from 'inquirer';
 import { v4 as uuidv4 } from 'uuid';
+import Conf from 'conf';
+import path from 'path';
+
+const config = new Conf({
+    projectName: 'devbrain',
+    defaults: {
+        projects: []
+    }
+});
 
 const program = new Command();
 
@@ -27,9 +36,54 @@ program
 program
     .command('daemon')
     .description('Start background monitoring daemon')
-    .option('-p, --path <path>', 'Path to watch', process.cwd())
+    .option('-p, --path <path>', 'Path to watch', '')
     .action((options: { path: string }) => {
-        startDaemon(options.path);
+        const paths = options.path ? [options.path] : config.get('projects') as string[];
+        if (paths.length === 0) {
+            console.log(chalk.red('[ERROR] No projects to monitor. Add one with "devbrain monitor add <path>"'));
+            return;
+        }
+        startDaemon(paths);
+    });
+
+const monitor = program.command('monitor').description('Manage monitored projects');
+
+monitor
+    .command('add [path]')
+    .description('Add a project to monitor')
+    .action((p: string) => {
+        const targetPath = path.resolve(p || process.cwd());
+        const projects = config.get('projects') as string[];
+        if (!projects.includes(targetPath)) {
+            config.set('projects', [...projects, targetPath]);
+            console.log(chalk.green(`✓ Now monitoring: ${targetPath}`));
+        } else {
+            console.log(chalk.yellow(`! Already monitoring: ${targetPath}`));
+        }
+    });
+
+monitor
+    .command('remove [path]')
+    .description('Stop monitoring a project')
+    .action((p: string) => {
+        const targetPath = path.resolve(p || process.cwd());
+        const projects = config.get('projects') as string[];
+        const updated = projects.filter(proj => proj !== targetPath);
+        config.set('projects', updated);
+        console.log(chalk.green(`✓ Stopped monitoring: ${targetPath}`));
+    });
+
+monitor
+    .command('list')
+    .description('List all monitored projects')
+    .action(() => {
+        const projects = config.get('projects') as string[];
+        if (projects.length === 0) {
+            console.log(chalk.yellow('No projects currently monitored.'));
+            return;
+        }
+        console.log(chalk.blue('\nMonitored Projects:'));
+        projects.forEach(p => console.log(` - ${p}`));
     });
 
 program
@@ -76,74 +130,157 @@ program
     .command('github <owner> <repo>')
     .description('Learn from a GitHub repository')
     .option('-t, --token <token>', 'GitHub token (optional, for private repos)')
-    .action(async (owner: string, repo: string, options: { token?: string }) => {
+    .option('-d, --deep', 'Perform deep AI analysis of commit diffs', false)
+    .option('-l, --limit <number>', 'Number of commits to analyze', '10')
+    .action(async (owner: string, repo: string, options: { token?: string, deep?: boolean, limit: string }) => {
         try {
-            // Use provided token or empty (public repos don't need auth)
             const token = options.token || process.env.GITHUB_TOKEN || '';
+            const aiApiKey = process.env.GEMINI_API_KEY;
+
+            if (options.deep && !aiApiKey) {
+                console.log(chalk.red('[ERROR] GEMINI_API_KEY is required for deep analysis.'));
+                return;
+            }
+
             const github = new GitHubService(token);
+            const ai = aiApiKey ? new AiService(aiApiKey) : null;
 
-            console.log(chalk.blue(`[DevBrain] Analyzing ${owner}/${repo}...`));
+            console.log(chalk.blue(`[DevBrain] Analyzing ${owner}/${repo}${options.deep ? ' (Deep Mode)' : ''}...`));
 
-            // Fetch recent commits
-            console.log(chalk.gray('Fetching recent commits...'));
+            const limit = parseInt(options.limit);
             const commits = await github.monitorRepo(owner, repo);
-            
-            // Fetch closed issues/bugs
-            console.log(chalk.gray('Fetching closed issues...'));
-            const issues = await github.getRecentErrorsInIssues(owner, repo);
 
-            // Store commit insights
-            for (const commit of commits.slice(0, 10)) {
-                const fix = {
-                    id: uuidv4(),
-                    projectName: `${owner}/${repo}`,
-                    errorMessage: `Commit: ${commit.message.split('\n')[0]}`,
-                    rootCause: `GitHub Repository: ${owner}/${repo}`,
-                    mentalModel: `Author: ${commit.author || 'unknown'}, Approach: Git history analysis`,
-                    fixDescription: commit.message,
-                    beforeCodeSnippet: `SHA: ${commit.sha}`,
-                    afterCodeSnippet: `Date: ${commit.date || 'unknown'}`,
-                    filePaths: [`https://github.com/${owner}/${repo}/commit/${commit.sha}`],
-                    tags: ['github-commit', 'repository', owner, repo],
-                    frameworkContext: 'git',
-                    createdAt: Date.now(),
-                    confidence: 75,
-                    timeSavedMinutes: 10,
-                    usageCount: 0,
-                    successCount: 0
-                };
-                await storage.saveFix(fix);
+            for (const commit of commits.slice(0, limit)) {
+                let fix: any;
+
+                if (options.deep && ai) {
+                    process.stdout.write(chalk.gray(` Analyzing commit ${commit.sha.substring(0, 7)}... `));
+                    try {
+                        const diff = await github.getCommitDiff(owner, repo, commit.sha);
+                        const analysis = await ai.analyzeCommit(commit.message, diff);
+
+                        if (analysis.isFix) {
+                            process.stdout.write(chalk.green('WISDOM FOUND\n'));
+                            fix = {
+                                id: uuidv4(),
+                                projectName: `${owner}/${repo}`,
+                                errorMessage: analysis.errorMessage,
+                                rootCause: analysis.rootCause,
+                                mentalModel: analysis.mentalModel,
+                                fixDescription: analysis.fixDescription,
+                                beforeCodeSnippet: `SHA: ${commit.sha}`,
+                                afterCodeSnippet: `Author: ${commit.author || 'unknown'}`,
+                                filePaths: [`https://github.com/${owner}/${repo}/commit/${commit.sha}`],
+                                tags: [...(analysis.tags || []), 'github-deep'],
+                                frameworkContext: 'git',
+                                createdAt: Date.now(),
+                                confidence: analysis.confidence || 80,
+                                timeSavedMinutes: 15,
+                                usageCount: 0,
+                                successCount: 0
+                            };
+                        } else {
+                            process.stdout.write(chalk.dim('No fix detected\n'));
+                            continue;
+                        }
+                    } catch (e) {
+                        process.stdout.write(chalk.red('Extraction error\n'));
+                        continue;
+                    }
+                } else {
+                    fix = {
+                        id: uuidv4(),
+                        projectName: `${owner}/${repo}`,
+                        errorMessage: `Commit: ${commit.message.split('\n')[0]}`,
+                        rootCause: `GitHub Repository: ${owner}/${repo}`,
+                        mentalModel: `Author: ${commit.author || 'unknown'}, Approach: Git history analysis`,
+                        fixDescription: commit.message,
+                        beforeCodeSnippet: `SHA: ${commit.sha}`,
+                        afterCodeSnippet: `Date: ${commit.date || 'unknown'}`,
+                        filePaths: [`https://github.com/${owner}/${repo}/commit/${commit.sha}`],
+                        tags: ['github-commit', 'repository', owner, repo],
+                        frameworkContext: 'git',
+                        createdAt: Date.now(),
+                        confidence: 75,
+                        timeSavedMinutes: 10,
+                        usageCount: 0,
+                        successCount: 0
+                    };
+                }
+
+                if (fix) await storage.saveFix(fix);
             }
 
-            // Store issue insights
-            for (const issue of issues.slice(0, 10)) {
-                const fix = {
-                    id: uuidv4(),
-                    projectName: `${owner}/${repo}`,
-                    errorMessage: `Issue: ${issue.title}`,
-                    rootCause: `GitHub Issue #${issue.number}`,
-                    mentalModel: `Bug Report: Known issue in ${owner}/${repo}`,
-                    fixDescription: issue.body || 'No description provided',
-                    beforeCodeSnippet: `Status: closed`,
-                    afterCodeSnippet: `Issue URL: ${issue.html_url}`,
-                    filePaths: [issue.html_url],
-                    tags: ['github-issue', 'bug-report', 'repository', owner, repo],
-                    frameworkContext: 'issue-tracking',
-                    createdAt: Date.now(),
-                    confidence: 80,
-                    timeSavedMinutes: 15,
-                    usageCount: 0,
-                    successCount: 0
-                };
-                await storage.saveFix(fix);
-            }
-
-            console.log(chalk.green(`✓ Learned from ${commits.length} commits and ${issues.length} issues`));
-            console.log(chalk.cyan(`Total insights stored: ${commits.length + issues.length}`));
-            console.log(chalk.gray(`Search with: devbrain search "${repo}"`));
+            console.log(chalk.green(`✓ Operation complete for ${owner}/${repo}`));
         } catch (error: any) {
             console.error(chalk.red(`[ERROR] Failed to fetch GitHub data:`), error.message);
             process.exit(1);
+        }
+    });
+
+program
+    .command('learn')
+    .description('Bulk learn from all your GitHub repositories')
+    .option('-t, --token <token>', 'GitHub token')
+    .option('-l, --limit <number>', 'Commits per repo', '5')
+    .action(async (options: { token?: string, limit: string }) => {
+        try {
+            const token = options.token || process.env.GITHUB_TOKEN;
+            if (!token) {
+                console.log(chalk.red('[ERROR] GitHub token required. Set GITHUB_TOKEN or use --token.'));
+                return;
+            }
+
+            const github = new GitHubService(token);
+            console.log(chalk.blue('[DevBrain] Fetching your repositories...'));
+            const repos = await github.listUserRepos();
+
+            console.log(chalk.gray(`Found ${repos.length} repositories. Starting bulk learning (Deep Mode enabled).`));
+
+            for (const repo of repos) {
+                console.log(chalk.cyan(`\nProcessing ${repo.fullName}...`));
+                const commits = await github.monitorRepo(repo.owner, repo.name);
+                const aiApiKey = process.env.GEMINI_API_KEY;
+                const ai = aiApiKey ? new AiService(aiApiKey) : null;
+
+                for (const commit of commits.slice(0, parseInt(options.limit))) {
+                    if (ai) {
+                        process.stdout.write(chalk.gray(` Analyzing ${commit.sha.substring(0, 7)}... `));
+                        try {
+                            const diff = await github.getCommitDiff(repo.owner, repo.name, commit.sha);
+                            const analysis = await ai.analyzeCommit(commit.message, diff);
+                            if (analysis.isFix) {
+                                process.stdout.write(chalk.green('Wisdom extracted\n'));
+                                await storage.saveFix({
+                                    id: uuidv4(),
+                                    projectName: repo.fullName,
+                                    errorMessage: analysis.errorMessage,
+                                    rootCause: analysis.rootCause,
+                                    mentalModel: analysis.mentalModel,
+                                    fixDescription: analysis.fixDescription,
+                                    beforeCodeSnippet: `SHA: ${commit.sha}`,
+                                    afterCodeSnippet: `Author: ${commit.author || 'unknown'}`,
+                                    filePaths: [`https://github.com/${repo.fullName}/commit/${commit.sha}`],
+                                    tags: [...(analysis.tags || []), 'bulk-learn'],
+                                    frameworkContext: 'git',
+                                    createdAt: Date.now(),
+                                    confidence: analysis.confidence || 80,
+                                    timeSavedMinutes: 15,
+                                    usageCount: 0,
+                                    successCount: 0
+                                });
+                            } else {
+                                process.stdout.write(chalk.dim('Skipped\n'));
+                            }
+                        } catch (e) {
+                            process.stdout.write(chalk.red('Error\n'));
+                        }
+                    }
+                }
+            }
+            console.log(chalk.green('\n✓ Bulk learning complete!'));
+        } catch (error: any) {
+            console.error(chalk.red(`[ERROR] Bulk learn failed:`), error.message);
         }
     });
 

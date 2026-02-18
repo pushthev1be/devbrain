@@ -22,6 +22,14 @@ function startServer(port = 3000) {
         await core_1.storage.saveFix(fix);
         res.status(201).json({ success: true });
     });
+    app.get('/api/anti-patterns', async (req, res) => {
+        res.json(await core_1.storage.getAntiPatterns());
+    });
+    app.post('/api/anti-patterns', async (req, res) => {
+        const pattern = req.body;
+        await core_1.storage.saveAntiPattern(pattern);
+        res.status(201).json({ success: true });
+    });
     app.listen(port, () => {
         console.log(`[DevBrain API] Server running at http://localhost:${port}`);
     });

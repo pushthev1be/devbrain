@@ -38,7 +38,7 @@ export async function runWithMonitoring(command: string) {
         if (exitCode !== 0) {
             // Store failure context
             lastFailedRun = { command, output: fullOutput, timestamp: Date.now() };
-            
+
             // Search database for similar errors
             if (capturedErrors.length > 0) {
                 console.log(chalk.yellow.bold('\n[DevBrain] Searching knowledge base for similar issues...'));
@@ -81,7 +81,7 @@ async function alertOnMatchingErrors(errors: string[], fullOutput: string, comma
     try {
         // Get all fixes from database
         const allFixes = await storage.getFixes();
-        
+
         if (allFixes.length === 0) {
             console.log(chalk.gray('  No knowledge in database yet. Run more commands to build wisdom.'));
             return;
@@ -97,12 +97,12 @@ async function alertOnMatchingErrors(errors: string[], fullOutput: string, comma
         for (const fix of allFixes) {
             for (const term of searchTerms) {
                 if (!term || term.length < 3) continue;
-                
+
                 // Check if error message or tags match
                 if (fix.errorMessage.toLowerCase().includes(term.toLowerCase()) ||
                     fix.mentalModel.toLowerCase().includes(term.toLowerCase()) ||
                     fix.tags.some(t => t.toLowerCase().includes(term.toLowerCase()))) {
-                    
+
                     // Avoid duplicates
                     if (!matches.find(m => m.id === fix.id)) {
                         matches.push(fix);
@@ -119,7 +119,7 @@ async function alertOnMatchingErrors(errors: string[], fullOutput: string, comma
 
         // Alert user with matching solutions
         console.log(chalk.yellow.bold(`\n⚠️  Found ${matches.length} similar issue(s) in knowledge base!\n`));
-        
+
         matches.slice(0, 5).forEach((fix, idx) => {
             console.log(chalk.cyan(`[Match ${idx + 1}] ${fix.errorMessage.split('\n')[0]}`));
             console.log(chalk.gray(`  Project: ${fix.projectName}`));
@@ -141,18 +141,18 @@ async function alertOnMatchingErrors(errors: string[], fullOutput: string, comma
 
 function checkForErrors(data: string) {
     const errorPatterns = [
-        /^Error:/m,
-        /^TypeError:/m,
-        /^SyntaxError:/m,
-        /^ReferenceError:/m,
-        /failed/i,
-        /exception/i,
-        /fatal/i,
-        /cannot find/i,
-        /not found/i,
-        /undefined/i,
-        /null/i,
-        /undefined is not/i
+        /(?:^|\s)Error:/m,
+        /(?:^|\s)TypeError:/m,
+        /(?:^|\s)SyntaxError:/m,
+        /(?:^|\s)ReferenceError:/m,
+        /(?:^|\s)Exception:/m,
+        /at\s+.*:\d+:\d+/m, // Stack trace
+        /^\[ERROR\]/m,
+        /^FAIL/m,
+        /uncaught/i,
+        /unhandled/i,
+        /undefined is not/i,
+        /cannot read property/i
     ];
 
     for (const pattern of errorPatterns) {
