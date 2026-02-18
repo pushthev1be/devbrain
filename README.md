@@ -15,24 +15,37 @@ DevBrain is a comprehensive developer knowledge management system that combines 
 - 💾 **Local Storage** - Your knowledge stays on your machine in a private SQLite database.
 - 🚀 **Deep Discovery** - Crawler that performs AI-powered analysis of entire GitHub repositories.
 
+## 🚀 Quick Essential Commands
+
+| Command | Description | Recommended Frequency |
+| :--- | :--- | :--- |
+| `devbrain activate` | Connect project & scan history | **Once per project** |
+| `devbrain watch` | Stylized "Kernel Mode" monitoring | **Keep running in background** |
+| `devbrain daemon` | Standard monitoring daemon | **Alternative to watch** |
+| `devbrain config set` | "Hardwire" your API keys | **Initial setup only** |
+| `devbrain github --deep`| Deep dive into a public repo | **When studying new stacks** |
+| `devbrain run "cmd"` | Run & monitor a command | **During active debugging** |
+
 ## 🕹️ Getting Started & User Flow
 
 Follow this flow to turn your development history into a powerful technical knowledge base.
 
-### 1. Environment Setup
-After downloading the source, install dependencies and configure your AI/GitHub keys:
+### 1. Environment Setup & Persistent Config
+After downloading the source, install dependencies and build. Then, "hardwire" your AI keys persistently so you don't have to set them every time:
 
 ```bash
-# Install dependencies
+# Install and build everything
 npm install
-
-# Set your keys (Required for Deep Discovery)
-export GEMINI_API_KEY="your_google_ai_key"
-export GITHUB_TOKEN="your_github_personal_access_token"
-
-# Build the core and CLI
 npm run build
+
+# Securely store your keys (Recommended)
+devbrain config set gemini-key "your_ai_key"
+devbrain config set github-token "your_token"
+
+# Verify your configuration
+devbrain config list
 ```
+*Storing keys via `config set` keeps them out of your environment logs but makes them permanent for all DevBrain commands.*
 
 ### 2. Instant Project Activation
 Navigate to any of your project directories and "activate" DevBrain. This is the first thing you should do in a project.
@@ -64,11 +77,20 @@ Use the CLI or the Dashboard to recall and search your captured wisdom:
 
 ## 📖 Command Reference
 
+### `devbrain config <set|list>`
+Manage your persistent configuration.
+- `devbrain config set gemini-key "key"` - Stores key locally.
+- `devbrain config set github-token "token"` - Stores token locally.
+- `devbrain config list` - Shows current (masked) configuration.
+
 ### `devbrain activate`
 The one-stop command to start using DevBrain in a new project. Sets up monitoring and learns from recent history.
 
+### `devbrain watch`
+The vibrant, high-fidelity alternative to the standard daemon. Features a stylized "Kernel" UI, real-time "Neural Intercept" status, and cyberpunk-themed anomaly logging.
+
 ### `devbrain daemon`
-Starts the background observer. It watches all registered projects, analyzes file changes, and captures wisdom as you code.
+Starts the standard background observer. It watches all registered projects and captures wisdom as you code with a clean, professional output.
 
 ### `devbrain monitor <add|list|remove>`
 Manage which projects DevBrain is watching.
@@ -91,6 +113,62 @@ Run a command (like `npm test`) and monitor it for errors. If a failure is later
 
 ### `devbrain search <query>`
 Quickly find solutions or patterns from your terminal.
+
+## 📚 Developer Knowledge Base
+
+DevBrain includes a local **Project Bible** system for capturing and organizing development lessons:
+
+```bash
+cd dev_bible
+
+# View all knowledge
+make stats
+
+# Search for lessons
+make search TAG=devbrain
+make search TAG=error-handling
+
+# Add what you learned
+make add-mistake
+make add-pattern
+make add-principle
+
+# Validate before commit
+make validate
+```
+
+### Knowledge Base Structure
+
+The `dev_bible/` folder contains:
+- **bible.jsonl** - Your growing knowledge base (PRINCIPLES, PATTERNS, MISTAKES, RUNBOOKS, DECISIONS)
+- **Makefile** - Helper commands for managing lessons
+- **validate.py** - CI-ready JSON validator
+- **README.md** - Complete documentation
+- **CHEATSHEET.md** - Quick reference guide
+
+### Golden Workflow
+
+**Before coding:** Search for relevant lessons
+```bash
+grep '"your-feature"' dev_bible/bible.jsonl
+```
+
+**After fixing a bug:** Document what you learned
+```bash
+make -C dev_bible add-mistake
+make -C dev_bible validate
+```
+
+This captures institutional knowledge across the entire DevBrain project and prevents recurring mistakes.
+
+## Configuration Details
+
+DevBrain prioritizes keys in the following order:
+1. **Command Line Options** (`--token`)
+2. **Environment Variables** (`GEMINI_API_KEY`, `GITHUB_TOKEN`)
+3. **Persistent Config Store** (`devbrain config set`)
+
+The persistent store is located at `~/.devbrain/config.json`.
 
 ## Project Structure
 
