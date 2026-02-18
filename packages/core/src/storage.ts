@@ -103,5 +103,30 @@ export const storage = {
       topTags: Array.from(new Set(fixes.flatMap(f => f.tags))).slice(0, 5),
       accuracyRate: totalUsage > 0 ? Math.round((totalSuccess / totalUsage) * 100) : 0
     };
+  },
+
+  getAntiPatterns: async (): Promise<any[]> => {
+    const rows = await all('SELECT * FROM anti_patterns ORDER BY createdAt DESC');
+    return rows.map(r => ({
+      ...r,
+      projectsAffected: JSON.parse(r.projectsAffected || '[]')
+    }));
+  },
+
+  saveAntiPattern: async (pattern: any) => {
+    const sql = `
+      INSERT OR REPLACE INTO anti_patterns (
+        id, patternName, symptoms, betterApproach, projectsAffected, createdAt
+      ) VALUES (?, ?, ?, ?, ?, ?)
+    `;
+
+    await run(sql, [
+      pattern.id,
+      pattern.patternName,
+      pattern.symptoms,
+      pattern.betterApproach,
+      JSON.stringify(pattern.projectsAffected || []),
+      pattern.createdAt || Date.now()
+    ]);
   }
 };

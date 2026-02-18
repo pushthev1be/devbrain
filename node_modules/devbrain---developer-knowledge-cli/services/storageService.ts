@@ -54,10 +54,25 @@ export const storage = {
   },
 
   getAntiPatterns: async (): Promise<AntiPattern[]> => {
-    return []; // Placeholder for now
+    try {
+      const response = await fetch(`${API_BASE}/anti-patterns`);
+      if (!response.ok) throw new Error('API server down');
+      return await response.json();
+    } catch (e) {
+      console.warn('Failed to fetch anti-patterns:', e);
+      return [];
+    }
   },
 
   saveAntiPattern: async (ap: AntiPattern) => {
-    console.log('Anti-pattern save requested');
+    try {
+      await fetch(`${API_BASE}/anti-patterns`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(ap)
+      });
+    } catch (e) {
+      console.warn('Failed to save anti-pattern:', e);
+    }
   }
 };

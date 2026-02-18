@@ -21,6 +21,16 @@ export function startServer(port = 3000) {
         res.status(201).json({ success: true });
     });
 
+    app.get('/api/anti-patterns', async (req: express.Request, res: express.Response) => {
+        res.json(await storage.getAntiPatterns());
+    });
+
+    app.post('/api/anti-patterns', async (req: express.Request, res: express.Response) => {
+        const pattern = req.body;
+        await storage.saveAntiPattern(pattern);
+        res.status(201).json({ success: true });
+    });
+
     app.listen(port, () => {
         console.log(`[DevBrain API] Server running at http://localhost:${port}`);
     });
