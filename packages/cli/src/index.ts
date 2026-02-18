@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { runWithMonitoring } from './pty.js';
-import { startDaemon } from './daemon.js';
-import { startServer } from './server.js';
+import { runWithMonitoring } from './pty.ts';
+import { startDaemon } from './daemon.ts';
+import { startServer } from './server.ts';
 import { storage } from '@devbrain/core';
 import inquirer from 'inquirer';
 
