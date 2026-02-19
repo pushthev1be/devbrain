@@ -18,3 +18,4 @@ __exportStar(require("./types.js"), exports);
 __exportStar(require("./storage.js"), exports);
 __exportStar(require("./ai.js"), exports);
 __exportStar(require("./github.js"), exports);
+__exportStar(require("./scraper.js"), exports);

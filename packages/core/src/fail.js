@@ -1,0 +1,1 @@
+throw new Error("Critical database connection failure: E_CONN_REFUSED");

@@ -50,9 +50,14 @@ db.serialize(() => {
       confidence REAL,
       timeSavedMinutes INTEGER,
       usageCount INTEGER,
-      successCount INTEGER
+      successCount INTEGER,
+      contentHash TEXT,
+      UNIQUE(projectName, errorMessage, contentHash)
     )
   `);
+    // Migration: Add missing columns if they don't exist
+    db.run("ALTER TABLE fixes ADD COLUMN type TEXT", (err) => { });
+    db.run("ALTER TABLE fixes ADD COLUMN contentHash TEXT", (err) => { });
     db.run(`
     CREATE TABLE IF NOT EXISTS anti_patterns (
       id TEXT PRIMARY KEY,
@@ -73,20 +78,24 @@ exports.storage = {
             tags: JSON.parse(r.tags || '[]')
         }));
     },
+    getGenericFixes: async () => {
+        const rows = await all("SELECT * FROM fixes WHERE fixDescription LIKE 'Analyzed % lines of%'");
+        return rows.map(r => ({ ...r, filePaths: JSON.parse(r.filePaths || '[]'), tags: JSON.parse(r.tags || '[]') }));
+    },
     saveFix: async (fix) => {
         const sql = `
       INSERT OR REPLACE INTO fixes (
-        id, projectName, errorMessage, rootCause, mentalModel, 
+        id, type, projectName, errorMessage, rootCause, mentalModel, 
         fixDescription, beforeCodeSnippet, afterCodeSnippet, 
         filePaths, tags, frameworkContext, createdAt, 
-        confidence, timeSavedMinutes, usageCount, successCount
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        confidence, timeSavedMinutes, usageCount, successCount, contentHash
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
         await run(sql, [
-            fix.id, fix.projectName, fix.errorMessage, fix.rootCause, fix.mentalModel,
+            fix.id, fix.type, fix.projectName, fix.errorMessage, fix.rootCause, fix.mentalModel,
             fix.fixDescription, fix.beforeCodeSnippet, fix.afterCodeSnippet,
             JSON.stringify(fix.filePaths), JSON.stringify(fix.tags), fix.frameworkContext, fix.createdAt,
-            fix.confidence || 0, fix.timeSavedMinutes, fix.usageCount, fix.successCount
+            fix.confidence || 0, fix.timeSavedMinutes, fix.usageCount, fix.successCount, fix.contentHash
         ]);
     },
     getStats: async () => {
@@ -107,6 +116,32 @@ exports.storage = {
             ...r,
             projectsAffected: JSON.parse(r.projectsAffected || '[]')
         }));
+    },
+    clearDuplicates: async () => {
+        // Keep most recent for each unique insight
+        const sql = `
+      DELETE FROM fixes 
+      WHERE id NOT IN (
+        SELECT id FROM (
+          SELECT id, MAX(createdAt) 
+          FROM fixes 
+          GROUP BY projectName, errorMessage
+        )
+      )
+    `;
+        await run(sql);
+        // Also cleanup anti-patterns
+        const apSql = `
+      DELETE FROM anti_patterns 
+      WHERE id NOT IN (
+        SELECT id FROM (
+          SELECT id, MAX(createdAt) 
+          FROM anti_patterns 
+          GROUP BY patternName
+        )
+      )
+    `;
+        await run(apSql);
     },
     saveAntiPattern: async (pattern) => {
         const sql = `

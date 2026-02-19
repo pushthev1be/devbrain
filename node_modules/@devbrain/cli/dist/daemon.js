@@ -10,6 +10,11 @@ const fs_1 = __importDefault(require("fs"));
 const core_1 = require("@devbrain/core");
 const chalk_1 = __importDefault(require("chalk"));
 const uuid_1 = require("uuid");
+const conf_1 = __importDefault(require("conf"));
+const crypto_1 = __importDefault(require("crypto"));
+const config = new conf_1.default({
+    projectName: 'devbrain',
+});
 async function analyzeCodeFile(filePath) {
     try {
         const content = fs_1.default.readFileSync(filePath, 'utf-8');
@@ -120,6 +125,9 @@ async function detectAntiPatterns(filePath, content, projectName) {
     }
     // Save detected anti-patterns to database
     for (const pattern of antiPatterns) {
+        const sessionKey = `${filePath}:${pattern.name}`;
+        if (sessionAntiPatterns.has(sessionKey))
+            continue;
         try {
             const antiPatternRecord = {
                 id: (0, uuid_1.v4)(),
@@ -130,6 +138,7 @@ async function detectAntiPatterns(filePath, content, projectName) {
                 createdAt: Date.now()
             };
             await core_1.storage.saveAntiPattern(antiPatternRecord);
+            updateAntiPatternCache(sessionKey);
             console.log(chalk_1.default.red(`  ⚠️  Anti-Pattern: ${pattern.name}`));
         }
         catch (error) {
@@ -137,30 +146,29 @@ async function detectAntiPatterns(filePath, content, projectName) {
         }
     }
 }
-async function storeAnalysisAsKnowledge(filePath, analysis, projectName) {
+async function storeAnalysisAsKnowledge(filePath, analysis, projectName, aiData, contentHash) {
     try {
-        // Save even if minimal issues, just to track file complexity
         const fix = {
             id: (0, uuid_1.v4)(),
             type: 'pattern',
             projectName,
-            errorMessage: `Pattern detected: ${analysis.potentialIssues.join(', ') || analysis.patterns.join(', ') || 'file-complexity'}`,
-            rootCause: `File: ${path_1.default.basename(filePath)} (${analysis.fileType})`,
-            mentalModel: `Complexity: ${analysis.complexity}, Patterns: ${analysis.patterns.join(', ')}`,
-            fixDescription: analysis.insights,
+            errorMessage: aiData?.hasWisdom ? aiData.title : `Significant Pattern: ${analysis.patterns.join(', ') || 'Code Structure'}`,
+            rootCause: aiData?.hasWisdom ? aiData.rationale : `Contextual analysis of ${path_1.default.basename(filePath)} (${analysis.fileType}).`,
+            mentalModel: aiData?.hasWisdom ? aiData.principle : `Engineering Principle: ${analysis.patterns[0] || 'Clean Code'}`,
+            fixDescription: aiData?.hasWisdom ? aiData.description : `Verified pattern in ${analysis.fileType} development.`,
             beforeCodeSnippet: filePath,
-            afterCodeSnippet: `Review recommended for: ${analysis.potentialIssues.join(', ') || 'general-review'}`,
+            afterCodeSnippet: aiData?.hasWisdom ? `Implementation Pattern: ${aiData.title}` : `Review recommended for: ${analysis.potentialIssues.join(', ') || 'general-review'}`,
             filePaths: [filePath],
-            tags: [...analysis.patterns, ...analysis.potentialIssues],
+            tags: aiData?.hasWisdom ? [...new Set([...analysis.patterns, ...analysis.potentialIssues, ...aiData.tags])] : [...analysis.patterns, ...analysis.potentialIssues],
             frameworkContext: analysis.fileType,
             createdAt: Date.now(),
-            confidence: analysis.potentialIssues.length > 0 ? 85 : (analysis.patterns.length > 0 ? 70 : 50),
+            confidence: aiData?.hasWisdom ? aiData.confidence : (analysis.potentialIssues.length > 0 ? 85 : (analysis.patterns.length > 0 ? 70 : 50)),
             timeSavedMinutes: 5,
             usageCount: 0,
-            successCount: 0
+            successCount: 0,
+            contentHash
         };
         await core_1.storage.saveFix(fix);
-        console.log(chalk_1.default.green(`[SAVED] ${path_1.default.basename(filePath)} - Tags: ${fix.tags.join(', ')}`));
     }
     catch (error) {
         console.error(chalk_1.default.red(`[ERROR] Failed to store analysis:`), error);
@@ -168,14 +176,42 @@ async function storeAnalysisAsKnowledge(filePath, analysis, projectName) {
 }
 const fileAnalysisQueue = new Map();
 const ANALYSIS_DEBOUNCE_MS = 2000; // Wait 2s after last change before analyzing
-function startDaemon(watchPath) {
+// Stateful de-duplication (Persistent via Conf)
+const lastAnalysisResults = config.get('analysisCache') || {};
+const sessionAntiPatterns = new Set(config.get('antiPatternCache') || []);
+const lastContentHashes = new Map(); // In-memory for current run
+function updateCache(filePath, resultString) {
+    lastAnalysisResults[filePath] = resultString;
+    config.set('analysisCache', lastAnalysisResults);
+}
+function updateAntiPatternCache(sessionKey) {
+    sessionAntiPatterns.add(sessionKey);
+    config.set('antiPatternCache', Array.from(sessionAntiPatterns));
+}
+function startDaemon(watchPath, kernelMode = false) {
     const paths = Array.isArray(watchPath) ? watchPath : [watchPath];
     const resolvedPaths = paths.map(p => path_1.default.resolve(p));
-    console.log(chalk_1.default.blue(`[DevBrain Daemon] Starting monitoring...`));
-    resolvedPaths.forEach(p => {
-        console.log(chalk_1.default.gray(` Watching: ${p}`));
-    });
-    console.log(chalk_1.default.dim('Press Ctrl+C to stop\n'));
+    const aiApiKey = process.env.GEMINI_API_KEY || config.get('geminiKey');
+    const aiService = aiApiKey ? new core_1.AiService(aiApiKey) : null;
+    if (kernelMode) {
+        console.log(chalk_1.default.cyan('\nDEVBRAIN_KERNEL::PTY_SESSION_V5_STABLE'));
+        console.log(chalk_1.default.gray(`PTY_EMULATOR: ON // NEURAL_INTERCEPT: ACTIVE`));
+        // Neural Interceptor check
+        if (aiApiKey) {
+            console.log(chalk_1.default.green('DAEMON_INIT: Neural link established. Intercepting streams...'));
+        }
+        else {
+            console.log(chalk_1.default.red('[KERNEL ERROR] Link to neural processor severed.'));
+            console.log(chalk_1.default.yellow('INTERCEPTOR::ANOMALY_FOUND_IN_STREAM - AI features disabled.'));
+        }
+    }
+    else {
+        console.log(chalk_1.default.blue(`[DevBrain Daemon] Starting monitoring...`));
+        resolvedPaths.forEach(p => {
+            console.log(chalk_1.default.gray(` Watching: ${p}`));
+        });
+        console.log(chalk_1.default.dim('Press Ctrl+C to stop\n'));
+    }
     const watcher = chokidar_1.default.watch(resolvedPaths, {
         ignored: [
             /(^|[\/\\])\./, // ignore dotfiles
@@ -194,20 +230,57 @@ function startDaemon(watchPath) {
         // Find which project this file belongs to
         const projectPath = resolvedPaths.find(p => filePath.startsWith(p));
         const projectName = projectPath ? path_1.default.basename(projectPath) : 'unknown';
-        console.log(chalk_1.default.gray(`[FS_EVENT] ${path_1.default.relative(process.cwd(), filePath)} (${projectName})`));
         // Debounce analysis - if file keeps changing, wait until it settles
         if (fileAnalysisQueue.has(filePath)) {
             clearTimeout(fileAnalysisQueue.get(filePath));
         }
         const timeoutId = setTimeout(async () => {
+            const content = fs_1.default.readFileSync(filePath, 'utf-8');
+            const contentHash = crypto_1.default.createHash('md5').update(content).digest('hex');
+            // Skip if content is exactly the same as last processed in this run
+            if (lastContentHashes.get(filePath) === contentHash) {
+                fileAnalysisQueue.delete(filePath);
+                return;
+            }
+            lastContentHashes.set(filePath, contentHash);
             const analysis = await analyzeCodeFile(filePath);
-            if (analysis.potentialIssues.length > 0 || analysis.patterns.length > 0) {
-                console.log(chalk_1.default.yellow(`  📊 Issues: ${analysis.potentialIssues.join(', ')}`));
-                console.log(chalk_1.default.cyan(`  🔍 Patterns: ${analysis.patterns.join(', ')}`));
-                await storeAnalysisAsKnowledge(filePath, analysis, projectName);
+            const currentResultString = JSON.stringify({
+                issues: analysis.potentialIssues.sort(),
+                patterns: analysis.patterns.sort()
+            });
+            const lastResultString = lastAnalysisResults[filePath];
+            if (currentResultString !== lastResultString) {
+                console.log(chalk_1.default.gray(`[FS_EVENT] ${path_1.default.relative(process.cwd(), filePath)} (${projectName})`));
+                let aiData = null;
+                if (aiService) {
+                    try {
+                        aiData = await aiService.analyzeCodeQuality(path_1.default.basename(filePath), content);
+                    }
+                    catch (e) {
+                        console.warn(chalk_1.default.yellow(`[AI_ERROR] Failed to obtain deep insight: ${e}`));
+                    }
+                }
+                if (analysis.potentialIssues.length > 0 || analysis.patterns.length > 0 || aiData?.hasWisdom) {
+                    if (kernelMode) {
+                        if (aiData?.hasWisdom) {
+                            console.log(chalk_1.default.magenta(`[STORY_CAPTURED] ${aiData.title.toUpperCase()}`));
+                            console.log(chalk_1.default.gray(`  WHY: ${aiData.rationale}`));
+                        }
+                        if (analysis.potentialIssues.length > 0) {
+                            console.log(chalk_1.default.red(`  [ANOMALY] ${analysis.potentialIssues.join(', ')}`));
+                        }
+                    }
+                    else {
+                        if (aiData?.hasWisdom) {
+                            console.log(chalk_1.default.cyan(`\n✨ [WISDOM] ${aiData.title}`));
+                            console.log(chalk_1.default.gray(`   Rationale: ${aiData.rationale}`));
+                        }
+                    }
+                    await storeAnalysisAsKnowledge(filePath, analysis, projectName, aiData, contentHash);
+                }
+                updateCache(filePath, currentResultString);
             }
             // Detect and save anti-patterns
-            const content = fs_1.default.readFileSync(filePath, 'utf-8');
             await detectAntiPatterns(filePath, content, projectName);
             fileAnalysisQueue.delete(filePath);
         }, ANALYSIS_DEBOUNCE_MS);

@@ -7,10 +7,12 @@
         "packages/*"
     ],
     "scripts": {
+        "dev": "npm run dashboard:dev",
         "dashboard:dev": "npm run dev -w apps/dashboard",
         "cli:dev": "npm run dev -w packages/cli",
         "cli:build": "npm run build -w packages/cli",
-        "core:build": "npm run build -w packages/core"
+        "core:build": "npm run build -w packages/core",
+        "dashboard:build": "npm run build -w apps/dashboard"
     },
     "devDependencies": {
         "typescript": "^5.0.0",

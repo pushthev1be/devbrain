@@ -24,7 +24,7 @@ class AiService {
       Return JSON: { bestMatchId: string | null, confidence: number (0-100), reasoning: string }
     `;
         const result = await this.genAI.models.generateContent({
-            model: 'gemini-1.5-flash',
+            model: 'gemini-1.5-flash-001',
             contents: [{ role: 'user', parts: [{ text: prompt }] }],
             generationConfig: { responseMimeType: 'application/json' }
         });
@@ -39,11 +39,44 @@ class AiService {
       Return JSON with: rootCause, mentalModel, fixDescription, tags (array), frameworkContext.
     `;
         const result = await this.genAI.models.generateContent({
-            model: 'gemini-1.5-flash',
+            model: 'gemini-1.5-flash-001',
             contents: [{ role: 'user', parts: [{ text: prompt }] }],
             generationConfig: { responseMimeType: 'application/json' }
         });
         return JSON.parse(result.text || result.response?.text() || '{}');
+    }
+    async analyzeCodeQuality(filename, content) {
+        const prompt = `
+      Analyze the following source code to extract high-quality engineering wisdom for a local Knowledge Base.
+      FILE: ${filename}
+      CONTENT:
+      ${content.substring(0, 15000)}
+      
+      CRITERIA:
+      1. This is a Knowledge Base capture. Every file in the project has a purpose.
+      2. Identify DOMAIN ROLE: What is this file's "job" in the overall architecture? (e.g. 'Storage Engine', 'API Routing', 'State Management')
+      3. Identify PATTERNS & PRINCIPLES: How is it solving problems? (e.g. 'Dependency Injection', 'Lazy Loading').
+      4. Avoid generic "Code Analysis". Be specific about the LOGIC.
+      5. BE BEGINNER FRIENDLY. Explain the "Why" simply.
+      6. Return ONLY a JSON object:
+      {
+        "hasWisdom": true,
+        "type": "pattern" | "principle" | "runbook" | "decision",
+        "title": "Clear Name (e.g. 'Persistent Storage Layer')",
+        "rationale": "High-level goal. What engineering problem does this solve?",
+        "principle": "The design pattern or concept used.",
+        "description": "Implementation details. How does it work internally?",
+        "tags": ["relevant", "keywords"],
+        "confidence": 0-100
+      }
+    `;
+        const result = await this.genAI.models.generateContent({
+            model: 'gemini-1.5-flash-001',
+            contents: [{ role: 'user', parts: [{ text: prompt }] }],
+            generationConfig: { responseMimeType: 'application/json' }
+        });
+        const data = JSON.parse(result.text || result.response?.text() || '{}');
+        return data;
     }
     async analyzeCommit(message, diff) {
         const prompt = `
@@ -74,7 +107,7 @@ class AiService {
       5. BE DEEP. Avoid generic answers. Explain the engineering mechanics.
     `;
         const result = await this.genAI.models.generateContent({
-            model: 'gemini-1.5-flash',
+            model: 'gemini-1.5-flash-001',
             contents: [{ role: 'user', parts: [{ text: prompt }] }],
             generationConfig: { responseMimeType: 'application/json' }
         });

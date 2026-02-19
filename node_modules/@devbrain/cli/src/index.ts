@@ -9,12 +9,15 @@ import inquirer from 'inquirer';
 import { v4 as uuidv4 } from 'uuid';
 import Conf from 'conf';
 import path from 'path';
+import fs from 'fs';
 import { execSync } from 'child_process';
 
 const config = new Conf({
     projectName: 'devbrain',
     defaults: {
-        projects: []
+        projects: [],
+        geminiKey: '',
+        githubToken: ''
     }
 });
 
@@ -26,12 +29,36 @@ program
     .version('1.0.0');
 
 program
+    .command('config <action> [key] [value]')
+    .description('Manage configuration (actions: set, get, list)')
+    .action((action: string, key: string, value: string) => {
+        if (action === 'set') {
+            if (key === 'gemini-key') {
+                config.set('geminiKey', value);
+                console.log(chalk.green('✓ Gemini API Key stored persistently.'));
+            } else if (key === 'github-token') {
+                config.set('githubToken', value);
+                console.log(chalk.green('✓ GitHub Token stored persistently.'));
+            } else {
+                console.log(chalk.red('[ERROR] Invalid config key. Use "gemini-key" or "github-token".'));
+            }
+        } else if (action === 'list') {
+            console.log(chalk.blue('\nConfiguration:'));
+            console.log(` - gemini-key: ${config.get('geminiKey') ? '********' : 'not set'}`);
+            console.log(` - github-token: ${config.get('githubToken') ? '********' : 'not set'}`);
+        } else {
+            console.log(chalk.red('[ERROR] Unknown config action. Use "set" or "list".'));
+        }
+    });
+
+program
     .command('run <cmd...>')
     .description('Run a command with brain monitoring')
     .action(async (cmd: string[]) => {
         const command = cmd.join(' ');
         console.log(chalk.blue(`[DevBrain] Monitoring: ${command}`));
         await runWithMonitoring(command);
+        process.exit(0);
     });
 
 program
@@ -44,7 +71,20 @@ program
             console.log(chalk.red('[ERROR] No projects to monitor. Add one with "devbrain monitor add <path>"'));
             return;
         }
-        startDaemon(paths);
+        startDaemon(paths, false);
+    });
+
+program
+    .command('watch')
+    .description('Start stylized "Kernel" monitoring mode')
+    .option('-p, --path <path>', 'Path to watch', '')
+    .action((options: { path: string }) => {
+        const paths = options.path ? [options.path] : config.get('projects') as string[];
+        if (paths.length === 0) {
+            console.log(chalk.red('[ERROR] No projects to monitor. Add one with "devbrain monitor add <path>"'));
+            return;
+        }
+        startDaemon(paths, true);
     });
 
 const monitor = program.command('monitor').description('Manage monitored projects');
@@ -127,13 +167,13 @@ program
         console.log(`Recall Precision: ${stats.accuracyRate}%`);
     });
 
-async function learnFromRepo(owner: string, repo: string, options: { deep?: boolean, limit: string, token?: string }) {
+async function learnFromRepo(owner: string, repo: string, options: { deep?: boolean, limit: string, token?: string, aiKey?: string }) {
     try {
-        const token = options.token || process.env.GITHUB_TOKEN || '';
-        const aiApiKey = process.env.GEMINI_API_KEY;
+        const token = options.token || process.env.GITHUB_TOKEN || config.get('githubToken') as string || '';
+        const aiApiKey = options.aiKey || process.env.GEMINI_API_KEY || config.get('geminiKey') as string;
 
         if (options.deep && !aiApiKey) {
-            console.log(chalk.red('[ERROR] GEMINI_API_KEY is required for deep analysis.'));
+            console.log(chalk.red('[ERROR] Gemini API Key not found. Set it with "devbrain config set gemini-key <key>" or use env GEMINI_API_KEY.'));
             return;
         }
 
@@ -232,9 +272,9 @@ program
     .option('-l, --limit <number>', 'Commits per repo', '5')
     .action(async (options: { token?: string, limit: string }) => {
         try {
-            const token = options.token || process.env.GITHUB_TOKEN;
+            const token = options.token || process.env.GITHUB_TOKEN || config.get('githubToken') as string;
             if (!token) {
-                console.log(chalk.red('[ERROR] GitHub token required. Set GITHUB_TOKEN or use --token.'));
+                console.log(chalk.red('[ERROR] GitHub token not found. Set it with "devbrain config set github-token <token>" or use env GITHUB_TOKEN.'));
                 return;
             }
 
@@ -293,4 +333,239 @@ program
         console.log(chalk.gray('\nHint: Ensure "devbrain daemon" is running to capture active development.'));
     });
 
-program.parse();
+const maint = program.command('maint').description('System maintenance utilities');
+
+maint
+    .command('dedupe')
+    .description('Clear redundant knowledge blocks from the database')
+    .action(async () => {
+        try {
+            console.log(chalk.blue('[DevBrain Maintenance] Scanning for duplicates...'));
+            await storage.clearDuplicates();
+            console.log(chalk.green('✓ Database de-duplicated. Redundant blocks removed.'));
+        } catch (error) {
+            console.error(chalk.red('[ERROR] Maintenance failed:'), error);
+        }
+    });
+
+maint
+    .command('upgrade')
+    .description('Re-analyze generic insights using AI for higher fidelity')
+    .action(async () => {
+        const apiKey = process.env.GEMINI_API_KEY || (config as any).get('geminiKey');
+        if (!apiKey) {
+            console.log(chalk.red('[ERROR] Gemini API Key not found. Set it with "devbrain config set gemini-key <key>".'));
+            return;
+        }
+
+        const ai = new AiService(apiKey);
+        try {
+            console.log(chalk.blue('[DevBrain Maintenance] Identifying generic blocks...'));
+            const targets = await storage.getGenericFixes();
+
+            if (targets.length === 0) {
+                console.log(chalk.green('✓ All existing insights are already high-fidelity or non-generic.'));
+                return;
+            }
+
+            console.log(chalk.yellow(`[UPGRADE] Found ${targets.length} blocks needing re-analysis.`));
+
+            for (let i = 0; i < targets.length; i++) {
+                const fix = targets[i];
+                const filePath = fix.filePaths[0]; // Primary file
+
+                if (!filePath || !require('fs').existsSync(filePath)) {
+                    console.log(chalk.gray(`  [SKIPPING] ${i + 1}/${targets.length} - File not found: ${filePath}`));
+                    continue;
+                }
+
+                try {
+                    console.log(chalk.cyan(`  [UPGRADING] ${i + 1}/${targets.length} - ${path.basename(filePath)}...`));
+                    const content = require('fs').readFileSync(filePath, 'utf-8');
+                    const aiData = await ai.analyzeCodeQuality(path.basename(filePath), content);
+
+                    if (aiData.isSignificant) {
+                        fix.errorMessage = aiData.title;
+                        fix.rootCause = aiData.rationale;
+                        fix.mentalModel = aiData.principle;
+                        fix.fixDescription = aiData.description;
+                        fix.tags = [...new Set([...fix.tags, ...aiData.tags])];
+                        fix.confidence = aiData.confidence;
+
+                        await storage.saveFix(fix);
+                        console.log(chalk.green(`  ✓ Hydrated: ${aiData.title}`));
+                    } else {
+                        console.log(chalk.gray(`  - AI determined no significant change for this block.`));
+                    }
+                } catch (e) {
+                    console.error(chalk.red(`  [ERROR] Failed to upgrade ${filePath}:`), (e as any).message);
+                }
+            }
+
+            console.log(chalk.green('\n✓ Maintenance complete. Data upgraded to High-Fidelity.'));
+        } catch (error) {
+            console.error(chalk.red('[ERROR] Maintenance failed:'), error);
+        }
+    });
+
+maint
+    .command('crawl')
+    .description('Scan the entire project for deep engineering wisdom')
+    .option('--path <path>', 'Path to scan', '.')
+    .action(async (options) => {
+        const apiKey = process.env.GEMINI_API_KEY || (config as any).get('geminiKey');
+        if (!apiKey) {
+            console.log(chalk.red('[ERROR] AI Key missing.'));
+            return;
+        }
+
+        const ai = new AiService(apiKey);
+        const scanPath = path.resolve(options.path);
+
+        console.log(chalk.blue(`[DevBrain Crawler] Scanning project: ${scanPath}`));
+        console.log(chalk.gray('  This might take a while depending on project size...'));
+
+        const getFiles = (dir: string): string[] => {
+            const files: string[] = [];
+            const items = fs.readdirSync(dir, { withFileTypes: true });
+            for (const item of items) {
+                if (item.isDirectory()) {
+                    if (['node_modules', 'dist', '.git', 'build', '.next', 'bin', 'obj'].includes(item.name)) continue;
+                    files.push(...getFiles(path.join(dir, item.name)));
+                } else {
+                    const ext = path.extname(item.name);
+                    if (['.ts', '.js', '.tsx', '.jsx', '.py', '.go', '.rs', '.java', '.cs'].includes(ext)) {
+                        files.push(path.join(dir, item.name));
+                    }
+                }
+            }
+            return files;
+        };
+
+        try {
+            const allFiles = getFiles(scanPath);
+            console.log(chalk.yellow(`[CRAWL] Found ${allFiles.length} code files. Starting deep extraction...`));
+
+            for (let i = 0; i < allFiles.length; i++) {
+                const filePath = allFiles[i];
+                const relPath = path.relative(scanPath, filePath);
+
+                try {
+                    console.log(chalk.cyan(`  (${i + 1}/${allFiles.length}) Extracting: ${relPath}...`));
+                    const content = fs.readFileSync(filePath, 'utf-8');
+                    const contentHash = require('crypto').createHash('md5').update(content).digest('hex');
+
+                    const aiData = await ai.analyzeCodeQuality(path.basename(filePath), content);
+
+                    if (aiData.isSignificant) {
+                        const fix: any = {
+                            id: uuidv4(),
+                            type: aiData.type || 'pattern',
+                            projectName: path.basename(scanPath),
+                            errorMessage: aiData.title,
+                            rootCause: aiData.rationale,
+                            mentalModel: aiData.principle,
+                            fixDescription: aiData.description,
+                            filePaths: [filePath],
+                            tags: aiData.tags || [],
+                            frameworkContext: path.extname(filePath).slice(1),
+                            createdAt: Date.now(),
+                            confidence: aiData.confidence || 80,
+                            timeSavedMinutes: 15,
+                            usageCount: 1,
+                            successCount: 1,
+                            contentHash
+                        };
+
+                        await storage.saveFix(fix);
+                        console.log(chalk.green(`    ✓ Captured: ${aiData.title}`));
+                    }
+                } catch (e) {
+                    console.warn(chalk.gray(`    ! Skipped: ${(e as any).message}`));
+                }
+            }
+            console.log(chalk.green('\n✓ Project Crawl Complete. Your local knowledge base is now populated.'));
+        } catch (error) {
+            console.error(chalk.red('[ERROR] Crawl failed:'), error);
+        }
+    });
+
+maint
+    .command('ingest')
+    .description('Import manual knowledge from dev_bible/bible.jsonl')
+    .action(async () => {
+        const biblePath = path.join(process.cwd(), 'dev_bible', 'bible.jsonl');
+        if (!fs.existsSync(biblePath)) {
+            console.log(chalk.red(`[ERROR] Bible file not found at: ${biblePath}`));
+            return;
+        }
+
+        try {
+            console.log(chalk.blue('[DevBrain Maintenance] Ingesting manual wisdom from Bible...'));
+            const content = fs.readFileSync(biblePath, 'utf-8');
+            const lines = content.split('\n').filter((l: string) => l.trim());
+            let count = 0;
+
+            for (const line of lines) {
+                try {
+                    const entry = JSON.parse(line.trim());
+                    const fix: any = {
+                        id: entry.id || `manual_${Date.now()}_${count}`,
+                        projectName: 'DevBible',
+                        tags: entry.tags || [],
+                        createdAt: Date.now(),
+                        usageCount: 1,
+                        successCount: 1,
+                        timeSavedMinutes: 10,
+                        filePaths: [],
+                        frameworkContext: 'Manual'
+                    };
+
+                    const entryType = entry.type?.toUpperCase();
+                    switch (entryType) {
+                        case 'PRINCIPLE':
+                            fix.type = 'principle';
+                            fix.errorMessage = `[PRINCIPLE] ${entry.id}`;
+                            fix.fixDescription = entry.text;
+                            break;
+                        case 'PATTERN':
+                            fix.type = 'pattern';
+                            fix.errorMessage = entry.name;
+                            fix.rootCause = entry.when;
+                            fix.fixDescription = Array.isArray(entry.steps) ? entry.steps.join('\n') : entry.steps;
+                            break;
+                        case 'MISTAKE':
+                            fix.type = 'bugfix';
+                            fix.errorMessage = entry.symptom;
+                            fix.rootCause = entry.root_cause;
+                            fix.fixDescription = Array.isArray(entry.fix_steps) ? entry.fix_steps.join('\n') : entry.fix_steps;
+                            break;
+                        case 'RUNBOOK':
+                            fix.type = 'runbook';
+                            fix.errorMessage = entry.title;
+                            fix.fixDescription = Array.isArray(entry.steps) ? entry.steps.join('\n') : entry.steps;
+                            break;
+                        case 'DECISION':
+                            fix.type = 'decision';
+                            fix.errorMessage = entry.question;
+                            fix.rootCause = `Outcome: ${entry.decision}`;
+                            fix.fixDescription = `Reason: ${entry.reason}`;
+                            break;
+                        default:
+                            continue;
+                    }
+
+                    await storage.saveFix(fix);
+                    count++;
+                } catch (e) {
+                    console.warn(chalk.yellow(`  [SKIP] Error parsing line: ${(e as any).message}`));
+                }
+            }
+
+            console.log(chalk.green(`✓ Successfully ingested ${count} wisdom blocks from DevBible.`));
+        } catch (error) {
+            console.error(chalk.red('[ERROR] Ingestion failed:'), error);
+        }
+    });
+
+program.parse(process.argv);

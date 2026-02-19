@@ -1,6 +1,6 @@
 export interface Fix {
     id: string;
-    type: 'bugfix' | 'pattern' | 'optimization';
+    type: 'bugfix' | 'pattern' | 'optimization' | 'principle' | 'runbook' | 'decision';
     projectName: string;
     errorMessage: string;
     rootCause: string;
@@ -16,6 +16,7 @@ export interface Fix {
     timeSavedMinutes: number;
     usageCount: number;
     successCount: number;
+    contentHash?: string;
 }
 export interface AntiPattern {
     id: string;

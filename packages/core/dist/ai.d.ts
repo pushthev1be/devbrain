@@ -4,5 +4,6 @@ export declare class AiService {
     constructor(apiKey: string);
     analyzeError(errorText: string, pastFixes: Fix[]): Promise<any>;
     generateWisdom(error: string, solution: string): Promise<any>;
+    analyzeCodeQuality(filename: string, content: string): Promise<any>;
     analyzeCommit(message: string, diff: string): Promise<any>;
 }

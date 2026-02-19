@@ -9,6 +9,8 @@ const App: React.FC = () => {
   const [fixes, setFixes] = useState<any[]>([]);
   const [antiPatterns, setAntiPatterns] = useState<any[]>([]);
   const [stats, setStats] = useState<any>({ totalFixes: 0, timeSavedHours: "0.0", topTags: [], accuracyRate: 0 });
+  const [searchTerm, setSearchTerm] = useState<string>('');
+  const [activeProjectTabs, setActiveProjectTabs] = useState<Record<string, string>>({});
 
   React.useEffect(() => {
     const loadData = async () => {
@@ -55,8 +57,8 @@ const App: React.FC = () => {
               key={tab.id}
               onClick={() => setActiveView(tab.id)}
               className={`flex-1 px-4 py-3 text-[10px] font-bold uppercase tracking-widest transition-all border-l border-[#30363d] first:border-l-0 ${activeView === tab.id
-                  ? 'bg-blue-600 text-white shadow-inner'
-                  : 'text-gray-500 hover:text-gray-200 hover:bg-[#1f2937]'
+                ? 'bg-blue-600 text-white shadow-inner'
+                : 'text-gray-500 hover:text-gray-200 hover:bg-[#1f2937]'
                 }`}
             >
               {tab.label}
@@ -81,76 +83,237 @@ const App: React.FC = () => {
           )}
 
           {activeView === AppState.DATABASE && (
-            <div className="p-6">
-              <div className="border-b-2 border-blue-500 pb-2 mb-8 flex justify-between items-end">
-                <h2 className="text-2xl font-black text-white italic uppercase tracking-tighter">WISDOM_FS_INDEX</h2>
-                <span className="text-[10px] text-blue-500 font-bold tracking-widest">{fixes.length} BLOCKS_MOUNTED</span>
+            <div className="p-8 space-y-12 h-full flex flex-col">
+              <div className="flex justify-between items-end border-b-4 border-blue-600 pb-4 mb-4">
+                <div>
+                  <h2 className="text-4xl font-black text-white italic uppercase tracking-tighter">PROJECT_KNOWLEDGE_BASE</h2>
+                  <p className="text-xs text-gray-500 mt-2 font-bold tracking-widest uppercase">
+                    {fixes.length} Total insights captured across your stack
+                  </p>
+                </div>
+                {/* Global Search */}
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="SEARCH_WISDOM..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="bg-[#161b22] border-2 border-gray-800 text-xs font-bold text-blue-500 px-10 py-3 uppercase tracking-widest outline-none focus:border-blue-600 transition-all w-64"
+                  />
+                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-600 font-bold">/</span>
+                </div>
               </div>
-              <div className="grid gap-4">
-                {fixes.map(fix => (
-                  <div key={fix.id} className="border border-[#30363d] bg-[#161b22] p-6 hover:border-blue-500 transition-colors group">
-                    <div className="flex justify-between items-start mb-4">
-                      <div className="flex flex-col">
-                        <span className="text-[9px] font-bold text-blue-500 mb-1 tracking-widest">BLOCK_ADDR::{fix.id.toUpperCase()}</span>
-                        <h3 className="text-lg font-bold text-white group-hover:text-blue-400 leading-tight">{fix.errorMessage.split('\n')[0]}</h3>
+
+              <div className="flex-1 overflow-y-auto space-y-16 pr-2">
+                {Array.from(new Set(fixes.map(f => f.projectName) as string[])).map((project: string) => {
+                  const projectFixes = fixes.filter(f => f.projectName === project);
+                  const currentTab = activeProjectTabs[project] || 'pattern';
+
+                  const projectTabsConfig = [
+                    { id: 'pattern', label: 'CODE_PATTERNS', color: 'blue' },
+                    { id: 'bugfix', label: 'FIXES_&_SOLUTIONS', color: 'red' },
+                    { id: 'git', label: 'COMMIT_HISTORY', color: 'purple' },
+                    { id: 'principle', label: 'PRINCIPLES', color: 'cyan' },
+                    { id: 'runbook', label: 'RUNBOOKS', color: 'green' },
+                    { id: 'decision', label: 'DECISIONS', color: 'yellow' }
+                  ];
+
+                  return (
+                    <section key={project} className="space-y-6">
+                      <div className="flex items-center justify-between border-l-8 border-blue-600 pl-6 py-2 bg-blue-600/5">
+                        <h2 className="text-3xl font-black text-white uppercase tracking-tighter italic">{project}</h2>
                       </div>
-                      <div className="text-right flex flex-col items-end">
-                        <span className="text-xs font-black text-green-500 bg-green-500/5 px-2 py-0.5 border border-green-500/20">{Math.round(((fix.successCount || 0) / (fix.usageCount || 1)) * 100)}% SUCCESS</span>
-                        <div className="text-[9px] text-gray-500 mt-2 uppercase font-bold">DATE: {new Date(fix.createdAt).toISOString().split('T')[0]}</div>
+
+                      {/* Category Tabs per Project */}
+                      <div className="flex border-b border-gray-800 mb-6">
+                        {projectTabsConfig.map(tab => (
+                          <button
+                            key={tab.id}
+                            onClick={() => setActiveProjectTabs(prev => {
+                              const next = { ...prev };
+                              next[project] = tab.id;
+                              return next;
+                            })}
+                            className={`px-4 py-2 text-[10px] font-bold uppercase tracking-widest transition-all ${currentTab === tab.id
+                              ? `bg-${tab.color}-600 text-white shadow-inner`
+                              : 'text-gray-500 hover:text-gray-200 hover:bg-[#1f2937]'
+                              }`}
+                          >
+                            {tab.label}
+                          </button>
+                        ))}
                       </div>
-                    </div>
-                    <div className="bg-black/40 p-4 border border-[#30363d]/50">
-                      <p className="text-xs text-gray-400 leading-relaxed mb-4 font-medium"><span className="text-gray-600 font-bold uppercase mr-2">MODEL:</span>{fix.mentalModel}</p>
-                      <div className="flex flex-wrap gap-2">
-                        {fix.tags.map(t => <span key={t} className="text-[9px] font-bold text-blue-400/60 border border-blue-400/20 px-2 py-0.5">#{t.toUpperCase()}</span>)}
+
+                      <div className="grid grid-cols-1 gap-10">
+                        {projectTabsConfig.map(tab => {
+                          if (currentTab !== tab.id) return null;
+
+                          const tabFixes = projectFixes.filter(f => {
+                            const fixType = f.type || 'pattern';
+                            const matchesType = fixType === tab.id;
+                            const matchesSearch = !searchTerm ||
+                              JSON.stringify(f).toLowerCase().includes(searchTerm.toLowerCase());
+                            return matchesType && matchesSearch;
+                          });
+
+                          const groupedFixes = tabFixes.reduce((acc: any[], current: any) => {
+                            // Normalize error message for grouping
+                            const title = current.errorMessage?.split('\n')[0];
+                            const existing = acc.find(f => f.errorMessage?.split('\n')[0] === title);
+
+                            if (existing) {
+                              existing.usageCount = (existing.usageCount || 1) + (current.usageCount || 1);
+                              existing.filePaths = Array.from(new Set([...(existing.filePaths || []), ...(current.filePaths || [])]));
+                            } else {
+                              acc.push({ ...current });
+                            }
+                            return acc;
+                          }, []);
+
+                          if (groupedFixes.length === 0) {
+                            return (
+                              <div key={tab.id} className="p-10 text-center border-2 border-dashed border-[#30363d] rounded-lg">
+                                <span className="text-gray-600 font-bold italic tracking-tighter text-xl uppercase opacity-20">NO_{tab.label.replace(/[^A-Z0-9]/g, '_')}_FOUND</span>
+                              </div>
+                            );
+                          }
+
+                          return (
+                            <div key={tab.id}>
+                              <div className="space-y-4">
+                                {groupedFixes.map(fix => (
+                                  <div key={fix.id} className="bg-[#161b22] border border-gray-800/50 hover:border-gray-700 transition-all shadow-xl group rounded-r-md">
+                                    <div className="flex flex-col md:flex-row divide-x divide-gray-800/50">
+                                      {/* Project / Stack Info */}
+                                      <div className="md:w-56 p-4 bg-[#0d1117]/50 flex flex-col justify-center gap-1 border-l-4 border-l-blue-600/30 group-hover:border-l-blue-500 transition-all">
+                                        <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest leading-none">Environment:</span>
+                                        <span className="text-sm font-black text-white italic truncate uppercase">{fix.frameworkContext || 'System'}</span>
+                                        <div className="mt-3 flex items-center gap-2">
+                                          <span className="h-2 w-2 rounded-full bg-blue-500 animate-pulse"></span>
+                                          <span className="text-[9px] font-bold text-blue-500 uppercase italic">Active Wisdom</span>
+                                        </div>
+                                      </div>
+
+                                      {/* Main Content */}
+                                      <div className="flex-1 p-5 flex items-center gap-8">
+                                        <div className="flex-1">
+                                          <h4 className="text-base font-black text-white uppercase tracking-tight mb-2 group-hover:text-blue-400 transition-colors">
+                                            {fix.errorMessage?.split('\n')[0]}
+                                          </h4>
+                                          <div className="flex gap-4">
+                                            <div className="bg-black/20 px-3 py-2 border border-gray-800/50 rounded flex-1">
+                                              <span className="text-[8px] font-bold text-gray-500 uppercase block mb-1">RATIONALE:</span>
+                                              <p className="text-[11px] text-gray-400 font-medium line-clamp-2 md:line-clamp-1 italic">
+                                                {fix.rootCause || "Context extraction in progress..."}
+                                              </p>
+                                            </div>
+                                            <div className="bg-green-600/5 px-3 py-2 border border-green-500/20 rounded flex-1">
+                                              <span className="text-[8px] font-bold text-green-700 uppercase block mb-1">THE_FIX:</span>
+                                              <p className="text-[11px] text-green-100/70 font-bold line-clamp-2 md:line-clamp-1">
+                                                {fix.fixDescription}
+                                              </p>
+                                            </div>
+                                          </div>
+                                        </div>
+
+                                        {/* Stats Column */}
+                                        <div className="flex flex-col items-center justify-center border-l border-gray-800/50 pl-8 min-w-[80px]">
+                                          <span className="text-xl font-black text-white">{fix.usageCount || 1}</span>
+                                          <span className="text-[8px] font-bold text-gray-600 uppercase tracking-tighter">Encounters</span>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
-                    </div>
-                  </div>
-                ))}
+                    </section>
+                  );
+                })}
               </div>
+
+              {fixes.length === 0 && (
+                <div className="py-40 text-center border-4 border-dashed border-gray-800 rounded-2xl">
+                  <p className="text-gray-700 text-3xl font-black uppercase italic tracking-tighter">NO_KNOWLEDGE_MOUNTED_IN_CORE</p>
+                  <p className="text-gray-800 text-xs font-bold mt-4 uppercase tracking-[0.5em]">STAIR_RUN_DAEMON_TO_EXTRACT_WISDOM</p>
+                </div>
+              )}
             </div>
           )}
 
           {activeView === AppState.ANTI_PATTERNS && (
             <div className="p-6">
               <div className="border-b-2 border-red-500 pb-2 mb-8 flex justify-between items-end">
-                <h2 className="text-2xl font-black text-white italic uppercase tracking-tighter">NEURAL_GUARD_V2 // ANTI_PATTERNS</h2>
-                <span className="text-[10px] text-red-500 font-bold tracking-widest">REALTIME_INTERCEPTION: ENABLED</span>
+                <h2 className="text-2xl font-black text-white italic uppercase tracking-tighter">NEURAL_GUARD_SYSTEM</h2>
+                <span className="text-[10px] text-red-500 font-bold tracking-widest">REALTIME_INTERCEPTION: ACTIVE</span>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 gap-6">
                 {antiPatterns.map(ap => (
-                  <div key={ap.id} className="border border-[#30363d] bg-[#161b22] p-6 shadow-[4px_4px_0px_0px_rgba(239,68,68,0.2)]">
-                    <div className="text-red-500 font-black text-[10px] mb-2 uppercase tracking-[0.2em]">DANGER_PATTERN</div>
-                    <h3 className="text-xl font-black text-white mb-4 italic uppercase">{ap.patternName}</h3>
+                  <div key={ap.id} className="border border-[#30363d] bg-[#161b22] px-6 py-4 flex flex-col md:flex-row gap-6 shadow-sm border-l-4 border-l-red-600/50">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-3 mb-2">
+                        <span className="text-red-500 font-black text-[9px] border border-red-500/30 px-2 py-0.5 italic uppercase">Anomaly Detected</span>
+                        <h3 className="text-lg font-black text-white italic uppercase">{ap.patternName}</h3>
+                      </div>
+                      <div className="space-y-4 mt-4">
+                        <div>
+                          <span className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Symptoms in Code:</span>
+                          <p className="text-xs text-gray-400 bg-black/30 p-3 border border-[#30363d] leading-relaxed italic">
+                            {ap.symptoms}
+                          </p>
+                        </div>
+                        <div className="flex flex-col gap-2">
+                          <span className="text-[10px] font-bold text-gray-500 uppercase block">Projects Affected:</span>
+                          <div className="flex flex-wrap gap-2">
+                            {ap.projectsAffected?.map((proj: string) => (
+                              <span key={proj} className="text-[9px] text-gray-500 bg-red-500/5 border border-red-500/10 px-2 py-1">
+                                {proj}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
 
-                    <div className="space-y-4">
-                      <div>
-                        <span className="text-[9px] font-bold text-gray-600 uppercase block mb-1">SYMPTOMS:</span>
-                        <p className="text-xs text-gray-400 bg-black/30 p-2 border border-[#30363d]">{ap.symptoms}</p>
-                      </div>
-                      <div>
-                        <span className="text-[9px] font-bold text-green-600 uppercase block mb-1">REMEDY:</span>
-                        <p className="text-xs text-green-400/80 bg-green-500/5 p-2 border border-green-500/20 italic">"{ap.betterApproach}"</p>
-                      </div>
+                    <div className="md:w-1/3 bg-green-500/5 border border-green-500/20 p-5 flex flex-col justify-center">
+                      <span className="text-[10px] font-black text-green-500 uppercase block mb-2 italic">Refactoring Recommendation</span>
+                      <p className="text-xs text-green-400/80 leading-relaxed font-medium">
+                        "{ap.betterApproach}"
+                      </p>
                     </div>
                   </div>
                 ))}
+                {antiPatterns.length === 0 && (
+                  <div className="p-20 text-center border-2 border-dashed border-[#30363d] rounded-lg">
+                    <span className="text-gray-600 font-bold italic tracking-tighter text-xl uppercase opacity-20">NO_ANOMALIES_IN_BUFFER</span>
+                  </div>
+                )}
               </div>
             </div>
           )}
 
           {activeView === AppState.MASTERY && (
             <div className="p-8">
-              <h2 className="text-2xl font-black text-white italic mb-10 border-b border-[#30363d] pb-4">KERNEL_EVOLUTION_LOG</h2>
+              <h2 className="text-2xl font-black text-white italic mb-10 border-b border-[#30363d] pb-4 uppercase tracking-tighter">COGNITIVE_EVOLUTION_TIMELINE</h2>
               <div className="border-l-2 border-[#1f2937] ml-4 space-y-12 relative">
                 {fixes.map((fix, idx) => (
                   <div key={fix.id} className="relative pl-10">
                     <div className="absolute left-[-6px] top-1 w-2.5 h-2.5 bg-blue-600 shadow-[0_0_8px_#3b82f6]"></div>
-                    <div className="bg-[#161b22] border border-[#30363d] p-6 shadow-[6px_6px_0px_0px_#000]">
-                      <span className="text-[9px] text-gray-500 font-black block mb-2 tracking-[0.3em]">RECALL_EVENT_{idx + 1}</span>
-                      <h4 className="font-bold text-white text-lg tracking-tight mb-3">{fix.errorMessage.split('\n')[0]}</h4>
+                    <div className="bg-[#161b22] border border-[#30363d] p-6 shadow-sm">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className={`text-[8px] font-black px-1.5 py-0.5 uppercase ${fix.type === 'bugfix' ? 'bg-red-900/50 text-red-400' : 'bg-blue-900/50 text-blue-400'}`}>
+                          {fix.type || 'insight'}
+                        </span>
+                        <span className="text-[9px] text-gray-500 font-black tracking-widest uppercase">
+                          {fix.projectName} // {new Date(fix.createdAt).toLocaleTimeString()}
+                        </span>
+                      </div>
+                      <h4 className="font-bold text-white text-lg tracking-tight mb-3">{fix.errorMessage?.split('\n')[0]}</h4>
                       <div className="text-xs text-gray-400 font-medium italic border-l-2 border-blue-500/30 pl-4 py-1">
-                        "{fix.mentalModel}"
+                        "{fix.fixDescription?.substring(0, 150)}..."
                       </div>
                     </div>
                   </div>
@@ -161,23 +324,23 @@ const App: React.FC = () => {
 
           {activeView === AppState.INSIGHTS && (
             <div className="p-10">
-              <h2 className="text-4xl font-black text-white italic mb-12 border-b-4 border-blue-600 inline-block pr-12">SYSTEM_TELEMETRY</h2>
+              <h2 className="text-4xl font-black text-white italic mb-12 border-b-4 border-blue-600 inline-block pr-12 uppercase tracking-tighter">KB_ANALYTICS</h2>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-0 border border-[#30363d] mb-12 shadow-[8px_8px_0px_0px_#000]">
                 <div className="p-10 border-r border-[#30363d] bg-[#161b22]">
-                  <p className="text-[10px] font-black text-blue-500 uppercase tracking-widest mb-6">RECOVERY_DELTA</p>
+                  <p className="text-[10px] font-black text-blue-500 uppercase tracking-widest mb-6">Development Output</p>
                   <p className="text-7xl font-black text-white tracking-tighter">{stats.timeSavedHours}h</p>
-                  <p className="text-[9px] text-gray-600 mt-4 font-bold uppercase">ACCUMULATED_MAN_HOURS</p>
+                  <p className="text-[9px] text-gray-600 mt-4 font-bold uppercase tracking-widest">ESTIMATED_RECOVERY_TIME</p>
                 </div>
                 <div className="p-10 border-r border-[#30363d] bg-[#161b22]">
-                  <p className="text-[10px] font-black text-purple-500 uppercase tracking-widest mb-6">WISDOM_DENSITY</p>
+                  <p className="text-[10px] font-black text-purple-500 uppercase tracking-widest mb-6">Engineering Wisdom</p>
                   <p className="text-7xl font-black text-white tracking-tighter">{stats.totalFixes}</p>
-                  <p className="text-[9px] text-gray-600 mt-4 font-bold uppercase">BLOCKS_INDEXED</p>
+                  <p className="text-[9px] text-gray-600 mt-4 font-bold uppercase tracking-widest">KNOWLEDGE_BLOCKS_STORED</p>
                 </div>
                 <div className="p-10 bg-blue-600/5">
-                  <p className="text-[10px] font-black text-green-500 uppercase tracking-widest mb-6">RECALL_PRECISION</p>
+                  <p className="text-[10px] font-black text-green-500 uppercase tracking-widest mb-6">Detection Accuracy</p>
                   <p className="text-7xl font-black text-white tracking-tighter">{stats.accuracyRate}%</p>
-                  <p className="text-[9px] text-gray-600 mt-4 font-bold uppercase">VERIFIED_HIT_RATE</p>
+                  <p className="text-[9px] text-gray-600 mt-4 font-bold uppercase tracking-widest">PATTERN_VERIFICATION_RATE</p>
                 </div>
               </div>
             </div>
