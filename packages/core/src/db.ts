@@ -13,7 +13,7 @@ async function getDb(): Promise<Db> {
   const uri = process.env.MONGODB_URI;
   if (!uri) throw new Error('MONGODB_URI is not set. Add it to ~/.devbrain/.env');
   client = new MongoClient(uri, {
-    serverApi: { version: ServerApiVersion.v1, strict: true, deprecationErrors: true },
+    serverApi: { version: ServerApiVersion.v1, strict: false, deprecationErrors: true },
   });
   await client.connect();
   _db = client.db('devbrain');
