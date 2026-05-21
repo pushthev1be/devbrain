@@ -1,4 +1,4 @@
-import { MongoClient, Db } from 'mongodb';
+import { MongoClient, Db, ServerApiVersion } from 'mongodb';
 import { join } from 'path';
 import { homedir } from 'os';
 import type { Entry, Project } from './types';
@@ -12,7 +12,9 @@ async function getDb(): Promise<Db> {
   if (_db) return _db;
   const uri = process.env.MONGODB_URI;
   if (!uri) throw new Error('MONGODB_URI is not set. Add it to ~/.devbrain/.env');
-  client = new MongoClient(uri);
+  client = new MongoClient(uri, {
+    serverApi: { version: ServerApiVersion.v1, strict: true, deprecationErrors: true },
+  });
   await client.connect();
   _db = client.db('devbrain');
   await _db.collection('projects').createIndex({ path: 1 }, { unique: true });
@@ -132,6 +134,44 @@ export async function supersedeEntry(oldId: string, newId: string): Promise<void
     { id: oldId },
     { $set: { supersededBy: newId, supersededAt: Date.now() } }
   );
+}
+
+// ── atlas vector search ───────────────────────────────────────────────────────
+
+export async function vectorSearch(
+  queryEmbedding: number[],
+  opts: { topK?: number; projectId?: string } = {}
+): Promise<(Entry & { project: Project; vectorScore: number })[]> {
+  const { topK = 10, projectId } = opts;
+  const db = await getDb();
+
+  const pipeline: object[] = [
+    {
+      $vectorSearch: {
+        index: 'embedding_index',
+        path: 'embedding',
+        queryVector: queryEmbedding,
+        numCandidates: topK * 10,
+        limit: topK,
+        ...(projectId ? { filter: { projectId } } : {}),
+      },
+    },
+    { $addFields: { vectorScore: { $meta: 'vectorSearchScore' } } },
+    {
+      $lookup: {
+        from: 'projects',
+        localField: 'projectId',
+        foreignField: 'id',
+        as: '_proj',
+      },
+    },
+    { $match: { '_proj.0': { $exists: true } } },
+    { $addFields: { project: { $arrayElemAt: ['$_proj', 0] } } },
+    { $unset: ['_id', '_proj', 'project._id'] },
+  ];
+
+  const docs = await db.collection('entries').aggregate(pipeline).toArray();
+  return docs as unknown as (Entry & { project: Project; vectorScore: number })[];
 }
 
 // ── misc ──────────────────────────────────────────────────────────────────────

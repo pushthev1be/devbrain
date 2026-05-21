@@ -11,7 +11,7 @@ import {
   getRepoRoot, getProjectName, detectStack,
   getEmbedding, similarityLabel, timeAgo,
   buildContext, compressContext, formatContext,
-  bumpRetrievalCounts, preciseSearch,
+  bumpRetrievalCounts, preciseSearch, vectorSearch,
 } from '@devbrain/core';
 import type { EntryCategory } from '@devbrain/core';
 import type { Entry } from '@devbrain/core';
@@ -220,9 +220,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       };
       const searchText     = error_pattern ? `${query} ${error_pattern}` : query;
       const queryEmbedding = await getEmbedding(searchText);
-      const all            = await getAllEntriesWithProjects();
-      const results        = preciseSearch(searchText, queryEmbedding, all, {
-        category, topK: 6, threshold: 0.55,
+
+      // Atlas Vector Search — fast ANN retrieval, then re-rank with preciseSearch
+      let candidates;
+      try {
+        candidates = await vectorSearch(queryEmbedding, { topK: 20 });
+      } catch {
+        // fallback to in-memory if index not ready
+        candidates = await getAllEntriesWithProjects();
+      }
+
+      const results = preciseSearch(searchText, queryEmbedding, candidates, {
+        category, topK: 6, threshold: 0.45,
       });
 
       if (results.length === 0) {
