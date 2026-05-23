@@ -2,8 +2,10 @@
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
+import { createServer } from 'http';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import {
   getProjectByPath, upsertProject, insertEntry,
@@ -374,5 +376,44 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   }
 });
 
-const transport = new StdioServerTransport();
-server.connect(transport).catch(console.error);
+(async () => {
+  const PORT = process.env.PORT ? parseInt(process.env.PORT) : null;
+
+  if (PORT) {
+    // HTTP mode — Cloud Run
+    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+    await server.connect(transport);
+
+    const httpServer = createServer(async (req, res) => {
+      if (req.method === 'GET' && req.url === '/health') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ status: 'ok', service: 'devbrain-mcp' }));
+        return;
+      }
+      if (req.url === '/mcp') {
+        let body = '';
+        req.on('data', chunk => { body += chunk; });
+        req.on('end', async () => {
+          try {
+            const parsed = body ? JSON.parse(body) : undefined;
+            await transport.handleRequest(req, res, parsed);
+          } catch {
+            res.writeHead(400);
+            res.end('Bad request');
+          }
+        });
+        return;
+      }
+      res.writeHead(404);
+      res.end('Not found');
+    });
+
+    httpServer.listen(PORT, '0.0.0.0', () => {
+      console.log(`DevBrain MCP server listening on port ${PORT}`);
+    });
+  } else {
+    // stdio mode — local Claude Code
+    const transport = new StdioServerTransport();
+    await server.connect(transport);
+  }
+})();
