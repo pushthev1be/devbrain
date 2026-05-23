@@ -21,7 +21,7 @@ import { homedir } from 'os';
 // Load key from ~/.devbrain/.env if not already in environment
 const globalEnvPath = join(homedir(), '.devbrain', '.env');
 if (!process.env.GEMINI_API_KEY && existsSync(globalEnvPath)) {
-  const lines = readFileSync(globalEnvPath, 'utf-8').split('\n');
+  const lines = readFileSync(globalEnvPath, 'utf-8').replace(/^﻿/, '').split('\n');
   for (const line of lines) {
     const [key, ...rest] = line.split('=');
     if (key?.trim() && rest.length) process.env[key.trim()] = rest.join('=').trim();
