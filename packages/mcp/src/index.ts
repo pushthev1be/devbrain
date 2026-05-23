@@ -2,8 +2,10 @@
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
+import { createServer } from 'http';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import {
   getProjectByPath, upsertProject, insertEntry,
@@ -11,7 +13,7 @@ import {
   getRepoRoot, getProjectName, detectStack,
   getEmbedding, similarityLabel, timeAgo,
   buildContext, compressContext, formatContext,
-  bumpRetrievalCounts, preciseSearch,
+  bumpRetrievalCounts, preciseSearch, vectorSearch,
 } from '@devbrain/core';
 import type { EntryCategory } from '@devbrain/core';
 import type { Entry } from '@devbrain/core';
@@ -220,9 +222,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       };
       const searchText     = error_pattern ? `${query} ${error_pattern}` : query;
       const queryEmbedding = await getEmbedding(searchText);
-      const all            = await getAllEntriesWithProjects();
-      const results        = preciseSearch(searchText, queryEmbedding, all, {
-        category, topK: 6, threshold: 0.55,
+
+      // Atlas Vector Search — fast ANN retrieval, then re-rank with preciseSearch
+      let candidates;
+      try {
+        candidates = await vectorSearch(queryEmbedding, { topK: 20 });
+      } catch {
+        // fallback to in-memory if index not ready
+        candidates = await getAllEntriesWithProjects();
+      }
+
+      const results = preciseSearch(searchText, queryEmbedding, candidates, {
+        category, topK: 6, threshold: 0.45,
       });
 
       if (results.length === 0) {
@@ -365,5 +376,44 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   }
 });
 
-const transport = new StdioServerTransport();
-server.connect(transport).catch(console.error);
+(async () => {
+  const PORT = process.env.PORT ? parseInt(process.env.PORT) : null;
+
+  if (PORT) {
+    // HTTP mode — Cloud Run
+    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+    await server.connect(transport);
+
+    const httpServer = createServer(async (req, res) => {
+      if (req.method === 'GET' && req.url === '/health') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ status: 'ok', service: 'devbrain-mcp' }));
+        return;
+      }
+      if (req.url === '/mcp') {
+        let body = '';
+        req.on('data', chunk => { body += chunk; });
+        req.on('end', async () => {
+          try {
+            const parsed = body ? JSON.parse(body) : undefined;
+            await transport.handleRequest(req, res, parsed);
+          } catch {
+            res.writeHead(400);
+            res.end('Bad request');
+          }
+        });
+        return;
+      }
+      res.writeHead(404);
+      res.end('Not found');
+    });
+
+    httpServer.listen(PORT, '0.0.0.0', () => {
+      console.log(`DevBrain MCP server listening on port ${PORT}`);
+    });
+  } else {
+    // stdio mode — local Claude Code
+    const transport = new StdioServerTransport();
+    await server.connect(transport);
+  }
+})();
