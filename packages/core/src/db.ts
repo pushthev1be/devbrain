@@ -126,6 +126,16 @@ export async function bumpRetrievalCounts(ids: string[], fromProjectId?: string)
   };
   if (fromProjectId) update.$addToSet = { seenInProjects: fromProjectId };
   await db.collection('entries').updateMany({ id: { $in: ids } }, update);
+
+  // Upgrade confidence tier for entries that crossed a threshold
+  await db.collection('entries').updateMany(
+    { id: { $in: ids }, retrievalCount: { $gte: 3 }, confidence: { $ne: 'confirmed' } },
+    { $set: { confidence: 'confirmed' } }
+  );
+  await db.collection('entries').updateMany(
+    { id: { $in: ids }, retrievalCount: { $gte: 2, $lt: 3 }, confidence: 'observation' },
+    { $set: { confidence: 'corroborated' } }
+  );
 }
 
 export async function supersedeEntry(oldId: string, newId: string): Promise<void> {
@@ -172,6 +182,11 @@ export async function vectorSearch(
 
   const docs = await db.collection('entries').aggregate(pipeline).toArray();
   return docs as unknown as (Entry & { project: Project; vectorScore: number })[];
+}
+
+export async function deleteEntry(id: string): Promise<void> {
+  const db = await getDb();
+  await db.collection('entries').deleteOne({ id });
 }
 
 // ── misc ──────────────────────────────────────────────────────────────────────

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import 'dotenv/config';
 import { join } from 'path';
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync } from 'fs';
 import {
   getProjectByPath, upsertProject, insertEntry,
   getEntriesByProject, getAllEntriesWithProjects,
@@ -12,11 +12,11 @@ import {
   findSimilar, similarityLabel, timeAgo, RateLimitError,
   buildContext, formatContext,
   reinforceEntry, bumpRetrievalCounts, supersedeEntry,
-  preciseSearch, classifyQuery, recapSession,
+  preciseSearch, classifyQuery, recapSession, deleteEntry,
 } from '@devbrain/core';
 import type { Entry, Project, EntryCategory } from '@devbrain/core';
 import { nanoid } from 'nanoid';
-import { homedir } from 'os';
+import { homedir, tmpdir } from 'os';
 
 // Load key from ~/.devbrain/.env if not already in environment
 const globalEnvPath = join(homedir(), '.devbrain', '.env');
@@ -164,6 +164,78 @@ async function handleInit(): Promise<void> {
     } else {
       console.log(`  ${YELLOW}⚠${RESET}  Not a git repo — add notes manually`);
     }
+
+    // Write CLAUDE.md so Claude Code calls DevBrain tools automatically
+    const claudeMdPath = join(repoRoot, 'CLAUDE.md');
+    const devbrainBlock = [
+      '## DevBrain Memory',
+      '',
+      '> DevBrain is an **installed CLI tool** (`devbrain` npm package). DO NOT reimplement',
+      '> or recreate it. Run `devbrain --help` to verify. All commands below are real shell',
+      '> commands — invoke them with Bash/PowerShell, do not write code that mimics them.',
+      '',
+      `Project: ${name}  |  Stack: ${stack.join(', ') || 'Unknown'}`,
+      '',
+      '### Before every task — run these shell commands',
+      '```',
+      '# Load ranked project history before writing any code:',
+      `devbrain context`,
+      '',
+      '# If working on a specific topic:',
+      `devbrain context <topic>`,
+      '',
+      '# Before debugging an error — search with exact error text:',
+      `devbrain search "<error message or symptom>"`,
+      '```',
+      '',
+      '### While working — save automatically, without being asked',
+      '```',
+      '# After fixing a bug, making a decision, or learning something:',
+      `devbrain note "fix: <what you fixed and how"`,
+      `devbrain note "decision: <what you decided and why"`,
+      `devbrain note "lesson: <what you learned the hard way"`,
+      '```',
+      '',
+      '### Rules',
+      '- Run `devbrain context` before starting any non-trivial task — no exceptions.',
+      '- Run `devbrain search` before debugging any error you have not seen before.',
+      '- Save after fixing or deciding — do not wait until end of session.',
+      '- **Never reimplement devbrain** — if the binary is missing, run `npm install -g devbrain`.',
+      '',
+    ].join('\n');
+
+    const marker = '## DevBrain Memory';
+    if (!existsSync(claudeMdPath)) {
+      writeFileSync(claudeMdPath, devbrainBlock, 'utf-8');
+      console.log(`  ${GREEN}✓${RESET} Created CLAUDE.md — Claude will call DevBrain automatically`);
+    } else {
+      const existing = readFileSync(claudeMdPath, 'utf-8');
+      if (!existing.includes(marker)) {
+        writeFileSync(claudeMdPath, existing.trimEnd() + '\n\n' + devbrainBlock, 'utf-8');
+        console.log(`  ${GREEN}✓${RESET} Updated CLAUDE.md — DevBrain block appended`);
+      } else {
+        console.log(`  ${DIM}CLAUDE.md already has DevBrain block — skipped${RESET}`);
+      }
+    }
+    // Print MCP server config so Claude Code sees devbrain tools natively
+    const W2  = Math.min(process.stdout.columns || 80, 80);
+    const bar2 = `${DIM}${'─'.repeat(W2)}${RESET}`;
+    console.log(bar2);
+    console.log(`\n  ${BOLD}${CYAN}Connect DevBrain to Claude Code${RESET}  ${DIM}(one-time setup per machine)${RESET}\n`);
+    console.log(`  Add this to your Claude Code MCP settings so Claude calls DevBrain`);
+    console.log(`  tools automatically — without needing to be asked:\n`);
+    console.log(`${CYAN}  ┌─ ~/.claude/claude_desktop_config.json ─────────────────────────────┐${RESET}`);
+    console.log(`  ${DIM}{${RESET}`);
+    console.log(`    ${DIM}"mcpServers": {${RESET}`);
+    console.log(`      ${CYAN}"devbrain"${RESET}${DIM}: {${RESET}`);
+    console.log(`        ${CYAN}"type"${RESET}${DIM}: ${RESET}${GREEN}"http"${RESET}${DIM},${RESET}`);
+    console.log(`        ${CYAN}"url"${RESET}${DIM}: ${RESET}${GREEN}"https://devbrain-715714057208.us-central1.run.app/mcp"${RESET}`);
+    console.log(`      ${DIM}}${RESET}`);
+    console.log(`    ${DIM}}${RESET}`);
+    console.log(`  ${DIM}}${RESET}`);
+    console.log(`${CYAN}  └────────────────────────────────────────────────────────────────────┘${RESET}\n`);
+    console.log(`  ${DIM}Or in Claude Code: Settings → MCP Servers → Add → paste the URL above${RESET}\n`);
+    console.log(bar2);
     console.log();
 
     if (isNew) {
@@ -492,7 +564,7 @@ async function handleContext(query?: string): Promise<void> {
 
   s?.stop();
 
-  const ctx  = buildContext(all, project ?? null, queryEmbedding);
+  const ctx  = buildContext(all, project ?? null, queryEmbedding, query);
   const text = formatContext(ctx, query);
 
   const retrievedIds = [
@@ -583,13 +655,17 @@ async function handleBrowse(inquirer: unknown): Promise<void> {
       { name: `${DIM}← Back${RESET}`, value: -1 },
     ];
 
-    const { idx } = await inq.prompt([{
-      type: 'list',
-      name: 'idx',
-      message: `Browse  ${dim(sorted.length + ' entries')}`,
-      choices,
-      pageSize: 14,
-    }]);
+    let idx: number;
+    try {
+      const res = await inq.prompt([{
+        type: 'list',
+        name: 'idx',
+        message: `Browse  ${dim(sorted.length + ' entries')}`,
+        choices,
+        pageSize: 14,
+      }]);
+      idx = res.idx;
+    } catch { break; }
 
     if (idx === -1) { browsing = false; break; }
 
@@ -605,12 +681,16 @@ async function handleBrowse(inquirer: unknown): Promise<void> {
       { name: `${DIM}Main menu${RESET}`, value: 'menu' },
     ];
 
-    const { next } = await inq.prompt([{
-      type: 'list',
-      name: 'next',
-      message: 'What next?',
-      choices: actionChoices,
-    }]);
+    let next: string;
+    try {
+      const res = await inq.prompt([{
+        type: 'list',
+        name: 'next',
+        message: 'What next?',
+        choices: actionChoices,
+      }]);
+      next = res.next;
+    } catch { break; }
 
     if (next === 'menu') { browsing = false; }
     else if (next === 'open-image') {
@@ -619,6 +699,49 @@ async function handleBrowse(inquirer: unknown): Promise<void> {
     }
     else { clr(); }
   }
+}
+
+async function handleDelete(inquirer: unknown): Promise<void> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const inq = inquirer as any;
+  const all = await getAllEntriesWithProjects();
+  const active = all.filter(e => !e.supersededBy).sort((a, b) => b.createdAt - a.createdAt);
+
+  if (active.length === 0) {
+    console.log(`\n  ${YELLOW}No entries to delete.${RESET}\n`);
+    return;
+  }
+
+  let idx: number;
+  try {
+    const choices = [
+      ...active.map((e, i) => ({
+        name: `${typeCode(e.type)}[${e.type}]${RESET} ${e.title.slice(0, 55).padEnd(56)} ${dim(e.project.name + ' · ' + timeAgo(e.createdAt))}`,
+        value: i,
+      })),
+      { name: `${DIM}← Cancel${RESET}`, value: -1 },
+    ];
+    const res = await inq.prompt([{ type: 'list', name: 'idx', message: 'Select entry to delete:', choices, pageSize: 14 }]);
+    idx = res.idx;
+  } catch { return; }
+
+  if (idx === -1) return;
+  const selected = active[idx];
+
+  console.log(`\n  ${RED}${BOLD}${selected.title.slice(0, 80)}${RESET}`);
+  console.log(`  ${DIM}[${selected.type}] · ${selected.project.name} · ${timeAgo(selected.createdAt)}${RESET}\n`);
+
+  try {
+    const { confirm } = await inq.prompt([{
+      type: 'confirm', name: 'confirm',
+      message: 'Delete this entry?',
+      default: false, prefix: ' ',
+    }]);
+    if (!confirm) { console.log(`  ${DIM}Cancelled.${RESET}\n`); return; }
+  } catch { return; }
+
+  await deleteEntry(selected.id);
+  console.log(`  ${GREEN}✓${RESET} Deleted\n`);
 }
 
 // ─── interactive mode ─────────────────────────────────────────────────────────
@@ -706,14 +829,22 @@ async function handleRecap(sessionText?: string): Promise<void> {
     // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-explicit-any
     const _inq: any = require('inquirer');
     const inq = typeof _inq.prompt === 'function' ? _inq : _inq.default;
-    console.log(`\n  ${BOLD}${CYAN}Session Recap${RESET}  ${DIM}paste your chat / notes below, then submit${RESET}`);
-    console.log(`  ${DIM}(tip: copy the Claude Code conversation, paste it here)${RESET}\n`);
-    const { raw } = await inq.prompt([{
-      type: 'editor',
-      name: 'raw',
-      message: 'Paste session content:',
-    }]);
-    text = raw?.trim() ?? '';
+    const tmpFile = join(tmpdir(), `devbrain-recap-${Date.now()}.txt`);
+    writeFileSync(tmpFile, '', 'utf-8');
+    openPath(tmpFile);
+    console.log(`\n  ${BOLD}${CYAN}Session Recap${RESET}`);
+    console.log(`  ${DIM}Your editor just opened. Paste the session transcript, save, and close it.${RESET}`);
+    console.log(`  ${DIM}(Windows: Ctrl+S then close Notepad · Mac/Linux: save and quit)${RESET}\n`);
+    try {
+      await inq.prompt([{ type: 'input', name: '_', message: 'Press Enter when done:', prefix: ' ' }]);
+    } catch { return; }
+    try {
+      text = readFileSync(tmpFile, 'utf-8').trim();
+    } catch {
+      console.log(`  ${YELLOW}Could not read temp file.${RESET}\n`);
+      return;
+    }
+    try { unlinkSync(tmpFile); } catch {}
   }
 
   if (!text) {
@@ -869,7 +1000,7 @@ async function runOnboarding(): Promise<void> {
   console.log(`\n  ${GREEN}${BOLD}DevBrain is ready.${RESET}\n`);
 
   console.log(`  ${BOLD}Where your data lives${RESET}`);
-  console.log(`  ${DIM}Database  ${RESET}${join(devbrainDir, 'db.json')}`);
+  console.log(`  ${DIM}Database  ${RESET}MongoDB Atlas (MONGODB_URI in ${join(devbrainDir, '.env')})`);
   console.log(`  ${DIM}Exports   ${RESET}${join(devbrainDir, '<project>-export.zip')}`);
   console.log(`  ${DIM}API key   ${RESET}${join(devbrainDir, '.env')}\n`);
 
@@ -880,20 +1011,19 @@ async function runOnboarding(): Promise<void> {
 
   console.log(`${DIM}${'─'.repeat(W)}${RESET}\n`);
 
-  const { goNow } = await inq.prompt([{
-    type: 'confirm', name: 'goNow',
-    message: 'Open DevBrain now?',
-    default: true, prefix: ' ',
-  }]);
-
   markOnboarded();
 
-  if (!goNow) {
-    console.log(`\n  ${DIM}Run ${CYAN}devbrain${DIM} anytime to start.${RESET}\n`);
-    process.exit(0);
-  }
+  let goNow = true;
+  try {
+    const res = await inq.prompt([{
+      type: 'confirm', name: 'goNow',
+      message: 'Open DevBrain now?',
+      default: true, prefix: ' ',
+    }]);
+    goNow = res.goNow;
+  } catch { goNow = false; }
 
-  clr();
+  if (goNow) clr();
 }
 
 // ─── interactive REPL ────────────────────────────────────────────────────────
@@ -903,6 +1033,7 @@ const COMMANDS = [
   { value: '/context', desc: 'Inject ranked context for AI agents'                },
   { value: '/browse',  desc: 'Scroll through all saved entries'                   },
   { value: '/save',    desc: 'Save entry  (bug: fix: stack: decision: image: ...)'},
+  { value: '/delete',  desc: 'Delete an entry'                                    },
   { value: '/recap',   desc: 'AI-extract + save knowledge from a session'         },
   { value: '/prompt',  desc: 'Generate Claude Code CLAUDE.md + ingestion prompt'  },
   { value: '/summary', desc: 'Project name, stack and recent entries'             },
@@ -920,8 +1051,10 @@ async function runCommand(cmd: string, arg: string, inquirer: unknown): Promise<
     case '/search': {
       let q = arg;
       if (!q) {
-        const { query } = await inq.prompt([{ type: 'input', name: 'query', message: '🔍 Search:' }]);
-        q = query;
+        try {
+          const { query } = await inq.prompt([{ type: 'input', name: 'query', message: '🔍 Search:' }]);
+          q = query;
+        } catch { return true; }
       }
       await handleSearch(q);
       break;
@@ -934,19 +1067,22 @@ async function runCommand(cmd: string, arg: string, inquirer: unknown): Promise<
       let text = arg;
       if (!text) {
         process.stdout.write(`  ${DIM}Prefixes: bug: fix: stack: decision: pattern: lesson:${RESET}\n`);
-        const { note } = await inq.prompt([{ type: 'input', name: 'note', message: '📝 Save:' }]);
-        text = note;
+        try {
+          const { note } = await inq.prompt([{ type: 'input', name: 'note', message: '📝 Save:' }]);
+          text = note;
+        } catch { return true; }
       }
       await handleNote(text, inq);
       break;
     }
-    case '/summary': await handleSummary();  break;
-    case '/export':  await handleExport();   break;
-    case '/prompt':  await handlePrompt();   break;
-    case '/recap':   await handleRecap();    break;
-    case '/open':    await handleOpen();     break;
-    case '/init':    await handleInit();     break;
-    case '/browse':  await handleBrowse(inq); break;
+    case '/delete':  await handleDelete(inq);  break;
+    case '/summary': await handleSummary();    break;
+    case '/export':  await handleExport();     break;
+    case '/prompt':  await handlePrompt();     break;
+    case '/recap':   await handleRecap();      break;
+    case '/open':    await handleOpen();       break;
+    case '/init':    await handleInit();       break;
+    case '/browse':  await handleBrowse(inq);  break;
     case '/clear':   clr(); await printProjectContext(); break;
     case '/exit': case '/quit':
       console.log(`  ${DIM}See you later.${RESET}\n`);
@@ -1047,12 +1183,19 @@ async function handleInteractive(): Promise<void> {
     if (submitted.startsWith('__cmd__')) {
       const cmd = submitted.slice(7);
       const sp  = cmd.indexOf(' ');
-      await runCommand(sp === -1 ? cmd : cmd.slice(0, sp), sp === -1 ? '' : cmd.slice(sp + 1), inquirer);
+      try {
+        await runCommand(sp === -1 ? cmd : cmd.slice(0, sp), sp === -1 ? '' : cmd.slice(sp + 1), inquirer);
+      } catch { /* ESC in sub-prompt — back to main */ }
     } else if (submitted.startsWith('__save__')) {
-      await handleNote(submitted.slice(8), inquirer);
-      entryPool = await getAllEntriesWithProjects();
+      try {
+        await handleNote(submitted.slice(8), inquirer);
+        entryPool = await getAllEntriesWithProjects();
+        console.log(`  ${DIM}Memory: ${entryPool.length} entries${RESET}\n`);
+      } catch { /* ESC */ }
     } else if (submitted.startsWith('__search__')) {
-      await handleSearch(submitted.slice(10));
+      try {
+        await handleSearch(submitted.slice(10));
+      } catch { /* ESC */ }
     }
   }
 }
