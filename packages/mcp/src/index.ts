@@ -301,7 +301,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         try { queryEmbedding = await getEmbedding(query); } catch {}
       }
 
-      const raw  = buildContext(all, project ?? null, queryEmbedding);
+      const raw  = buildContext(all, project ?? null, queryEmbedding, query);
       const ctx  = await compressContext(raw);
       const text = formatContext(ctx, query);
 
@@ -332,7 +332,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (project_path) {
           const root = getRepoRoot(project_path) ?? project_path;
           const proj = all.find(x => x.project.path === root);
-          if (proj && e.projectId !== proj.projectId) return false;
+          if (proj && e.projectId !== proj.project.id) return false;
         }
         return true;
       });
@@ -381,31 +381,199 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
   if (PORT) {
     // HTTP mode — Cloud Run
-    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-    await server.connect(transport);
 
-    const httpServer = createServer(async (req, res) => {
-      if (req.method === 'GET' && req.url === '/health') {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ status: 'ok', service: 'devbrain-mcp' }));
-        return;
-      }
-      if (req.url === '/mcp') {
+    function json(res: import('http').ServerResponse, status: number, data: unknown) {
+      res.writeHead(status, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+      res.end(JSON.stringify(data));
+    }
+
+    function readBody(req: import('http').IncomingMessage): Promise<unknown> {
+      return new Promise((resolve, reject) => {
         let body = '';
         req.on('data', chunk => { body += chunk; });
-        req.on('end', async () => {
-          try {
-            const parsed = body ? JSON.parse(body) : undefined;
-            await transport.handleRequest(req, res, parsed);
-          } catch {
-            res.writeHead(400);
-            res.end('Bad request');
-          }
-        });
+        req.on('end', () => { try { resolve(body ? JSON.parse(body) : {}); } catch { reject(new Error('Invalid JSON')); } });
+      });
+    }
+
+    const BASE_URL = `https://devbrain-715714057208.us-central1.run.app`;
+
+    const OPENAPI_SPEC = {
+      openapi: '3.0.0',
+      info: { title: 'DevBrain API', version: '1.0.0', description: 'Developer knowledge base — search past bugs, decisions, and patterns across projects.' },
+      servers: [{ url: BASE_URL }],
+      paths: {
+        '/api/search': {
+          post: {
+            operationId: 'searchKnowledge',
+            summary: 'Search past bugs, fixes, decisions, and patterns',
+            requestBody: {
+              required: true,
+              content: { 'application/json': { schema: { type: 'object', required: ['query'], properties: {
+                query: { type: 'string', description: 'Natural language description of the problem' },
+                category: { type: 'string', enum: ['auth','database','deployment','build','config','network','performance','ui','data','testing','security','other'] },
+              } } } },
+            },
+            responses: { '200': { description: 'Search results', content: { 'application/json': { schema: { type: 'object', properties: {
+              text: { type: 'string', description: 'Human-readable search results summary' },
+              results: { type: 'array', items: { type: 'object', properties: {
+                type: { type: 'string' }, title: { type: 'string' }, content: { type: 'string' },
+                project: { type: 'string' }, match: { type: 'string' },
+              } } },
+            } } } } } },
+          },
+        },
+        '/api/save': {
+          post: {
+            operationId: 'saveEntry',
+            summary: 'Save a knowledge entry (bug, fix, decision, pattern, lesson, etc.)',
+            requestBody: {
+              required: true,
+              content: { 'application/json': { schema: { type: 'object', required: ['type', 'title', 'content'], properties: {
+                type: { type: 'string', enum: ['bug','fix','decision','pattern','lesson','stack','solution','note','anti-pattern'] },
+                title: { type: 'string', description: 'One-line summary (max 120 chars)' },
+                content: { type: 'string', description: 'Full explanation or solution' },
+                tags: { type: 'array', items: { type: 'string' } },
+                category: { type: 'string', enum: ['auth','database','deployment','build','config','network','performance','ui','data','testing','security','other'] },
+              } } } },
+            },
+            responses: { '200': { description: 'Saved confirmation', content: { 'application/json': { schema: { type: 'object', properties: {
+              text: { type: 'string', description: 'Confirmation message' },
+              saved: { type: 'boolean' },
+            } } } } } },
+          },
+        },
+        '/api/context': {
+          post: {
+            operationId: 'getContext',
+            summary: 'Get ranked historical context before starting a task',
+            requestBody: {
+              required: false,
+              content: { 'application/json': { schema: { type: 'object', properties: {
+                query: { type: 'string', description: 'Optional topic to focus context' },
+              } } } },
+            },
+            responses: { '200': { description: 'Ranked context', content: { 'application/json': { schema: { type: 'object', properties: {
+              text: { type: 'string', description: 'Ranked context as formatted text' },
+              context: { type: 'string' },
+            } } } } } },
+          },
+        },
+      },
+    };
+
+    const httpServer = createServer(async (req, res) => {
+      const url = req.url?.split('?')[0];
+
+      if (req.method === 'OPTIONS') {
+        res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' });
+        res.end(); return;
+      }
+
+      if (req.method === 'GET' && url === '/health') {
+        json(res, 200, { status: 'ok', service: 'devbrain-mcp' }); return;
+      }
+
+      if (req.method === 'GET' && url === '/openapi.json') {
+        json(res, 200, OPENAPI_SPEC); return;
+      }
+
+      // ── REST API for Agent Builder ─────────────────────────────────────────
+      if (url === '/api/search' && req.method === 'POST') {
+        try {
+          const { query, category, error_pattern } = await readBody(req) as { query: string; category?: EntryCategory; error_pattern?: string };
+          if (!query) { json(res, 400, { error: 'query is required' }); return; }
+          const searchText = error_pattern ? `${query} ${error_pattern}` : query;
+          const queryEmbedding = await getEmbedding(searchText);
+          let candidates;
+          try { candidates = await vectorSearch(queryEmbedding, { topK: 20 }); }
+          catch { candidates = await getAllEntriesWithProjects(); }
+          const results = preciseSearch(searchText, queryEmbedding, candidates, { category, topK: 6, threshold: 0.45 });
+          await bumpRetrievalCounts(results.map(r => r.entry.id));
+          const mapped = results.map(r => ({
+            type: r.entry.type, title: r.entry.title, content: r.entry.content,
+            tags: r.entry.tags, project: r.project.name, match: similarityLabel(r.similarity),
+            matchType: r.matchType, createdAt: r.entry.createdAt,
+          }));
+          const text = mapped.length === 0
+            ? `No results found for "${query}"`
+            : mapped.map((r, i) => `${i+1}. [${r.type}] ${r.title}\n   ${r.match} · ${r.project}\n   ${r.content}`).join('\n\n');
+          json(res, 200, { text, results: mapped });
+        } catch (err) { json(res, 500, { error: String(err) }); }
         return;
       }
-      res.writeHead(404);
-      res.end('Not found');
+
+      if (url === '/api/save' && req.method === 'POST') {
+        try {
+          const { type, title, content, tags = [], category, error_pattern, cause_archetype } = await readBody(req) as {
+            type: Entry['type']; title: string; content: string;
+            tags?: string[]; category?: EntryCategory; error_pattern?: string; cause_archetype?: string;
+          };
+          if (!type || !title || !content) { json(res, 400, { error: 'type, title, content are required' }); return; }
+          // Ensure a real project document exists so $lookup aggregation finds these entries
+          const agentProjectId = 'agent-builder';
+          const existing = await getProjectByPath('agent-builder');
+          if (!existing) {
+            await upsertProject({
+              id: agentProjectId, name: 'Agent Builder', path: 'agent-builder',
+              stack: [], createdAt: Date.now(), lastSeen: Date.now(),
+            });
+          } else {
+            await upsertProject({ ...existing, lastSeen: Date.now() });
+          }
+          let embedding: number[] | undefined;
+          try { embedding = await getEmbedding(`${title} ${content} ${tags.join(' ')}`); } catch {}
+          await insertEntry({
+            id: nanoid(), projectId: agentProjectId, type,
+            title: title.slice(0, 120), content, tags,
+            embedding, createdAt: Date.now(), confidence: 'observation',
+            ...(category ? { category } : {}),
+            ...(error_pattern ? { errorPattern: error_pattern } : {}),
+            ...(cause_archetype ? { causeArchetype: cause_archetype } : {}),
+          });
+          json(res, 200, { text: `Saved [${type}]: ${title.slice(0, 80)}`, saved: true, type, title: title.slice(0, 80) });
+        } catch (err) { json(res, 500, { error: String(err) }); }
+        return;
+      }
+
+      if (url === '/api/context' && req.method === 'POST') {
+        try {
+          const { query } = await readBody(req) as { query?: string };
+          const all = await getAllEntriesWithProjects();
+          let queryEmbedding: number[] | undefined;
+          if (query?.trim()) { try { queryEmbedding = await getEmbedding(query); } catch {} }
+          const raw  = buildContext(all, null, queryEmbedding);
+          const ctx  = await compressContext(raw);
+          const text = formatContext(ctx, query);
+          json(res, 200, { text, context: text });
+        } catch (err) { json(res, 500, { error: String(err) }); }
+        return;
+      }
+
+      if (url === '/mcp') {
+        try {
+          // Hono reads rawHeaders, not req.headers — patch rawHeaders directly
+          const rh = req.rawHeaders;
+          let acceptIdx = -1;
+          for (let i = 0; i < rh.length; i += 2) {
+            if (rh[i].toLowerCase() === 'accept') { acceptIdx = i; break; }
+          }
+          const cur = acceptIdx !== -1 ? rh[acceptIdx + 1] : '';
+          if (!cur.includes('application/json') || !cur.includes('text/event-stream')) {
+            if (acceptIdx !== -1) rh[acceptIdx + 1] = 'application/json, text/event-stream';
+            else rh.push('Accept', 'application/json, text/event-stream');
+          }
+          // SDK stateless mode requires a fresh transport per request
+          const mcpTransport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+          await server.connect(mcpTransport);
+          await mcpTransport.handleRequest(req, res);
+        } catch (err) {
+          console.error('MCP transport error:', err);
+          if (!res.headersSent) { res.writeHead(500); res.end('MCP error'); }
+        }
+        return;
+      }
+
+      res.writeHead(404); res.end('Not found');
     });
 
     httpServer.listen(PORT, '0.0.0.0', () => {
