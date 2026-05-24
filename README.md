@@ -35,6 +35,16 @@ echo "GEMINI_API_KEY=your_key_here" > ~/.devbrain/.env
 
 ### Connect to Claude Code
 
+
+
+
+https://github.com/user-attachments/assets/ca8cff35-a53c-4d21-b518-b388f7dbf90e
+
+
+
+
+
+
 Add to `~/.claude/mcp.json`:
 
 ```json
