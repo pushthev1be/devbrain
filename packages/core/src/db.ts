@@ -73,8 +73,16 @@ export async function getAllEntriesWithProjects(): Promise<(Entry & { project: P
         as: '_proj',
       },
     },
-    { $match: { '_proj.0': { $exists: true } } },
-    { $addFields: { project: { $arrayElemAt: ['$_proj', 0] } } },
+    {
+      $addFields: {
+        project: {
+          $ifNull: [
+            { $arrayElemAt: ['$_proj', 0] },
+            { id: '$projectId', name: 'devbrain', path: '', stack: [], createdAt: 0, lastSeen: 0 },
+          ],
+        },
+      },
+    },
     { $unset: ['_id', '_proj', 'project._id'] },
   ]).toArray();
   return docs as unknown as (Entry & { project: Project })[];
@@ -175,8 +183,16 @@ export async function vectorSearch(
         as: '_proj',
       },
     },
-    { $match: { '_proj.0': { $exists: true } } },
-    { $addFields: { project: { $arrayElemAt: ['$_proj', 0] } } },
+    {
+      $addFields: {
+        project: {
+          $ifNull: [
+            { $arrayElemAt: ['$_proj', 0] },
+            { id: '$projectId', name: 'devbrain', path: '', stack: [], createdAt: 0, lastSeen: 0 },
+          ],
+        },
+      },
+    },
     { $unset: ['_id', '_proj', 'project._id'] },
   ];
 
