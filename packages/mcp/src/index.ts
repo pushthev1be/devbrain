@@ -175,6 +175,37 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
   ],
 }));
 
+function saveConfirmation(
+  type: string, title: string,
+  category?: string, causeArchetype?: string, errorPattern?: string
+): string {
+  const cat   = category && category !== 'other' ? ` ${category}` : '';
+  const short = title.slice(0, 65);
+
+  if (type === 'fix') {
+    if (causeArchetype) return `Stored recurring${cat} fix archetype: ${causeArchetype.slice(0, 70)}`;
+    if (errorPattern)   return `Saved new${cat} fix — error pattern stored for future matching`;
+    return `Saved new${cat} fix: ${short}`;
+  }
+  if (type === 'decision')     return `Detected architectural decision: ${short}`;
+  if (type === 'anti-pattern') {
+    if (causeArchetype) return `Stored anti-pattern archetype: ${causeArchetype.slice(0, 70)}`;
+    return `Stored${cat} anti-pattern to avoid: ${short}`;
+  }
+  if (type === 'bug') {
+    if (causeArchetype) return `Stored${cat} bug + root-cause archetype: ${causeArchetype.slice(0, 70)}`;
+    return `Stored${cat} bug: ${short}`;
+  }
+  if (type === 'pattern') return `Captured reusable${cat} pattern: ${short}`;
+  if (type === 'lesson') {
+    if (causeArchetype) return `Stored recurring issue archetype: ${causeArchetype.slice(0, 70)}`;
+    return `Captured hard-won${cat} lesson: ${short}`;
+  }
+  if (type === 'stack')    return `Stack snapshot saved: ${short}`;
+  if (type === 'solution') return `Saved${cat} solution: ${short}`;
+  return `Saved [${type}]${cat ? ' · ' + cat.trim() : ''}: ${short}`;
+}
+
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
 
@@ -210,8 +241,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         ...(cause_archetype ? { causeArchetype: cause_archetype } : {}),
       });
 
+      const confirmation = saveConfirmation(type, title, category, cause_archetype, error_pattern);
       return {
-        content: [{ type: 'text', text: `Saved [${type}] to DevBrain: ${title.slice(0, 80)}` }],
+        content: [{ type: 'text', text: `DevBrain: ${confirmation}` }],
       };
     }
 
@@ -530,7 +562,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             ...(error_pattern ? { errorPattern: error_pattern } : {}),
             ...(cause_archetype ? { causeArchetype: cause_archetype } : {}),
           });
-          json(res, 200, { text: `Saved [${type}]: ${title.slice(0, 80)}`, saved: true, type, title: title.slice(0, 80) });
+          const confirmation = saveConfirmation(type, title, category, cause_archetype, error_pattern);
+          json(res, 200, { text: confirmation, saved: true, type, title: title.slice(0, 80) });
         } catch (err) { json(res, 500, { error: String(err) }); }
         return;
       }
