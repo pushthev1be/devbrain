@@ -217,6 +217,45 @@ async function handleInit(): Promise<void> {
         console.log(`  ${DIM}CLAUDE.md already has DevBrain block — skipped${RESET}`);
       }
     }
+    // Write .claude/settings.json with PostToolUse hook for autonomous saving
+    const clauDirPath      = join(repoRoot, '.claude');
+    const settingsPath     = join(clauDirPath, 'settings.json');
+    const hookCommand      =
+      'echo "DevBrain: if this edit fixed a bug, made a decision, established a ' +
+      'pattern, or learned something — call save_entry via the devbrain MCP tool now"';
+    const hookEntry = {
+      hooks: {
+        PostToolUse: [
+          {
+            matcher: 'Edit|Write',
+            hooks: [{ type: 'command', command: hookCommand }],
+          },
+        ],
+      },
+    };
+
+    if (!existsSync(clauDirPath)) mkdirSync(clauDirPath, { recursive: true });
+    if (!existsSync(settingsPath)) {
+      writeFileSync(settingsPath, JSON.stringify(hookEntry, null, 2), 'utf-8');
+      console.log(`  ${GREEN}✓${RESET} Created .claude/settings.json — saves triggered after every edit`);
+    } else {
+      try {
+        const existing = JSON.parse(readFileSync(settingsPath, 'utf-8'));
+        const alreadyHasHook = JSON.stringify(existing).includes('DevBrain');
+        if (!alreadyHasHook) {
+          existing.hooks ??= {};
+          existing.hooks.PostToolUse ??= [];
+          existing.hooks.PostToolUse.push(...hookEntry.hooks.PostToolUse);
+          writeFileSync(settingsPath, JSON.stringify(existing, null, 2), 'utf-8');
+          console.log(`  ${GREEN}✓${RESET} Updated .claude/settings.json — DevBrain hook added`);
+        } else {
+          console.log(`  ${DIM}.claude/settings.json already has DevBrain hook — skipped${RESET}`);
+        }
+      } catch {
+        console.log(`  ${YELLOW}⚠${RESET}  Could not update .claude/settings.json — check manually`);
+      }
+    }
+
     // Print MCP server config so Claude Code sees devbrain tools natively
     const W2  = Math.min(process.stdout.columns || 80, 80);
     const bar2 = `${DIM}${'─'.repeat(W2)}${RESET}`;
