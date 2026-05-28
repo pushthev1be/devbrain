@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+﻿#!/usr/bin/env node
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
@@ -46,7 +46,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           type: {
             type: 'string',
             enum: ['bug', 'fix', 'decision', 'pattern', 'lesson', 'stack', 'solution', 'note', 'anti-pattern'],
-            description: 'bug=problem found · fix=solution applied · decision=architectural choice · pattern=reusable approach · lesson=learned the hard way · stack=technologies used',
+            description: 'bug=problem found Â· fix=solution applied Â· decision=architectural choice Â· pattern=reusable approach Â· lesson=learned the hard way Â· stack=technologies used',
           },
           title: {
             type: 'string',
@@ -64,7 +64,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           category: {
             type: 'string',
             enum: ['auth','database','deployment','build','config','network','performance','ui','data','testing','security','other'],
-            description: 'Problem category — pick the best fit for precise future retrieval',
+            description: 'Problem category â€” pick the best fit for precise future retrieval',
           },
           error_pattern: {
             type: 'string',
@@ -72,7 +72,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           },
           cause_archetype: {
             type: 'string',
-            description: 'The abstract root-cause pattern transferable across projects — e.g. "environment config divergence on time-dependent values". Include for bugs/anti-patterns when the root cause generalizes beyond this project.',
+            description: 'The abstract root-cause pattern transferable across projects â€” e.g. "environment config divergence on time-dependent values". Include for bugs/anti-patterns when the root cause generalizes beyond this project.',
           },
           project_path: {
             type: 'string',
@@ -87,7 +87,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       description:
         'Search DevBrain for past solutions, bugs, decisions, and patterns across all projects. ' +
         'Call this at the start of a task to check if this problem was solved before. ' +
-        'Pass category and error_pattern when known — enables precise pattern matching, not just semantic similarity.',
+        'Pass category and error_pattern when known â€” enables precise pattern matching, not just semantic similarity.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -95,11 +95,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           category: {
             type: 'string',
             enum: ['auth','database','deployment','build','config','network','performance','ui','data','testing','security','other'],
-            description: 'Problem category if known — boosts relevant results',
+            description: 'Problem category if known â€” boosts relevant results',
           },
           error_pattern: {
             type: 'string',
-            description: 'Exact error message or symptom text if available — enables direct pattern matching',
+            description: 'Exact error message or symptom text if available â€” enables direct pattern matching',
           },
         },
         required: ['query'],
@@ -107,7 +107,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
     {
       name: 'get_project_summary',
-      description: 'Get the stored knowledge summary for a project — stack, entry counts, and recent captures.',
+      description: 'Get the stored knowledge summary for a project â€” stack, entry counts, and recent captures.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -122,7 +122,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       name: 'get_context',
       description:
         'Get ranked historical context from DevBrain to initialize reasoning before starting a task. ' +
-        'Returns past issues, architecture decisions, patterns, and stack notes — deduplicated and weighted ' +
+        'Returns past issues, architecture decisions, patterns, and stack notes â€” deduplicated and weighted ' +
         'by relevance, recency, and project match. Call this at the start of any non-trivial task.',
       inputSchema: {
         type: 'object',
@@ -141,7 +141,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: 'query_entries',
       description:
-        'Directly browse DevBrain entries by type, category, project, or recency — no search query needed. ' +
+        'Directly browse DevBrain entries by type, category, project, or recency â€” no search query needed. ' +
         'Use this when you know the shape of knowledge you want: e.g. all anti-patterns, all auth decisions, ' +
         'all bugs in this project from the last 30 days. Complements search_knowledge (semantic) and get_context (ranked blend).',
       inputSchema: {
@@ -184,7 +184,7 @@ function saveConfirmation(
 
   if (type === 'fix') {
     if (causeArchetype) return `Stored recurring${cat} fix archetype: ${causeArchetype.slice(0, 70)}`;
-    if (errorPattern)   return `Saved new${cat} fix — error pattern stored for future matching`;
+    if (errorPattern)   return `Saved new${cat} fix â€” error pattern stored for future matching`;
     return `Saved new${cat} fix: ${short}`;
   }
   if (type === 'decision')     return `Detected architectural decision: ${short}`;
@@ -203,14 +203,14 @@ function saveConfirmation(
   }
   if (type === 'stack')    return `Stack snapshot saved: ${short}`;
   if (type === 'solution') return `Saved${cat} solution: ${short}`;
-  return `Saved [${type}]${cat ? ' · ' + cat.trim() : ''}: ${short}`;
+  return `Saved [${type}]${cat ? ' Â· ' + cat.trim() : ''}: ${short}`;
 }
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
 
   try {
-    // ── save_entry ─────────────────────────────────────────────────────────────
+    // â”€â”€ save_entry â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     if (name === 'save_entry') {
       const { type, title, content, tags = [], category, error_pattern, cause_archetype, project_path } = args as {
         type: Entry['type']; title: string; content: string;
@@ -247,7 +247,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       };
     }
 
-    // ── search_knowledge ───────────────────────────────────────────────────────
+    // â”€â”€ search_knowledge â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     if (name === 'search_knowledge') {
       const { query, category, error_pattern } = args as {
         query: string; category?: EntryCategory; error_pattern?: string;
@@ -255,7 +255,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const searchText     = error_pattern ? `${query} ${error_pattern}` : query;
       const queryEmbedding = await getEmbedding(searchText);
 
-      // Atlas Vector Search — fast ANN retrieval, then re-rank with preciseSearch
+      // Atlas Vector Search â€” fast ANN retrieval, then re-rank with preciseSearch
       let candidates;
       try {
         candidates = await vectorSearch(queryEmbedding, { topK: 20 });
@@ -280,7 +280,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const catLabel   = r.entry.category ? ` [${r.entry.category}]` : '';
         return (
           `${i + 1}. [${r.entry.type}]${catLabel} ${r.entry.title}\n` +
-          `   ${matchLabel} · ${r.project.name} · ${timeAgo(r.entry.createdAt)}\n` +
+          `   ${matchLabel} Â· ${r.project.name} Â· ${timeAgo(r.entry.createdAt)}\n` +
           (r.entry.errorPattern ? `   pattern: ${r.entry.errorPattern}\n` : '') +
           `   ${r.entry.content}` +
           (r.entry.tags.length ? `\n   tags: ${r.entry.tags.join(', ')}` : '')
@@ -290,7 +290,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return { content: [{ type: 'text', text: `DevBrain results for "${query}":\n\n${text}` }] };
     }
 
-    // ── get_project_summary ────────────────────────────────────────────────────
+    // â”€â”€ get_project_summary â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     if (name === 'get_project_summary') {
       const { project_path } = ((args ?? {}) as { project_path?: string });
       const cwd      = project_path ?? process.cwd();
@@ -313,14 +313,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         `Project: ${project.name}`,
         `Stack:   ${project.stack.join(', ') || 'Unknown'}`,
         `Entries: ${entries.length} total`,
-        `         ${Object.entries(counts).filter(([, n]) => n > 0).map(([t, n]) => `${n} ${t}s`).join(' · ')}`,
+        `         ${Object.entries(counts).filter(([, n]) => n > 0).map(([t, n]) => `${n} ${t}s`).join(' Â· ')}`,
         entries.length ? `\nRecent:\n${recent}` : '',
       ].filter(Boolean).join('\n');
 
       return { content: [{ type: 'text', text: summary }] };
     }
 
-    // ── get_context ────────────────────────────────────────────────────────────
+    // â”€â”€ get_context â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     if (name === 'get_context') {
       const { query, project_path } = ((args ?? {}) as { query?: string; project_path?: string });
       const cwd      = project_path ?? process.cwd();
@@ -346,7 +346,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return { content: [{ type: 'text', text }] };
     }
 
-    // ── query_entries ──────────────────────────────────────────────────────────
+    // â”€â”€ query_entries â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     if (name === 'query_entries') {
       const { type, category, project_path, since_days, limit = 20 } = (args ?? {}) as {
         type?: string; category?: EntryCategory; project_path?: string;
@@ -382,11 +382,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       const text = filtered.map((e, i) => {
         const catLabel  = e.category ? ` [${e.category}]` : '';
-        const conf      = e.confidence && e.confidence !== 'observation' ? ` · ${e.confidence}` : '';
-        const crossBadge = (e.seenInProjects?.length ?? 0) >= 2 ? ` · ×${e.seenInProjects!.length} projects` : '';
+        const conf      = e.confidence && e.confidence !== 'observation' ? ` Â· ${e.confidence}` : '';
+        const crossBadge = (e.seenInProjects?.length ?? 0) >= 2 ? ` Â· Ã—${e.seenInProjects!.length} projects` : '';
         return (
           `${i + 1}. [${e.type}]${catLabel} ${e.title}\n` +
-          `   ${e.project.name} · ${timeAgo(e.createdAt)}${conf}${crossBadge}\n` +
+          `   ${e.project.name} Â· ${timeAgo(e.createdAt)}${conf}${crossBadge}\n` +
           (e.errorPattern   ? `   pattern: ${e.errorPattern}\n`      : '') +
           (e.causeArchetype ? `   archetype: ${e.causeArchetype}\n`   : '') +
           `   ${e.content.slice(0, 200)}` +
@@ -394,7 +394,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         );
       }).join('\n\n');
 
-      const header = `DevBrain entries${type ? ` · type:${type}` : ''}${category ? ` · category:${category}` : ''}${since_days ? ` · last ${since_days}d` : ''} (${filtered.length} results)`;
+      const header = `DevBrain entries${type ? ` Â· type:${type}` : ''}${category ? ` Â· category:${category}` : ''}${since_days ? ` Â· last ${since_days}d` : ''} (${filtered.length} results)`;
       return { content: [{ type: 'text', text: `${header}\n\n${text}` }] };
     }
 
@@ -412,7 +412,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const PORT = process.env.PORT ? parseInt(process.env.PORT) : null;
 
   if (PORT) {
-    // HTTP mode — Cloud Run
+    // HTTP mode â€” Cloud Run
 
     function json(res: import('http').ServerResponse, status: number, data: unknown) {
       res.writeHead(status, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
@@ -431,7 +431,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     const OPENAPI_SPEC = {
       openapi: '3.0.0',
-      info: { title: 'DevBrain API', version: '1.0.0', description: 'Developer knowledge base — search past bugs, decisions, and patterns across projects.' },
+      info: { title: 'DevBrain API', version: '1.0.0', description: 'Developer knowledge base â€” search past bugs, decisions, and patterns across projects.' },
       servers: [{ url: BASE_URL }],
       paths: {
         '/api/search': {
@@ -493,13 +493,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       },
     };
 
-    // ─── DEVBRAIN DASHBOARD HTML ──────────────────────────────────────────────────
+    // â”€â”€â”€ DEVBRAIN DASHBOARD HTML â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const HTML_DASHBOARD = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>DevBrain — Developer Memory</title>
+  <title>DevBrain â€” Developer Memory</title>
   <style>
     :root {
       --bg:         #1e1e1e;
@@ -530,7 +530,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       min-height: 100vh;
     }
     a { color: var(--accent); text-decoration: none; }
-    /* ── Layout ── */
+    /* â”€â”€ Layout â”€â”€ */
     .titlebar {
       height: 36px;
       background: var(--surface2);
@@ -571,7 +571,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       height: calc(100vh - 58px);
       overflow: hidden;
     }
-    /* ── Sidebar ── */
+    /* â”€â”€ Sidebar â”€â”€ */
     .sidebar {
       background: var(--surface);
       border-right: 1px solid var(--border);
@@ -611,7 +611,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     .stat-row { display: flex; justify-content: space-between; align-items: center; padding: 3px 0; }
     .stat-label { color: var(--text2); font-size: 12px; }
     .stat-value { color: var(--accent); font-family: var(--mono); font-size: 12px; font-weight: 600; }
-    /* ── Main Editor Area ── */
+    /* â”€â”€ Main Editor Area â”€â”€ */
     .editor-area {
       display: flex;
       flex-direction: column;
@@ -643,7 +643,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     .tab.active { color: var(--text); background: var(--bg); border-bottom: 2px solid var(--accent); }
     .editor-panel { display: none; flex: 1; overflow-y: auto; padding: 20px 24px; }
     .editor-panel.active { display: block; }
-    /* ── Search Panel ── */
+    /* â”€â”€ Search Panel â”€â”€ */
     .search-row {
       display: flex;
       gap: 8px;
@@ -684,7 +684,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       cursor: pointer;
     }
     .vscode-btn-ghost:hover { background: var(--surface2); color: var(--text); }
-    /* ── Results ── */
+    /* â”€â”€ Results â”€â”€ */
     .results-list { display: flex; flex-direction: column; gap: 1px; }
     .result-item {
       background: var(--surface);
@@ -723,7 +723,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       border: 1px solid var(--border);
       padding: 1px 5px;
     }
-    /* ── Form ── */
+    /* â”€â”€ Form â”€â”€ */
     .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
     .form-group { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
     .form-group.full { grid-column: 1 / -1; }
@@ -755,7 +755,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       line-height: 1.5;
     }
     .vscode-textarea:focus { border-color: var(--accent); }
-    /* ── Context viewer ── */
+    /* â”€â”€ Context viewer â”€â”€ */
     .context-pre {
       background: var(--surface);
       border: 1px solid var(--border);
@@ -774,7 +774,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     .context-pre .ctx-entry-bug { color: var(--red); }
     .context-pre .ctx-entry-fix { color: var(--green); }
     .context-pre .ctx-entry { color: var(--text2); }
-    /* ── Empty state ── */
+    /* â”€â”€ Empty state â”€â”€ */
     .empty {
       padding: 32px 0;
       color: var(--text3);
@@ -782,7 +782,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       font-size: 12px;
       text-align: center;
     }
-    /* ── Toast ── */
+    /* â”€â”€ Toast â”€â”€ */
     .toast {
       position: fixed;
       bottom: 28px;
@@ -799,12 +799,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       z-index: 999;
     }
     .toast.show { transform: translateY(0); opacity: 1; }
-    /* ── Scrollbar ── */
+    /* â”€â”€ Scrollbar â”€â”€ */
     ::-webkit-scrollbar { width: 8px; }
     ::-webkit-scrollbar-track { background: var(--bg); }
     ::-webkit-scrollbar-thumb { background: var(--border2); }
     ::-webkit-scrollbar-thumb:hover { background: #5a5a5a; }
-    /* ── Info strip ── */
+    /* â”€â”€ Info strip â”€â”€ */
     .info-strip {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
@@ -821,542 +821,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     .info-cell-value { font-size: 18px; font-family: var(--mono); color: var(--text); font-weight: 600; }
     .info-cell-sub { font-size: 11px; color: var(--text2); font-family: var(--mono); margin-top: 2px; }
   </style>
-      --panel-bg: rgba(15, 23, 42, 0.65);
-      --panel-border: rgba(255, 255, 255, 0.08);
-      --text-primary: #f8fafc;
-      --text-secondary: #94a3b8;
-      --accent-cyan: #06b6d4;
-      --accent-magenta: #d946ef;
-      --accent-green: #10b981;
-      --accent-red: #f43f5e;
-      --accent-yellow: #eab308;
-      --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4);
-      --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    }
-
-    * {
-      box-sizing: border-box;
-      scrollbar-width: thin;
-      scrollbar-color: var(--panel-border) transparent;
-    }
-
-    body {
-      margin: 0;
-      padding: 0;
-      background-color: var(--bg-color);
-      color: var(--text-primary);
-      font-family: 'Inter', sans-serif;
-      min-height: 100vh;
-      -webkit-font-smoothing: antialiased;
-      background-image: 
-        radial-gradient(circle at 12% 18%, rgba(6, 182, 212, 0.06) 0%, transparent 45%),
-        radial-gradient(circle at 88% 82%, rgba(217, 70, 239, 0.06) 0%, transparent 45%);
-    }
-
-    /* Scrollbars */
-    ::-webkit-scrollbar {
-      width: 6px;
-      height: 6px;
-    }
-    ::-webkit-scrollbar-track {
-      background: transparent;
-    }
-    ::-webkit-scrollbar-thumb {
-      background: var(--panel-border);
-      border-radius: 4px;
-    }
-
-    /* Container */
-    .container {
-      max-width: 1400px;
-      margin: 0 auto;
-      padding: 2.5rem 1.5rem;
-    }
-
-    /* Navigation & Header */
-    header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 2.5rem;
-      border-bottom: 1px solid var(--panel-border);
-      padding-bottom: 1.5rem;
-    }
-
-    .logo-container {
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-    }
-
-    .logo-glow {
-      width: 12px;
-      height: 12px;
-      border-radius: 50%;
-      background: linear-gradient(135deg, var(--accent-cyan), var(--accent-magenta));
-      box-shadow: 0 0 12px var(--accent-cyan);
-      animation: pulse 2s infinite ease-in-out;
-    }
-
-    @keyframes pulse {
-      0%, 100% { opacity: 0.7; transform: scale(1); }
-      50% { opacity: 1; transform: scale(1.15); box-shadow: 0 0 18px var(--accent-magenta); }
-    }
-
-    h1 {
-      font-family: 'Outfit', sans-serif;
-      font-size: 1.75rem;
-      font-weight: 700;
-      letter-spacing: -0.02em;
-      background: linear-gradient(to right, #ffffff, #94a3b8);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-    }
-
-    .mcp-status {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      background: rgba(16, 185, 129, 0.1);
-      border: 1px solid rgba(16, 185, 129, 0.2);
-      padding: 0.4rem 0.8rem;
-      border-radius: 9999px;
-      font-size: 0.8rem;
-      font-weight: 500;
-      color: var(--accent-green);
-    }
-
-    .mcp-status-dot {
-      width: 7px;
-      height: 7px;
-      border-radius: 50%;
-      background-color: var(--accent-green);
-      box-shadow: 0 0 8px var(--accent-green);
-    }
-
-    /* Grid layout */
-    .dashboard-grid {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 1.5rem;
-      margin-bottom: 2.5rem;
-    }
-
-    .stat-card {
-      background: var(--panel-bg);
-      border: 1px solid var(--panel-border);
-      border-radius: 12px;
-      padding: 1.5rem;
-      box-shadow: var(--glass-shadow);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      transition: var(--transition);
-    }
-
-    .stat-card:hover {
-      transform: translateY(-2px);
-      border-color: rgba(255, 255, 255, 0.15);
-      box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.5);
-    }
-
-    .stat-label {
-      font-size: 0.85rem;
-      color: var(--text-secondary);
-      font-weight: 500;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      margin-bottom: 0.5rem;
-    }
-
-    .stat-value {
-      font-family: 'Outfit', sans-serif;
-      font-size: 2.25rem;
-      font-weight: 700;
-      color: var(--text-primary);
-    }
-
-    .stat-sub {
-      font-size: 0.75rem;
-      margin-top: 0.5rem;
-      color: var(--text-secondary);
-      display: flex;
-      align-items: center;
-      gap: 0.25rem;
-    }
-
-    /* Main Area Split */
-    .main-layout {
-      display: grid;
-      grid-template-columns: 1.7fr 1.3fr;
-      gap: 2rem;
-    }
-
-    .panel {
-      background: var(--panel-bg);
-      border: 1px solid var(--panel-border);
-      border-radius: 16px;
-      padding: 2rem;
-      box-shadow: var(--glass-shadow);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-    }
-
-    .panel-title {
-      font-family: 'Outfit', sans-serif;
-      font-size: 1.25rem;
-      font-weight: 600;
-      margin-bottom: 1.5rem;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      color: var(--text-primary);
-    }
-
-    .panel-subtitle {
-      font-size: 0.85rem;
-      color: var(--text-secondary);
-      margin-top: -1.25rem;
-      margin-bottom: 1.5rem;
-      line-height: 1.4;
-    }
-
-    /* Search Input & Controls */
-    .search-container {
-      display: flex;
-      gap: 0.75rem;
-      margin-bottom: 1.5rem;
-    }
-
-    .input-glow-focus {
-      flex: 1;
-      background: rgba(15, 23, 42, 0.8);
-      border: 1px solid var(--panel-border);
-      border-radius: 8px;
-      padding: 0.8rem 1rem;
-      color: var(--text-primary);
-      font-family: 'Inter', sans-serif;
-      font-size: 0.95rem;
-      outline: none;
-      transition: var(--transition);
-    }
-
-    .input-glow-focus:focus {
-      border-color: var(--accent-cyan);
-      box-shadow: 0 0 10px rgba(6, 182, 212, 0.2);
-    }
-
-    .btn {
-      background: linear-gradient(135deg, var(--accent-cyan), #0891b2);
-      color: white;
-      border: none;
-      border-radius: 8px;
-      padding: 0.8rem 1.5rem;
-      font-family: 'Inter', sans-serif;
-      font-size: 0.9rem;
-      font-weight: 500;
-      cursor: pointer;
-      transition: var(--transition);
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-    }
-
-    .btn:hover {
-      transform: translateY(-1px);
-      box-shadow: 0 4px 15px rgba(6, 182, 212, 0.4);
-      filter: brightness(1.1);
-    }
-
-    .btn-secondary {
-      background: linear-gradient(135deg, var(--accent-magenta), #c084fc);
-    }
-
-    .btn-secondary:hover {
-      box-shadow: 0 4px 15px rgba(217, 70, 239, 0.4);
-    }
-
-    /* Results */
-    .results-grid {
-      display: flex;
-      flex-direction: column;
-      gap: 1rem;
-      max-height: 520px;
-      overflow-y: auto;
-      padding-right: 0.25rem;
-    }
-
-    .result-card {
-      background: rgba(30, 41, 59, 0.4);
-      border: 1px solid var(--panel-border);
-      border-radius: 10px;
-      padding: 1.25rem;
-      transition: var(--transition);
-    }
-
-    .result-card:hover {
-      border-color: rgba(255, 255, 255, 0.12);
-      background: rgba(30, 41, 59, 0.55);
-    }
-
-    .card-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      margin-bottom: 0.75rem;
-    }
-
-    .card-title-group {
-      display: flex;
-      flex-direction: column;
-      gap: 0.25rem;
-    }
-
-    .card-title {
-      font-family: 'Outfit', sans-serif;
-      font-size: 1.05rem;
-      font-weight: 600;
-      color: var(--text-primary);
-    }
-
-    .card-meta {
-      font-size: 0.75rem;
-      color: var(--text-secondary);
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-    }
-
-    .badge {
-      font-size: 0.7rem;
-      padding: 0.2rem 0.5rem;
-      border-radius: 4px;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.02em;
-    }
-
-    .badge-bug { background: rgba(244, 63, 94, 0.15); color: var(--accent-red); border: 1px solid rgba(244, 63, 94, 0.2); }
-    .badge-fix { background: rgba(16, 185, 129, 0.15); color: var(--accent-green); border: 1px solid rgba(16, 185, 129, 0.2); }
-    .badge-decision { background: rgba(217, 70, 239, 0.15); color: var(--accent-magenta); border: 1px solid rgba(217, 70, 239, 0.2); }
-    .badge-pattern { background: rgba(234, 179, 8, 0.15); color: var(--accent-yellow); border: 1px solid rgba(234, 179, 8, 0.2); }
-    .badge-lesson { background: rgba(234, 179, 8, 0.15); color: var(--accent-yellow); border: 1px solid rgba(234, 179, 8, 0.2); }
-    .badge-anti-pattern { background: rgba(244, 63, 94, 0.2); color: var(--accent-red); border: 1px solid rgba(244, 63, 94, 0.3); }
-    .badge-other { background: rgba(148, 163, 184, 0.15); color: var(--text-secondary); border: 1px solid rgba(148, 163, 184, 0.2); }
-
-    .score-badge {
-      background: rgba(6, 182, 212, 0.1);
-      border: 1px solid rgba(6, 182, 212, 0.2);
-      color: var(--accent-cyan);
-      font-family: monospace;
-      font-size: 0.8rem;
-      padding: 0.2rem 0.5rem;
-      border-radius: 4px;
-      font-weight: 500;
-    }
-
-    .card-content {
-      font-size: 0.85rem;
-      line-height: 1.5;
-      color: #cbd5e1;
-      white-space: pre-line;
-      margin-bottom: 0.75rem;
-    }
-
-    .card-tags {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.4rem;
-    }
-
-    .tag {
-      font-size: 0.7rem;
-      background: rgba(255, 255, 255, 0.05);
-      border: 1px solid rgba(255, 255, 255, 0.05);
-      color: var(--text-secondary);
-      padding: 0.15rem 0.4rem;
-      border-radius: 4px;
-    }
-
-    .empty-state {
-      text-align: center;
-      padding: 3rem 1.5rem;
-      color: var(--text-secondary);
-      font-size: 0.9rem;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 0.75rem;
-    }
-
-    /* Form Styles */
-    .form-group {
-      margin-bottom: 1.25rem;
-    }
-
-    .form-row {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 1rem;
-    }
-
-    label {
-      display: block;
-      font-size: 0.8rem;
-      font-weight: 500;
-      color: var(--text-secondary);
-      margin-bottom: 0.4rem;
-    }
-
-    select, textarea {
-      width: 100%;
-      background: rgba(15, 23, 42, 0.8);
-      border: 1px solid var(--panel-border);
-      border-radius: 8px;
-      padding: 0.8rem;
-      color: var(--text-primary);
-      font-family: 'Inter', sans-serif;
-      font-size: 0.9rem;
-      outline: none;
-      transition: var(--transition);
-    }
-
-    select:focus, textarea:focus {
-      border-color: var(--accent-cyan);
-      box-shadow: 0 0 10px rgba(6, 182, 212, 0.2);
-    }
-
-    textarea {
-      resize: vertical;
-      min-height: 100px;
-    }
-
-    .form-submit-btn {
-      width: 100%;
-      justify-content: center;
-      padding: 0.9rem;
-    }
-
-    /* Context viewer styling */
-    .context-viewer {
-      background: rgba(15, 23, 42, 0.8);
-      border: 1px solid var(--panel-border);
-      border-radius: 10px;
-      padding: 1.25rem;
-      font-family: monospace;
-      font-size: 0.85rem;
-      line-height: 1.5;
-      color: #e2e8f0;
-      max-height: 480px;
-      overflow-y: auto;
-      white-space: pre-wrap;
-      display: none;
-    }
-
-    .context-header-block {
-      border-bottom: 1px solid rgba(255,255,255,0.1);
-      padding-bottom: 0.5rem;
-      margin-bottom: 0.5rem;
-      color: var(--accent-cyan);
-    }
-
-    .markdown-rendered h3 {
-      color: var(--accent-cyan);
-      font-size: 1rem;
-      margin-top: 1.25rem;
-      margin-bottom: 0.5rem;
-      border-bottom: 1px solid rgba(6, 182, 212, 0.2);
-      padding-bottom: 0.25rem;
-    }
-    .markdown-rendered p {
-      margin: 0.5rem 0;
-    }
-    .markdown-rendered ul {
-      margin: 0.5rem 0;
-      padding-left: 1.25rem;
-    }
-    .markdown-rendered li {
-      margin-bottom: 0.25rem;
-    }
-
-    /* Toast Notification */
-    .toast {
-      position: fixed;
-      bottom: 2rem;
-      right: 2rem;
-      background: rgba(15, 23, 42, 0.9);
-      border: 1px solid var(--accent-green);
-      border-radius: 8px;
-      padding: 1rem 1.5rem;
-      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
-      z-index: 1000;
-      transform: translateY(150%);
-      transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-    }
-
-    .toast.show {
-      transform: translateY(0);
-    }
-
-    .toast-success-icon {
-      width: 16px;
-      height: 16px;
-      border-radius: 50%;
-      background: var(--accent-green);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 0.6rem;
-      color: #070a13;
-      font-weight: bold;
-    }
-
-    /* Doc section */
-    .doc-section {
-      margin-top: 3rem;
-      background: linear-gradient(135deg, rgba(30, 41, 59, 0.3), rgba(15, 23, 42, 0.3));
-      border: 1px solid var(--panel-border);
-      border-radius: 16px;
-      padding: 2.5rem;
-    }
-
-    .doc-grid {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 2rem;
-      margin-top: 1.5rem;
-    }
-
-    .doc-col h4 {
-      font-family: 'Outfit', sans-serif;
-      font-size: 1.05rem;
-      font-weight: 600;
-      color: var(--accent-cyan);
-      margin-bottom: 0.75rem;
-    }
-
-    .doc-col p {
-      font-size: 0.85rem;
-      line-height: 1.6;
-      color: var(--text-secondary);
-    }
-
-    /* Responsive */
-    @media (max-width: 1024px) {
-      .dashboard-grid { grid-template-columns: repeat(2, 1fr); }
-      .main-layout { grid-template-columns: 1fr; }
-      .doc-grid { grid-template-columns: 1fr; }
-    }
-  </style>
 </head>
 <body>
 
   <div class="titlebar">
     <div class="titlebar-dot"></div>
-    <span class="titlebar-name">devbrain — developer memory</span>
-    <span class="titlebar-badge" id="conn-badge">● connected</span>
+    <span class="titlebar-name">devbrain â€” developer memory</span>
+    <span class="titlebar-badge" id="conn-badge">â— connected</span>
   </div>
 
   <div class="layout">
@@ -1365,16 +836,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     <div class="sidebar">
       <div class="stat-block">
         <div class="sidebar-section-label">Database</div>
-        <div class="stat-row"><span class="stat-label">entries</span><span class="stat-value" id="stat-memories">—</span></div>
-        <div class="stat-row"><span class="stat-label">projects</span><span class="stat-value" id="stat-projects">—</span></div>
+        <div class="stat-row"><span class="stat-label">entries</span><span class="stat-value" id="stat-memories">â€”</span></div>
+        <div class="stat-row"><span class="stat-label">projects</span><span class="stat-value" id="stat-projects">â€”</span></div>
       </div>
 
       <div class="sidebar-section-label" style="margin-top:8px;">Views</div>
       <button class="sidebar-item active" id="nav-search" onclick="switchTab('search')">
-        <span class="icon">⌕</span> Search
+        <span class="icon">âŒ•</span> Search
       </button>
       <button class="sidebar-item" id="nav-context" onclick="switchTab('context')">
-        <span class="icon">≡</span> Context
+        <span class="icon">â‰¡</span> Context
       </button>
       <button class="sidebar-item" id="nav-ingest" onclick="switchTab('ingest')">
         <span class="icon">+</span> Save Entry
@@ -1383,13 +854,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       <div class="sidebar-divider"></div>
       <div class="sidebar-section-label">Stack</div>
       <div class="sidebar-item" style="cursor:default; color: var(--text3);">
-        <span class="icon">◆</span> Gemini 2.0 Flash
+        <span class="icon">â—†</span> Gemini 2.0 Flash
       </div>
       <div class="sidebar-item" style="cursor:default; color: var(--text3);">
-        <span class="icon">◆</span> MongoDB Atlas
+        <span class="icon">â—†</span> MongoDB Atlas
       </div>
       <div class="sidebar-item" style="cursor:default; color: var(--text3);">
-        <span class="icon">◆</span> Google Cloud Run
+        <span class="icon">â—†</span> Google Cloud Run
       </div>
 
       <div class="sidebar-divider"></div>
@@ -1421,12 +892,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         <div class="info-strip">
           <div class="info-cell">
             <div class="info-cell-label">total entries</div>
-            <div class="info-cell-value" id="stat2-memories">—</div>
+            <div class="info-cell-value" id="stat2-memories">â€”</div>
             <div class="info-cell-sub">across all projects</div>
           </div>
           <div class="info-cell">
             <div class="info-cell-label">projects tracked</div>
-            <div class="info-cell-value" id="stat2-projects">—</div>
+            <div class="info-cell-value" id="stat2-projects">â€”</div>
             <div class="info-cell-sub">registered codebases</div>
           </div>
           <div class="info-cell">
@@ -1437,11 +908,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         </div>
 
         <div class="search-row">
-          <input type="text" id="search-input" class="vscode-input" placeholder="Search bugs, decisions, patterns — paste exact error message for best results" />
+          <input type="text" id="search-input" class="vscode-input" placeholder="Search bugs, decisions, patterns â€” paste exact error message for best results" />
           <button class="vscode-btn" id="search-btn" onclick="performSearch()">Search</button>
         </div>
         <div id="results-container">
-          <div class="empty">// no search performed yet — type a query above</div>
+          <div class="empty">// no search performed yet â€” type a query above</div>
         </div>
       </div>
 
@@ -1451,7 +922,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           // Synthesizes ranked project history into a context block ready for LLM prompt injection.
         </p>
         <div class="search-row">
-          <input type="text" id="context-query" class="vscode-input" placeholder="Optional topic filter — e.g. auth, database, deployment" />
+          <input type="text" id="context-query" class="vscode-input" placeholder="Optional topic filter â€” e.g. auth, database, deployment" />
           <button class="vscode-btn" id="context-btn" onclick="generateContext()">Generate Context</button>
         </div>
         <pre class="context-pre" id="context-output"></pre>
@@ -1495,11 +966,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               </select>
             </div>
             <div class="form-group full">
-              <label class="form-label">title — specific and searchable</label>
+              <label class="form-label">title â€” specific and searchable</label>
               <input type="text" id="ingest-title" class="vscode-input" placeholder="e.g. MongoDB authSource=admin required in production URI" required />
             </div>
             <div class="form-group full">
-              <label class="form-label">content — symptom + root cause + fix</label>
+              <label class="form-label">content â€” symptom + root cause + fix</label>
               <textarea id="ingest-content" class="vscode-textarea" placeholder="Describe the problem, root cause, and exact resolution..." required></textarea>
             </div>
             <div class="form-group">
@@ -1704,7 +1175,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return;
       }
 
-      // ── REST API for Agent Builder ─────────────────────────────────────────
+      // â”€â”€ REST API for Agent Builder â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
       if (url === '/api/search' && req.method === 'POST') {
         try {
           const { query, category, error_pattern } = await readBody(req) as { query: string; category?: EntryCategory; error_pattern?: string };
@@ -1723,7 +1194,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           }));
           const text = mapped.length === 0
             ? `No results found for "${query}"`
-            : mapped.map((r, i) => `${i+1}. [${r.type}] ${r.title}\n   ${r.match} · ${r.project}\n   ${r.content}`).join('\n\n');
+            : mapped.map((r, i) => `${i+1}. [${r.type}] ${r.title}\n   ${r.match} Â· ${r.project}\n   ${r.content}`).join('\n\n');
           json(res, 200, { text, results: mapped });
         } catch (err) { json(res, 500, { error: String(err) }); }
         return;
@@ -1779,7 +1250,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       if (url === '/mcp') {
         try {
-          // Hono reads rawHeaders, not req.headers — patch rawHeaders directly
+          // Hono reads rawHeaders, not req.headers â€” patch rawHeaders directly
           const rh = req.rawHeaders;
           let acceptIdx = -1;
           for (let i = 0; i < rh.length; i += 2) {
@@ -1808,7 +1279,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       console.log(`DevBrain MCP server listening on port ${PORT}`);
     });
   } else {
-    // stdio mode — local MCP client / agent
+    // stdio mode â€” local MCP client / agent
     const transport = new StdioServerTransport();
     await server.connect(transport);
   }
