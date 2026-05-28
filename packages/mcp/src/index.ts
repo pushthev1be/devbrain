@@ -493,17 +493,334 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       },
     };
 
-    // ─── STUNNING DEVCONTEXT DASHBOARD HTML ─────────────────────────────────────
+    // ─── DEVBRAIN DASHBOARD HTML ──────────────────────────────────────────────────
     const HTML_DASHBOARD = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>DevBrain — Developer Memory System</title>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Outfit:wght@600;700&display=swap" rel="stylesheet">
+  <title>DevBrain — Developer Memory</title>
   <style>
     :root {
-      --bg-color: #070a13;
+      --bg:         #1e1e1e;
+      --surface:    #252526;
+      --surface2:   #2d2d30;
+      --border:     #3c3c3c;
+      --border2:    #474747;
+      --text:       #d4d4d4;
+      --text2:      #9d9d9d;
+      --text3:      #6c6c6c;
+      --accent:     #007acc;
+      --accent-dim: #0e639c;
+      --green:      #4ec994;
+      --red:        #f14c4c;
+      --yellow:     #cca700;
+      --orange:     #ce9178;
+      --purple:     #c586c0;
+      --mono:       'Consolas', 'Courier New', monospace;
+      --ui:         -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--ui);
+      font-size: 13px;
+      line-height: 1.5;
+      min-height: 100vh;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    /* ── Layout ── */
+    .titlebar {
+      height: 36px;
+      background: var(--surface2);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      gap: 12px;
+      user-select: none;
+    }
+    .titlebar-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+    .titlebar-name { font-size: 13px; color: var(--text2); font-family: var(--mono); }
+    .titlebar-badge {
+      margin-left: auto;
+      font-size: 11px;
+      color: var(--green);
+      background: transparent;
+      border: 1px solid #4ec99440;
+      padding: 2px 8px;
+      border-radius: 2px;
+      font-family: var(--mono);
+    }
+    .statusbar {
+      height: 22px;
+      background: var(--accent);
+      display: flex;
+      align-items: center;
+      padding: 0 12px;
+      gap: 16px;
+      font-size: 11px;
+      color: #fff;
+      font-family: var(--mono);
+    }
+    .statusbar-item { opacity: 0.9; }
+    .layout {
+      display: grid;
+      grid-template-columns: 220px 1fr;
+      height: calc(100vh - 58px);
+      overflow: hidden;
+    }
+    /* ── Sidebar ── */
+    .sidebar {
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .sidebar-section-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text2);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      padding: 8px 12px 4px;
+    }
+    .sidebar-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 12px;
+      cursor: pointer;
+      color: var(--text2);
+      font-size: 13px;
+      border: none;
+      background: none;
+      width: 100%;
+      text-align: left;
+    }
+    .sidebar-item:hover { background: var(--surface2); color: var(--text); }
+    .sidebar-item.active { background: var(--surface2); color: var(--text); }
+    .sidebar-item .icon { width: 16px; font-size: 12px; flex-shrink: 0; color: var(--text3); }
+    .sidebar-divider { height: 1px; background: var(--border); margin: 6px 0; }
+    .stat-block {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .stat-row { display: flex; justify-content: space-between; align-items: center; padding: 3px 0; }
+    .stat-label { color: var(--text2); font-size: 12px; }
+    .stat-value { color: var(--accent); font-family: var(--mono); font-size: 12px; font-weight: 600; }
+    /* ── Main Editor Area ── */
+    .editor-area {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .tab-bar {
+      background: var(--surface2);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      flex-shrink: 0;
+    }
+    .tab {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 0 16px;
+      height: 35px;
+      font-size: 13px;
+      color: var(--text2);
+      border-right: 1px solid var(--border);
+      cursor: pointer;
+      white-space: nowrap;
+      background: var(--surface2);
+      border: none;
+      border-right: 1px solid var(--border);
+      border-bottom: 2px solid transparent;
+    }
+    .tab:hover { color: var(--text); background: var(--surface); }
+    .tab.active { color: var(--text); background: var(--bg); border-bottom: 2px solid var(--accent); }
+    .editor-panel { display: none; flex: 1; overflow-y: auto; padding: 20px 24px; }
+    .editor-panel.active { display: block; }
+    /* ── Search Panel ── */
+    .search-row {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+    .vscode-input {
+      flex: 1;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 13px;
+      padding: 5px 8px;
+      outline: none;
+      border-radius: 0;
+    }
+    .vscode-input:focus { border-color: var(--accent); }
+    .vscode-input::placeholder { color: var(--text3); }
+    .vscode-btn {
+      background: var(--accent-dim);
+      color: #fff;
+      border: none;
+      padding: 5px 14px;
+      font-size: 13px;
+      font-family: var(--ui);
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .vscode-btn:hover { background: var(--accent); }
+    .vscode-btn:disabled { opacity: 0.5; cursor: default; }
+    .vscode-btn-ghost {
+      background: transparent;
+      color: var(--text2);
+      border: 1px solid var(--border);
+      padding: 5px 14px;
+      font-size: 13px;
+      font-family: var(--ui);
+      cursor: pointer;
+    }
+    .vscode-btn-ghost:hover { background: var(--surface2); color: var(--text); }
+    /* ── Results ── */
+    .results-list { display: flex; flex-direction: column; gap: 1px; }
+    .result-item {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      padding: 10px 14px;
+    }
+    .result-item:hover { background: var(--surface2); border-color: var(--border2); }
+    .result-header { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+    .result-title { color: var(--text); font-size: 13px; flex: 1; }
+    .result-meta { color: var(--text2); font-size: 11px; font-family: var(--mono); margin-bottom: 4px; }
+    .result-content { color: var(--text2); font-size: 12px; font-family: var(--mono); line-height: 1.4; }
+    .result-tags { display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap; }
+    .type-badge {
+      font-size: 10px;
+      font-family: var(--mono);
+      padding: 1px 5px;
+      border: 1px solid;
+      border-radius: 2px;
+      text-transform: lowercase;
+    }
+    .type-bug      { color: var(--red);    border-color: #f14c4c40; background: #f14c4c0d; }
+    .type-fix      { color: var(--green);  border-color: #4ec99440; background: #4ec9940d; }
+    .type-decision { color: var(--purple); border-color: #c586c040; background: #c586c00d; }
+    .type-pattern  { color: var(--yellow); border-color: #cca70040; background: #cca7000d; }
+    .type-lesson   { color: var(--yellow); border-color: #cca70040; background: #cca7000d; }
+    .type-anti-pattern { color: var(--red); border-color: #f14c4c40; background: #f14c4c0d; }
+    .type-stack    { color: var(--accent); border-color: #007acc40; background: #007acc0d; }
+    .type-note     { color: var(--text2);  border-color: var(--border); background: transparent; }
+    .type-default  { color: var(--text2);  border-color: var(--border); background: transparent; }
+    .score-tag { font-size: 10px; font-family: var(--mono); color: var(--text3); }
+    .tag-chip {
+      font-size: 10px;
+      font-family: var(--mono);
+      color: var(--text3);
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      padding: 1px 5px;
+    }
+    /* ── Form ── */
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .form-group { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+    .form-group.full { grid-column: 1 / -1; }
+    .form-label { font-size: 11px; color: var(--text2); font-family: var(--mono); }
+    .vscode-select {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 13px;
+      padding: 5px 8px;
+      outline: none;
+      width: 100%;
+      border-radius: 0;
+    }
+    .vscode-select:focus { border-color: var(--accent); }
+    .vscode-textarea {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 12px;
+      padding: 6px 8px;
+      outline: none;
+      resize: vertical;
+      min-height: 80px;
+      width: 100%;
+      border-radius: 0;
+      line-height: 1.5;
+    }
+    .vscode-textarea:focus { border-color: var(--accent); }
+    /* ── Context viewer ── */
+    .context-pre {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      padding: 14px 16px;
+      font-family: var(--mono);
+      font-size: 12px;
+      line-height: 1.6;
+      color: var(--text2);
+      white-space: pre-wrap;
+      overflow-y: auto;
+      max-height: 500px;
+      display: none;
+    }
+    .context-pre .ctx-heading { color: var(--accent); }
+    .context-pre .ctx-sub { color: var(--text); font-weight: 600; }
+    .context-pre .ctx-entry-bug { color: var(--red); }
+    .context-pre .ctx-entry-fix { color: var(--green); }
+    .context-pre .ctx-entry { color: var(--text2); }
+    /* ── Empty state ── */
+    .empty {
+      padding: 32px 0;
+      color: var(--text3);
+      font-family: var(--mono);
+      font-size: 12px;
+      text-align: center;
+    }
+    /* ── Toast ── */
+    .toast {
+      position: fixed;
+      bottom: 28px;
+      right: 24px;
+      background: var(--surface2);
+      border: 1px solid var(--accent);
+      color: var(--text);
+      padding: 8px 16px;
+      font-size: 12px;
+      font-family: var(--mono);
+      transform: translateY(80px);
+      opacity: 0;
+      transition: transform 0.2s ease, opacity 0.2s ease;
+      z-index: 999;
+    }
+    .toast.show { transform: translateY(0); opacity: 1; }
+    /* ── Scrollbar ── */
+    ::-webkit-scrollbar { width: 8px; }
+    ::-webkit-scrollbar-track { background: var(--bg); }
+    ::-webkit-scrollbar-thumb { background: var(--border2); }
+    ::-webkit-scrollbar-thumb:hover { background: #5a5a5a; }
+    /* ── Info strip ── */
+    .info-strip {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1px;
+      background: var(--border);
+      border: 1px solid var(--border);
+      margin-bottom: 20px;
+    }
+    .info-cell {
+      background: var(--surface);
+      padding: 10px 14px;
+    }
+    .info-cell-label { font-size: 10px; color: var(--text3); font-family: var(--mono); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 3px; }
+    .info-cell-value { font-size: 18px; font-family: var(--mono); color: var(--text); font-weight: 600; }
+    .info-cell-sub { font-size: 11px; color: var(--text2); font-family: var(--mono); margin-top: 2px; }
+  </style>
       --panel-bg: rgba(15, 23, 42, 0.65);
       --panel-border: rgba(255, 255, 255, 0.08);
       --text-primary: #f8fafc;
@@ -1035,117 +1352,134 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   </style>
 </head>
 <body>
-  <div class="container">
-    <header>
-      <div class="logo-container">
-        <div class="logo-glow"></div>
-        <h1>DevBrain</h1>
-      </div>
-      <div class="mcp-status">
-        <div class="mcp-status-dot"></div>
-        <span>MCP REST Engine Connected</span>
-      </div>
-    </header>
 
-    <!-- Stats Grid -->
-    <div class="dashboard-grid">
-      <div class="stat-card">
-        <div class="stat-label">Total Memories</div>
-        <div class="stat-value" id="stat-memories">--</div>
-        <div class="stat-sub">📦 Active saved entries</div>
+  <div class="titlebar">
+    <div class="titlebar-dot"></div>
+    <span class="titlebar-name">devbrain — developer memory</span>
+    <span class="titlebar-badge" id="conn-badge">● connected</span>
+  </div>
+
+  <div class="layout">
+
+    <!-- Sidebar -->
+    <div class="sidebar">
+      <div class="stat-block">
+        <div class="sidebar-section-label">Database</div>
+        <div class="stat-row"><span class="stat-label">entries</span><span class="stat-value" id="stat-memories">—</span></div>
+        <div class="stat-row"><span class="stat-label">projects</span><span class="stat-value" id="stat-projects">—</span></div>
       </div>
-      <div class="stat-card">
-        <div class="stat-label">Tracked Projects</div>
-        <div class="stat-value" id="stat-projects">--</div>
-        <div class="stat-sub">📂 Registered codebases</div>
+
+      <div class="sidebar-section-label" style="margin-top:8px;">Views</div>
+      <button class="sidebar-item active" id="nav-search" onclick="switchTab('search')">
+        <span class="icon">⌕</span> Search
+      </button>
+      <button class="sidebar-item" id="nav-context" onclick="switchTab('context')">
+        <span class="icon">≡</span> Context
+      </button>
+      <button class="sidebar-item" id="nav-ingest" onclick="switchTab('ingest')">
+        <span class="icon">+</span> Save Entry
+      </button>
+
+      <div class="sidebar-divider"></div>
+      <div class="sidebar-section-label">Stack</div>
+      <div class="sidebar-item" style="cursor:default; color: var(--text3);">
+        <span class="icon">◆</span> Gemini 2.0 Flash
       </div>
-      <div class="stat-card">
-        <div class="stat-label">Brain Engine</div>
-        <div class="stat-value" style="font-size: 1.6rem; line-height: 2.25rem; font-weight:600; color:var(--accent-cyan)">Gemini 2.0</div>
-        <div class="stat-sub">🧠 Google Cloud AI Models</div>
+      <div class="sidebar-item" style="cursor:default; color: var(--text3);">
+        <span class="icon">◆</span> MongoDB Atlas
       </div>
-      <div class="stat-card">
-        <div class="stat-label">Vector Storage</div>
-        <div class="stat-value" style="font-size: 1.6rem; line-height: 2.25rem; font-weight:600; color:var(--accent-magenta)">MongoDB Atlas</div>
-        <div class="stat-sub">⚡ 3072-dim Vector Search</div>
+      <div class="sidebar-item" style="cursor:default; color: var(--text3);">
+        <span class="icon">◆</span> Google Cloud Run
+      </div>
+
+      <div class="sidebar-divider"></div>
+      <div class="sidebar-section-label">Endpoints</div>
+      <div class="sidebar-item" style="cursor:default; font-family:var(--mono); font-size:11px; color:var(--text3);">
+        POST /api/search
+      </div>
+      <div class="sidebar-item" style="cursor:default; font-family:var(--mono); font-size:11px; color:var(--text3);">
+        POST /api/save
+      </div>
+      <div class="sidebar-item" style="cursor:default; font-family:var(--mono); font-size:11px; color:var(--text3);">
+        POST /api/context
+      </div>
+      <div class="sidebar-item" style="cursor:default; font-family:var(--mono); font-size:11px; color:var(--text3);">
+        GET  /mcp  (SSE)
       </div>
     </div>
 
-    <!-- Main Workspace Split -->
-    <div class="main-layout">
-      
-      <!-- Left Panel: Playground Search & Context -->
-      <div class="panel">
-        <div class="panel-title">
-          <span>DevBrain Search & Synthesis Playground</span>
-          <div style="display:flex; gap:0.5rem">
-            <button class="btn" id="tab-search" style="padding: 0.4rem 0.8rem; font-size: 0.8rem;">Search</button>
-            <button class="btn btn-secondary" id="tab-context" style="padding: 0.4rem 0.8rem; font-size: 0.8rem;">AI Context</button>
-          </div>
-        </div>
-        <p class="panel-subtitle" id="playground-desc">Query your long-term technical memory with MongoDB Atlas Vector Search. Simply type a technical question or bug description below.</p>
-
-        <!-- Search Mode Layout -->
-        <div id="search-section">
-          <div class="search-container">
-            <input type="text" id="search-input" class="input-glow-focus" placeholder="Search bugs, architectural decisions or stack patterns..." />
-            <button class="btn" id="search-btn">
-              <span>Search</span>
-            </button>
-          </div>
-
-          <div class="results-grid" id="results-container">
-            <div class="empty-state">
-              <svg width="32" height="32" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
-              <span>No search performed yet. Type a query above to test hybrid technical search.</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- AI Context Mode Layout -->
-        <div id="context-section" style="display: none;">
-          <div class="search-container">
-            <input type="text" id="context-query" class="input-glow-focus" placeholder="Topic filter (optional) e.g., auth, database..." />
-            <button class="btn btn-secondary" id="context-btn">
-              <span>Generate Context</span>
-            </button>
-          </div>
-
-          <div class="context-viewer" id="context-raw-container"></div>
-          <div class="panel" style="background: rgba(30, 41, 59, 0.2); border-color: rgba(255,255,255,0.03); margin-top: 1rem; display:none" id="context-rendered-panel">
-            <div class="stat-label" style="color:var(--accent-magenta)">Synthesized Dev Context (Formatted)</div>
-            <div class="markdown-rendered" id="context-rendered-container" style="font-size:0.9rem; line-height:1.6; color:#e2e8f0"></div>
-          </div>
-          <div class="empty-state" id="context-empty-state">
-            <svg width="32" height="32" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
-            <span>Generates fully synthesized and prioritized project context using Gemini 2.0 Flash and historical database logs.</span>
-          </div>
-        </div>
-
+    <!-- Editor area -->
+    <div class="editor-area">
+      <div class="tab-bar">
+        <button class="tab active" id="tab-search" onclick="switchTab('search')">search_knowledge</button>
+        <button class="tab" id="tab-context" onclick="switchTab('context')">get_context</button>
+        <button class="tab" id="tab-ingest" onclick="switchTab('ingest')">save_entry</button>
       </div>
 
-      <!-- Right Panel: Save Memory Ingestor -->
-      <div class="panel">
-        <div class="panel-title">Ingest Technical Knowledge</div>
-        <p class="panel-subtitle">Manually seed memories to feed the Vector database. Your AI Agent will automatically read these when answering future queries.</p>
-        
-        <form id="ingest-form">
-          <div class="form-row">
+      <!-- Search panel -->
+      <div class="editor-panel active" id="panel-search">
+        <div class="info-strip">
+          <div class="info-cell">
+            <div class="info-cell-label">total entries</div>
+            <div class="info-cell-value" id="stat2-memories">—</div>
+            <div class="info-cell-sub">across all projects</div>
+          </div>
+          <div class="info-cell">
+            <div class="info-cell-label">projects tracked</div>
+            <div class="info-cell-value" id="stat2-projects">—</div>
+            <div class="info-cell-sub">registered codebases</div>
+          </div>
+          <div class="info-cell">
+            <div class="info-cell-label">vector dimensions</div>
+            <div class="info-cell-value">3072</div>
+            <div class="info-cell-sub">gemini-embedding-001</div>
+          </div>
+        </div>
+
+        <div class="search-row">
+          <input type="text" id="search-input" class="vscode-input" placeholder="Search bugs, decisions, patterns — paste exact error message for best results" />
+          <button class="vscode-btn" id="search-btn" onclick="performSearch()">Search</button>
+        </div>
+        <div id="results-container">
+          <div class="empty">// no search performed yet — type a query above</div>
+        </div>
+      </div>
+
+      <!-- Context panel -->
+      <div class="editor-panel" id="panel-context">
+        <p style="color:var(--text2); font-size:12px; font-family:var(--mono); margin-bottom:14px;">
+          // Synthesizes ranked project history into a context block ready for LLM prompt injection.
+        </p>
+        <div class="search-row">
+          <input type="text" id="context-query" class="vscode-input" placeholder="Optional topic filter — e.g. auth, database, deployment" />
+          <button class="vscode-btn" id="context-btn" onclick="generateContext()">Generate Context</button>
+        </div>
+        <pre class="context-pre" id="context-output"></pre>
+        <div class="empty" id="context-empty">// context will appear here</div>
+      </div>
+
+      <!-- Save entry panel -->
+      <div class="editor-panel" id="panel-ingest">
+        <p style="color:var(--text2); font-size:12px; font-family:var(--mono); margin-bottom:16px;">
+          // Seed technical memory. Entries are embedded with Gemini and stored in MongoDB Atlas for vector retrieval.
+        </p>
+        <form id="ingest-form" onsubmit="submitEntry(event)">
+          <div class="form-grid">
             <div class="form-group">
-              <label for="ingest-type">Entry Type</label>
-              <select id="ingest-type" required>
-                <option value="bug">Bug</option>
-                <option value="fix" selected>Fix</option>
-                <option value="decision">Decision</option>
-                <option value="pattern">Pattern</option>
-                <option value="lesson">Lesson</option>
-                <option value="stack">Stack</option>
-                <option value="anti-pattern">Anti-Pattern</option>
+              <label class="form-label">type</label>
+              <select id="ingest-type" class="vscode-select" required>
+                <option value="bug">bug</option>
+                <option value="fix" selected>fix</option>
+                <option value="decision">decision</option>
+                <option value="pattern">pattern</option>
+                <option value="lesson">lesson</option>
+                <option value="stack">stack</option>
+                <option value="anti-pattern">anti-pattern</option>
               </select>
             </div>
             <div class="form-group">
-              <label for="ingest-category">Category</label>
-              <select id="ingest-category" required>
+              <label class="form-label">category</label>
+              <select id="ingest-category" class="vscode-select" required>
                 <option value="auth">auth</option>
                 <option value="database" selected>database</option>
                 <option value="deployment">deployment</option>
@@ -1160,275 +1494,172 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 <option value="other">other</option>
               </select>
             </div>
-          </div>
-
-          <div class="form-group">
-            <label for="ingest-title">Short Title / Subject</label>
-            <input type="text" id="ingest-title" class="input-glow-focus" placeholder="e.g. Rate-limit 429 connection failures on startup" required />
-          </div>
-
-          <div class="form-group">
-            <label for="ingest-content">Full Description & Technical Solution</label>
-            <textarea id="ingest-content" placeholder="Describe the problem, root cause and exact technical resolution..." required></textarea>
-          </div>
-
-          <div class="form-group">
-            <label for="ingest-tags">Tags (comma-separated)</label>
-            <input type="text" id="ingest-tags" class="input-glow-focus" placeholder="e.g. mongodb, express, retry-delay, nodejs" />
-          </div>
-
-          <div class="form-row">
-            <div class="form-group">
-              <label for="ingest-error">Exact Error Pattern (optional)</label>
-              <input type="text" id="ingest-error" class="input-glow-focus" placeholder="e.g. RESOURCE_EXHAUSTED" />
+            <div class="form-group full">
+              <label class="form-label">title — specific and searchable</label>
+              <input type="text" id="ingest-title" class="vscode-input" placeholder="e.g. MongoDB authSource=admin required in production URI" required />
+            </div>
+            <div class="form-group full">
+              <label class="form-label">content — symptom + root cause + fix</label>
+              <textarea id="ingest-content" class="vscode-textarea" placeholder="Describe the problem, root cause, and exact resolution..." required></textarea>
             </div>
             <div class="form-group">
-              <label for="ingest-cause">Cause Archetype (optional)</label>
-              <input type="text" id="ingest-cause" class="input-glow-focus" placeholder="e.g. environment divergence" />
+              <label class="form-label">error_pattern (exact error text)</label>
+              <input type="text" id="ingest-error" class="vscode-input" placeholder="MongoServerError: Authentication failed" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">cause_archetype (abstract pattern)</label>
+              <input type="text" id="ingest-cause" class="vscode-input" placeholder="environment config divergence" />
+            </div>
+            <div class="form-group full">
+              <label class="form-label">tags (comma-separated)</label>
+              <input type="text" id="ingest-tags" class="vscode-input" placeholder="mongodb, auth, production, connection-string" />
             </div>
           </div>
-
-          <button type="submit" class="btn form-submit-btn" style="margin-top: 1rem;" id="submit-btn">
-            <span>Ingest to DevBrain Database</span>
-          </button>
+          <button type="submit" class="vscode-btn" id="submit-btn" style="width:100%; padding:8px;">Save to DevBrain</button>
         </form>
       </div>
 
     </div>
-
-    <!-- Compliant Documentation Section -->
-    <div class="doc-section">
-      <h3 style="font-family:'Outfit'; font-size:1.4rem; color:var(--text-primary);">Integration & Architecture</h3>
-      <div class="doc-grid">
-        <div class="doc-col">
-          <h4>Google Cloud Run</h4>
-          <p>This DevBrain instance runs inside a highly optimized Docker container deployed to Google Cloud Run, serving both as an HTTP JSON REST API for Google Cloud Agent Builder and as an SSE Streamable MCP endpoint on <code>/mcp</code>.</p>
-        </div>
-        <div class="doc-col">
-          <h4>MongoDB Atlas Vector Search</h4>
-          <p>Leverages high-dimensional technical embeddings (3072 dimensions) mapped by <code>gemini-embedding-001</code> and stores them natively in MongoDB Atlas. Employs hybrid keyword and vector cosine-similarity indices to achieve lightning-fast retrieval.</p>
-        </div>
-        <div class="doc-col">
-          <h4>Gemini AI Synthesis</h4>
-          <p>Integrates Gemini 2.0 Flash to automatically summarize and categorize session recaps, extract deep transferable archetypes, and compress ranked vector matches into actionable context blocks for downstream agents.</p>
-        </div>
-      </div>
-    </div>
-
   </div>
 
-  <!-- Toast Toast Notification -->
-  <div class="toast" id="success-toast">
-    <div class="toast-success-icon">✓</div>
-    <span id="toast-message">Knowledge Ingested Successfully!</span>
+  <div class="statusbar">
+    <span class="statusbar-item">devbrain v0.1.0</span>
+    <span class="statusbar-item">|</span>
+    <span class="statusbar-item">Gemini 2.0 Flash</span>
+    <span class="statusbar-item">|</span>
+    <span class="statusbar-item">MongoDB Atlas</span>
+    <span class="statusbar-item">|</span>
+    <span class="statusbar-item">MCP: /mcp</span>
   </div>
+
+  <div class="toast" id="success-toast" id="toast-message">entry saved</div>
 
   <script>
-    // Tab switching
-    const tabSearch = document.getElementById('tab-search');
-    const tabContext = document.getElementById('tab-context');
-    const searchSection = document.getElementById('search-section');
-    const contextSection = document.getElementById('context-section');
-    const playDesc = document.getElementById('playground-desc');
+    function switchTab(name) {
+      ['search','context','ingest'].forEach(t => {
+        document.getElementById('panel-' + t).classList.toggle('active', t === name);
+        document.getElementById('tab-' + t).classList.toggle('active', t === name);
+        const nav = document.getElementById('nav-' + t);
+        if (nav) nav.classList.toggle('active', t === name);
+      });
+    }
 
-    tabSearch.addEventListener('click', () => {
-      searchSection.style.display = 'block';
-      contextSection.style.display = 'none';
-      playDesc.innerText = 'Query your long-term technical memory with MongoDB Atlas Vector Search. Simply type a technical question or bug description below.';
-    });
-
-    tabContext.addEventListener('click', () => {
-      searchSection.style.display = 'none';
-      contextSection.style.display = 'block';
-      playDesc.innerText = 'Simulate memory synthesis blocks compiled for standard LLM prompt headers. Gemini evaluates your entire project history and produces a ranked, aggregated snapshot.';
-    });
-
-    // Render Stats
     async function loadStats() {
       try {
         const res = await fetch('/api/stats');
-        if (!res.ok) return;
         const data = await res.json();
-        document.getElementById('stat-memories').innerText = data.totalEntries ?? 0;
-        document.getElementById('stat-projects').innerText = data.totalProjects ?? 0;
-      } catch (err) {
-        console.error('Failed to load stats', err);
-      }
+        const e = data.totalEntries ?? 0;
+        const p = data.totalProjects ?? 0;
+        document.getElementById('stat-memories').innerText = e;
+        document.getElementById('stat-projects').innerText = p;
+        document.getElementById('stat2-memories').innerText = e;
+        document.getElementById('stat2-projects').innerText = p;
+      } catch {}
     }
 
-    // Toast show helper
     function showToast(msg) {
-      const toast = document.getElementById('success-toast');
-      document.getElementById('toast-message').innerText = msg;
-      toast.classList.add('show');
-      setTimeout(() => toast.classList.remove('show'), 3500);
+      const t = document.getElementById('success-toast');
+      t.innerText = msg;
+      t.classList.add('show');
+      setTimeout(() => t.classList.remove('show'), 3000);
     }
 
-    // Render Search Results
-    const searchBtn = document.getElementById('search-btn');
-    const searchInput = document.getElementById('search-input');
-    const resultsContainer = document.getElementById('results-container');
+    function typeBadgeClass(type) {
+      const map = { bug:'type-bug', fix:'type-fix', decision:'type-decision', pattern:'type-pattern', lesson:'type-lesson', 'anti-pattern':'type-anti-pattern', stack:'type-stack', note:'type-note' };
+      return map[type] || 'type-default';
+    }
 
     async function performSearch() {
-      const query = searchInput.value.trim();
+      const query = document.getElementById('search-input').value.trim();
       if (!query) return;
-
-      searchBtn.disabled = true;
-      searchBtn.innerText = 'Searching...';
-
+      const btn = document.getElementById('search-btn');
+      const container = document.getElementById('results-container');
+      btn.disabled = true; btn.innerText = 'Searching...';
+      container.innerHTML = '<div class="empty">// searching...</div>';
       try {
-        const res = await fetch('/api/search', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query })
-        });
-        
-        if (!res.ok) throw new Error('Search failed');
+        const res = await fetch('/api/search', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ query }) });
         const data = await res.json();
-        
-        resultsContainer.innerHTML = '';
         const results = data.results ?? [];
-
         if (results.length === 0) {
-          resultsContainer.innerHTML = \`<div class="empty-state">
-            <svg width="32" height="32" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-            <span>No technical matches found. Try another technical term or bug error log.</span>
-          </div>\`;
+          container.innerHTML = '<div class="empty">// no matches found</div>';
         } else {
+          container.innerHTML = '';
+          const list = document.createElement('div');
+          list.className = 'results-list';
           results.forEach(r => {
-            const card = document.createElement('div');
-            card.className = 'result-card';
-            
-            const badgeClass = 'badge-' + (r.type || 'other');
-            const matchScore = r.match || 'Match';
-
-            const tagsHTML = (r.tags || []).map(t => \`<span class="tag">\${t}</span>\`).join('');
-
-            card.innerHTML = \`
-              <div class="card-header">
-                <div class="card-title-group">
-                  <div class="card-title">\${r.title}</div>
-                  <div class="card-meta">
-                    <span class="badge \${badgeClass}">\${r.type}</span>
-                    <span>Project: <b>\${r.project}</b></span>
-                  </div>
-                </div>
-                <div class="score-badge">\${matchScore}</div>
+            const item = document.createElement('div');
+            item.className = 'result-item';
+            const tagsHTML = (r.tags||[]).map(t => \`<span class="tag-chip">\${t}</span>\`).join('');
+            item.innerHTML = \`
+              <div class="result-header">
+                <span class="type-badge \${typeBadgeClass(r.type)}">\${r.type}</span>
+                <span class="result-title">\${r.title}</span>
+                <span class="score-tag">\${r.match}</span>
               </div>
-              <div class="card-content">\${r.content}</div>
-              <div class="card-tags">\${tagsHTML}</div>
+              <div class="result-meta">\${r.project}</div>
+              <div class="result-content">\${r.content}</div>
+              \${tagsHTML ? '<div class="result-tags">' + tagsHTML + '</div>' : ''}
             \`;
-            resultsContainer.appendChild(card);
+            list.appendChild(item);
           });
+          container.appendChild(list);
         }
-      } catch (err) {
-        resultsContainer.innerHTML = \`<div class="empty-state" style="color:var(--accent-red)">
-          <span>Search encountered an error. Ensure GEMINI_API_KEY is active.</span>
-        </div>\`;
+      } catch {
+        container.innerHTML = '<div class="empty" style="color:var(--red)">// search error</div>';
       } finally {
-        searchBtn.disabled = false;
-        searchBtn.innerText = 'Search';
+        btn.disabled = false; btn.innerText = 'Search';
       }
     }
 
-    searchBtn.addEventListener('click', performSearch);
-    searchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') performSearch(); });
-
-    // Context Generator
-    const contextBtn = document.getElementById('context-btn');
-    const contextInput = document.getElementById('context-query');
-    const contextRaw = document.getElementById('context-raw-container');
-    const contextEmpty = document.getElementById('context-empty-state');
-    const contextRenderedPanel = document.getElementById('context-rendered-panel');
-    const contextRendered = document.getElementById('context-rendered-container');
-
-    function renderMarkdown(md) {
-      // simple MD parser for high-end styling
-      let html = md
-        .replace(/### (.*)/g, '<h3>$1</h3>')
-        .replace(/## (.*)/g, '<h3>$1</h3>')
-        .replace(/• (.*)/g, '<li>$1</li>')
-        .replace(/- (.*)/g, '<li>$1</li>')
-        .replace(/\`([^\`]+)\`/g, '<code style="background:rgba(255,255,255,0.08); padding:0.15rem 0.3rem; border-radius:4px; font-family:monospace; color:var(--accent-cyan)">$1</code>');
-      
-      // Wrap lists
-      html = html.replace(/(<li>.*<\/li>)/gs, '<ul>$1<\/ul>');
-      return html;
-    }
-
-    contextBtn.addEventListener('click', async () => {
-      const q = contextInput.value.trim();
-      contextBtn.disabled = true;
-      contextBtn.innerText = 'Synthesizing...';
-
+    async function generateContext() {
+      const q = document.getElementById('context-query').value.trim();
+      const btn = document.getElementById('context-btn');
+      const output = document.getElementById('context-output');
+      const empty = document.getElementById('context-empty');
+      btn.disabled = true; btn.innerText = 'Generating...';
       try {
-        const res = await fetch('/api/context', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query: q })
-        });
-        if (!res.ok) throw new Error('Context synthesis failed');
+        const res = await fetch('/api/context', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ query: q }) });
         const data = await res.json();
-        
-        contextEmpty.style.display = 'none';
-        contextRaw.style.display = 'block';
-        contextRaw.innerText = '=== MCP DEV_CONTEXT INJECTED ===\\n\\n' + data.text;
-        
-        contextRenderedPanel.style.display = 'block';
-        contextRendered.innerHTML = renderMarkdown(data.text);
-      } catch (err) {
-        showToast('Error generating AI context');
+        output.style.display = 'block';
+        empty.style.display = 'none';
+        output.textContent = data.text;
+      } catch {
+        showToast('context generation failed');
       } finally {
-        contextBtn.disabled = false;
-        contextBtn.innerText = 'Generate Context';
+        btn.disabled = false; btn.innerText = 'Generate Context';
       }
-    });
+    }
 
-    // Ingestion Form Submit
-    const ingestForm = document.getElementById('ingest-form');
-    const submitBtn = document.getElementById('submit-btn');
-
-    ingestForm.addEventListener('submit', async (e) => {
+    async function submitEntry(e) {
       e.preventDefault();
-      submitBtn.disabled = true;
-      submitBtn.innerText = 'Ingesting...';
-
-      const type = document.getElementById('ingest-type').value;
-      const category = document.getElementById('ingest-category').value;
-      const title = document.getElementById('ingest-title').value.trim();
-      const content = document.getElementById('ingest-content').value.trim();
-      const tagsText = document.getElementById('ingest-tags').value.trim();
-      const error_pattern = document.getElementById('ingest-error').value.trim();
-      const cause_archetype = document.getElementById('ingest-cause').value.trim();
-
-      const tags = tagsText ? tagsText.split(',').map(t => t.trim()).filter(t => t) : [];
-
+      const btn = document.getElementById('submit-btn');
+      btn.disabled = true; btn.innerText = 'Saving...';
+      const title    = document.getElementById('ingest-title').value.trim();
+      const tagsRaw  = document.getElementById('ingest-tags').value.trim();
+      const payload  = {
+        type:            document.getElementById('ingest-type').value,
+        category:        document.getElementById('ingest-category').value,
+        title,
+        content:         document.getElementById('ingest-content').value.trim(),
+        tags:            tagsRaw ? tagsRaw.split(',').map(t => t.trim()).filter(Boolean) : [],
+        error_pattern:   document.getElementById('ingest-error').value.trim() || undefined,
+        cause_archetype: document.getElementById('ingest-cause').value.trim() || undefined,
+      };
       try {
-        const res = await fetch('/api/save', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            type, title, content, tags, category,
-            error_pattern: error_pattern || undefined,
-            cause_archetype: cause_archetype || undefined
-          })
-        });
-
-        if (!res.ok) throw new Error('Failed to save memory');
-        const data = await res.json();
-        
-        showToast(\`✓ Ingested Entry: "\${title.slice(0, 30)}..."\`);
-        ingestForm.reset();
+        const res = await fetch('/api/save', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+        if (!res.ok) throw new Error();
+        showToast(\`saved: \${title.slice(0,40)}\`);
+        document.getElementById('ingest-form').reset();
         await loadStats();
-      } catch (err) {
-        showToast('Error saving entry: ' + err.message);
+      } catch {
+        showToast('save failed');
       } finally {
-        submitBtn.disabled = false;
-        submitBtn.innerText = 'Ingest to DevBrain Database';
+        btn.disabled = false; btn.innerText = 'Save to DevBrain';
       }
-    });
+    }
 
-    // On Load
+    document.getElementById('search-input').addEventListener('keydown', e => { if (e.key === 'Enter') performSearch(); });
+
     loadStats();
   </script>
 </body>
