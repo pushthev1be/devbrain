@@ -165,8 +165,8 @@ async function handleInit(): Promise<void> {
       console.log(`  ${YELLOW}⚠${RESET}  Not a git repo — add notes manually`);
     }
 
-    // Write CLAUDE.md so Claude Code calls DevBrain tools automatically
-    const claudeMdPath = join(repoRoot, 'CLAUDE.md');
+    // Write DEV_CONTEXT.md so AI agents call DevBrain tools automatically
+    const devContextMdPath = join(repoRoot, 'DEV_CONTEXT.md');
     const devbrainBlock = [
       '## DevBrain Memory',
       '',
@@ -176,94 +176,75 @@ async function handleInit(): Promise<void> {
       '',
       `Project: ${name}  |  Stack: ${stack.join(', ') || 'Unknown'}`,
       '',
-      '### Before every task — run these shell commands',
+      '### Before every task',
       '```',
-      '# Load ranked project history before writing any code:',
-      `devbrain context`,
+      '# Load ranked engineering history before writing any code:',
+      'devbrain context',
       '',
-      '# If working on a specific topic:',
-      `devbrain context <topic>`,
-      '',
-      '# Before debugging an error — search with exact error text:',
-      `devbrain search "<error message or symptom>"`,
+      '# Before debugging — search with the EXACT error text or symptom:',
+      'devbrain search "<paste exact error message>"',
       '```',
       '',
-      '### While working — save automatically, without being asked',
+      '### Save to DevBrain when you notice any of these signals',
+      '',
+      'Do not wait to be asked. Save immediately when you think any of these:',
+      '',
+      '- "That was non-obvious — I would not have known that without digging"',
+      '- "This fix took longer than it should have — future me should know this"',
+      '- "This behavior is counterintuitive — it looks like X but actually does Y"',
+      '- "This pattern would apply to other parts of the codebase too"',
+      '- "If I had known this upfront I would have designed it differently"',
+      '- "This is a gotcha specific to this stack/environment/version"',
+      '- "We decided against the obvious approach — here is why"',
+      '- "This error message is misleading — the real cause is something else"',
+      '- "This works in dev but will break in production for this exact reason"',
+      '',
       '```',
-      '# After fixing a bug, making a decision, or learning something:',
-      `devbrain note "fix: <what you fixed and how"`,
-      `devbrain note "decision: <what you decided and why"`,
-      `devbrain note "lesson: <what you learned the hard way"`,
+      '# Save anything matching the above signals:',
+      'devbrain note "fix: <non-obvious fix + what the root cause actually was>"',
+      'devbrain note "lesson: <what looked right but was wrong, and why>"',
+      'devbrain note "decision: <what was chosen, what was rejected, and why>"',
+      'devbrain note "pattern: <reusable approach that applies beyond this file>"',
+      'devbrain note "anti-pattern: <what to never do here and the consequence>"',
+      'devbrain note "bug: <the symptom, the misleading surface error, the real cause>"',
       '```',
+      '',
+      '### What makes a good DevBrain entry',
+      '- **Title**: specific and searchable, not generic ("JWT expiry fails in prod" not "auth bug")',
+      '- **Body**: include the symptom, the root cause, and the exact fix — not just the fix',
+      '- **Error pattern**: if there is an exact error message, always include it verbatim',
+      '- **Cause archetype**: name the abstract pattern ("environment config divergence", "missing cleanup in teardown")',
       '',
       '### Rules',
       '- Run `devbrain context` before starting any non-trivial task — no exceptions.',
       '- Run `devbrain search` before debugging any error you have not seen before.',
-      '- Save after fixing or deciding — do not wait until end of session.',
+      '- Save proactively — if you had to think to solve it, save it.',
       '- **Never reimplement devbrain** — if the binary is missing, run `npm install -g devbrain`.',
       '',
     ].join('\n');
 
     const marker = '## DevBrain Memory';
-    if (!existsSync(claudeMdPath)) {
-      writeFileSync(claudeMdPath, devbrainBlock, 'utf-8');
-      console.log(`  ${GREEN}✓${RESET} Created CLAUDE.md — Claude will call DevBrain automatically`);
+    if (!existsSync(devContextMdPath)) {
+      writeFileSync(devContextMdPath, devbrainBlock, 'utf-8');
+      console.log(`  ${GREEN}✓${RESET} Created DEV_CONTEXT.md — AI Agent will call DevBrain automatically`);
     } else {
-      const existing = readFileSync(claudeMdPath, 'utf-8');
+      const existing = readFileSync(devContextMdPath, 'utf-8');
       if (!existing.includes(marker)) {
-        writeFileSync(claudeMdPath, existing.trimEnd() + '\n\n' + devbrainBlock, 'utf-8');
-        console.log(`  ${GREEN}✓${RESET} Updated CLAUDE.md — DevBrain block appended`);
+        writeFileSync(devContextMdPath, existing.trimEnd() + '\n\n' + devbrainBlock, 'utf-8');
+        console.log(`  ${GREEN}✓${RESET} Updated DEV_CONTEXT.md — DevBrain block appended`);
       } else {
-        console.log(`  ${DIM}CLAUDE.md already has DevBrain block — skipped${RESET}`);
-      }
-    }
-    // Write .claude/settings.json with PostToolUse hook for autonomous saving
-    const clauDirPath      = join(repoRoot, '.claude');
-    const settingsPath     = join(clauDirPath, 'settings.json');
-    const hookCommand      =
-      'echo "DevBrain: if this edit fixed a bug, made a decision, established a ' +
-      'pattern, or learned something — call save_entry via the devbrain MCP tool now"';
-    const hookEntry = {
-      hooks: {
-        PostToolUse: [
-          {
-            matcher: 'Edit|Write',
-            hooks: [{ type: 'command', command: hookCommand }],
-          },
-        ],
-      },
-    };
-
-    if (!existsSync(clauDirPath)) mkdirSync(clauDirPath, { recursive: true });
-    if (!existsSync(settingsPath)) {
-      writeFileSync(settingsPath, JSON.stringify(hookEntry, null, 2), 'utf-8');
-      console.log(`  ${GREEN}✓${RESET} Created .claude/settings.json — saves triggered after every edit`);
-    } else {
-      try {
-        const existing = JSON.parse(readFileSync(settingsPath, 'utf-8'));
-        const alreadyHasHook = JSON.stringify(existing).includes('DevBrain');
-        if (!alreadyHasHook) {
-          existing.hooks ??= {};
-          existing.hooks.PostToolUse ??= [];
-          existing.hooks.PostToolUse.push(...hookEntry.hooks.PostToolUse);
-          writeFileSync(settingsPath, JSON.stringify(existing, null, 2), 'utf-8');
-          console.log(`  ${GREEN}✓${RESET} Updated .claude/settings.json — DevBrain hook added`);
-        } else {
-          console.log(`  ${DIM}.claude/settings.json already has DevBrain hook — skipped${RESET}`);
-        }
-      } catch {
-        console.log(`  ${YELLOW}⚠${RESET}  Could not update .claude/settings.json — check manually`);
+        console.log(`  ${DIM}DEV_CONTEXT.md already has DevBrain block — skipped${RESET}`);
       }
     }
 
-    // Print MCP server config so Claude Code sees devbrain tools natively
+    // Print MCP server config so standard AI tools see devbrain tools natively
     const W2  = Math.min(process.stdout.columns || 80, 80);
     const bar2 = `${DIM}${'─'.repeat(W2)}${RESET}`;
     console.log(bar2);
-    console.log(`\n  ${BOLD}${CYAN}Connect DevBrain to Claude Code${RESET}  ${DIM}(one-time setup per machine)${RESET}\n`);
-    console.log(`  Add this to your Claude Code MCP settings so Claude calls DevBrain`);
-    console.log(`  tools automatically — without needing to be asked:\n`);
-    console.log(`${CYAN}  ┌─ ~/.claude/claude_desktop_config.json ─────────────────────────────┐${RESET}`);
+    console.log(`\n  ${BOLD}${CYAN}Connect DevBrain to your AI Agent / MCP Host${RESET}  ${DIM}(one-time setup per machine)${RESET}\n`);
+    console.log(`  Add this to your MCP settings or Google Cloud Agent Builder so the agent`);
+    console.log(`  calls DevBrain tools automatically — without needing to be asked:\n`);
+    console.log(`${CYAN}  ┌─ MCP Client Configuration JSON ─────────────────────────────────────┐${RESET}`);
     console.log(`  ${DIM}{${RESET}`);
     console.log(`    ${DIM}"mcpServers": {${RESET}`);
     console.log(`      ${CYAN}"devbrain"${RESET}${DIM}: {${RESET}`);
@@ -273,7 +254,7 @@ async function handleInit(): Promise<void> {
     console.log(`    ${DIM}}${RESET}`);
     console.log(`  ${DIM}}${RESET}`);
     console.log(`${CYAN}  └────────────────────────────────────────────────────────────────────┘${RESET}\n`);
-    console.log(`  ${DIM}Or in Claude Code: Settings → MCP Servers → Add → paste the URL above${RESET}\n`);
+    console.log(`  ${DIM}Or configure standard stdio host using the DevBrain MCP server binary.${RESET}\n`);
     console.log(bar2);
     console.log();
 
@@ -293,33 +274,49 @@ function printInitInstructions(name: string, stack: string[], repoRoot: string):
   const stackStr = stack.join(', ') || 'Unknown';
 
   console.log(`${bar}`);
-  console.log(`\n  ${BOLD}${CYAN}Next step — tell Claude to set up DevBrain for this project${RESET}\n`);
-  console.log(`  ${DIM}Paste the block below into your Claude Code chat:${RESET}\n`);
+  console.log(`\n  ${BOLD}${CYAN}Next step — tell your AI Agent (e.g. Gemini / Agent Builder) to set up DevBrain${RESET}\n`);
+  console.log(`  ${DIM}Paste the block below into your AI Agent's chat:${RESET}\n`);
   console.log(
 `${CYAN}────────────────────────────────── copy from here ──────────────────────────${RESET}
-You are setting up DevBrain memory for the project at "${repoRoot}".
+You are setting up DevBrain persistent memory for the project at "${repoRoot}".
 
 Do these two things now:
 
-1. CREATE CLAUDE.md (or append if it exists) with this block:
+1. CREATE or APPEND to DEV_CONTEXT.md with this block:
 
 ## DevBrain Memory
 
 Project: ${name}  |  Stack: ${stackStr}
 
 ### Before every task
-- Call \`get_context\` with the task topic before writing code.
-- Call \`search_knowledge\` with the exact error text before debugging.
+- Call \`get_context\` with the task topic before writing any code.
+- Call \`search_knowledge\` with the EXACT error text before debugging anything.
 
-### While working — save automatically, without being asked
-Call \`save_entry\` when you fix a bug, make an architectural decision, discover a
-reusable pattern, identify something to avoid, or learn something the hard way.
+### Save to DevBrain when you notice any of these signals (do not wait to be asked)
+Save immediately whenever you think:
+- "That was non-obvious — I would not have known that without digging"
+- "This fix took longer than it should — future me should know this"
+- "This behavior is counterintuitive — it looks like X but actually does Y"
+- "This pattern would apply to other parts of the codebase too"
+- "If I had known this upfront I would have designed it differently"
+- "This is a gotcha specific to this stack/environment/version combination"
+- "We decided against the obvious approach — here is why"
+- "This error message is misleading — the real cause is something else entirely"
+- "This works in dev but will silently break in production for this exact reason"
 
-Always include:
-  \`category\`     — one of: ${cats}
-  \`project_path\` — "${repoRoot}"
-  \`error_pattern\`  — exact error text for bugs/fixes
-  \`cause_archetype\` — abstract root cause, transferable across projects
+Call \`save_entry\` with:
+  type          — bug | fix | decision | pattern | lesson | anti-pattern | stack
+  title         — specific and searchable, not generic ("JWT expiry fails in prod" not "auth bug")
+  content       — symptom + root cause + exact fix (not just the fix)
+  error_pattern — exact verbatim error message if one exists
+  cause_archetype — abstract transferable root cause ("environment config divergence", "missing cleanup in teardown")
+  category      — auth | database | deployment | build | config | network | performance | ui | data | testing | security | other
+  project_path  — "${repoRoot}"
+
+### Rules
+- Run \`get_context\` before every non-trivial task — no exceptions.
+- Run \`search_knowledge\` before debugging any error you have not seen before.
+- Save proactively — if you had to think to solve it, it belongs in DevBrain.
 
 2. SCAN THIS PROJECT and save everything useful to DevBrain now:
    - Read README, package.json / equivalent, key config files, main entry points
@@ -1074,7 +1071,7 @@ const COMMANDS = [
   { value: '/save',    desc: 'Save entry  (bug: fix: stack: decision: image: ...)'},
   { value: '/delete',  desc: 'Delete an entry'                                    },
   { value: '/recap',   desc: 'AI-extract + save knowledge from a session'         },
-  { value: '/prompt',  desc: 'Generate Claude Code CLAUDE.md + ingestion prompt'  },
+  { value: '/prompt',  desc: 'Generate agent DEV_CONTEXT.md + ingestion prompt'  },
   { value: '/summary', desc: 'Project name, stack and recent entries'             },
   { value: '/export',  desc: 'Export knowledge to zip file'                       },
   { value: '/open',    desc: 'Open ~/.devbrain folder in file explorer'           },
@@ -1151,7 +1148,7 @@ async function handleInteractive(): Promise<void> {
   // eslint-disable-next-line no-constant-condition
   // bottom border is always the first dropdown item so both lines are
   // visible while the user is typing — top line (console.log) + input +
-  // bottom line (first item) = bordered input box, same as Claude Code
+  // bottom line (first item) = bordered input box, same as terminal agents
   const botSep = { name: sep, value: '__sep__', short: '' };
 
   while (true) {
@@ -1264,7 +1261,7 @@ async function main(): Promise<void> {
         console.log(`  ${CYAN}devbrain search${RESET} ${MAGENTA}<q>${RESET}    Semantic search`);
         console.log(`  ${CYAN}devbrain note${RESET} ${MAGENTA}"<t>"${RESET}   Save  ${DIM}(bug: fix: stack: decision: image:...)${RESET}`);
         console.log(`  ${CYAN}devbrain export${RESET}        Export knowledge to zip`);
-        console.log(`  ${CYAN}devbrain prompt${RESET}        Generate CLAUDE.md block + ingestion prompt`);
+        console.log(`  ${CYAN}devbrain prompt${RESET}        Generate DEV_CONTEXT.md block + ingestion prompt`);
         console.log(`  ${CYAN}devbrain recap${RESET}         AI-extract + save knowledge from a session`);
         console.log(`  ${CYAN}devbrain open${RESET}          Open ~/.devbrain in file explorer\n`);
         break;

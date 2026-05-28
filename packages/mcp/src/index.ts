@@ -9,7 +9,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import {
   getProjectByPath, upsertProject, insertEntry,
-  getEntriesByProject, getAllEntriesWithProjects,
+  getEntriesByProject, getAllEntriesWithProjects, getAllProjects,
   getRepoRoot, getProjectName, detectStack,
   getEmbedding, similarityLabel, timeAgo,
   buildContext, compressContext, formatContext,
@@ -493,6 +493,947 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       },
     };
 
+    // ─── STUNNING DEVCONTEXT DASHBOARD HTML ─────────────────────────────────────
+    const HTML_DASHBOARD = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DevBrain — Developer Memory System</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Outfit:wght@600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-color: #070a13;
+      --panel-bg: rgba(15, 23, 42, 0.65);
+      --panel-border: rgba(255, 255, 255, 0.08);
+      --text-primary: #f8fafc;
+      --text-secondary: #94a3b8;
+      --accent-cyan: #06b6d4;
+      --accent-magenta: #d946ef;
+      --accent-green: #10b981;
+      --accent-red: #f43f5e;
+      --accent-yellow: #eab308;
+      --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4);
+      --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    * {
+      box-sizing: border-box;
+      scrollbar-width: thin;
+      scrollbar-color: var(--panel-border) transparent;
+    }
+
+    body {
+      margin: 0;
+      padding: 0;
+      background-color: var(--bg-color);
+      color: var(--text-primary);
+      font-family: 'Inter', sans-serif;
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+      background-image: 
+        radial-gradient(circle at 12% 18%, rgba(6, 182, 212, 0.06) 0%, transparent 45%),
+        radial-gradient(circle at 88% 82%, rgba(217, 70, 239, 0.06) 0%, transparent 45%);
+    }
+
+    /* Scrollbars */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: var(--panel-border);
+      border-radius: 4px;
+    }
+
+    /* Container */
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 2.5rem 1.5rem;
+    }
+
+    /* Navigation & Header */
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 2.5rem;
+      border-bottom: 1px solid var(--panel-border);
+      padding-bottom: 1.5rem;
+    }
+
+    .logo-container {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .logo-glow {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--accent-cyan), var(--accent-magenta));
+      box-shadow: 0 0 12px var(--accent-cyan);
+      animation: pulse 2s infinite ease-in-out;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 0.7; transform: scale(1); }
+      50% { opacity: 1; transform: scale(1.15); box-shadow: 0 0 18px var(--accent-magenta); }
+    }
+
+    h1 {
+      font-family: 'Outfit', sans-serif;
+      font-size: 1.75rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      background: linear-gradient(to right, #ffffff, #94a3b8);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .mcp-status {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: rgba(16, 185, 129, 0.1);
+      border: 1px solid rgba(16, 185, 129, 0.2);
+      padding: 0.4rem 0.8rem;
+      border-radius: 9999px;
+      font-size: 0.8rem;
+      font-weight: 500;
+      color: var(--accent-green);
+    }
+
+    .mcp-status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background-color: var(--accent-green);
+      box-shadow: 0 0 8px var(--accent-green);
+    }
+
+    /* Grid layout */
+    .dashboard-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 1.5rem;
+      margin-bottom: 2.5rem;
+    }
+
+    .stat-card {
+      background: var(--panel-bg);
+      border: 1px solid var(--panel-border);
+      border-radius: 12px;
+      padding: 1.5rem;
+      box-shadow: var(--glass-shadow);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      transition: var(--transition);
+    }
+
+    .stat-card:hover {
+      transform: translateY(-2px);
+      border-color: rgba(255, 255, 255, 0.15);
+      box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.5);
+    }
+
+    .stat-label {
+      font-size: 0.85rem;
+      color: var(--text-secondary);
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 0.5rem;
+    }
+
+    .stat-value {
+      font-family: 'Outfit', sans-serif;
+      font-size: 2.25rem;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+
+    .stat-sub {
+      font-size: 0.75rem;
+      margin-top: 0.5rem;
+      color: var(--text-secondary);
+      display: flex;
+      align-items: center;
+      gap: 0.25rem;
+    }
+
+    /* Main Area Split */
+    .main-layout {
+      display: grid;
+      grid-template-columns: 1.7fr 1.3fr;
+      gap: 2rem;
+    }
+
+    .panel {
+      background: var(--panel-bg);
+      border: 1px solid var(--panel-border);
+      border-radius: 16px;
+      padding: 2rem;
+      box-shadow: var(--glass-shadow);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+    }
+
+    .panel-title {
+      font-family: 'Outfit', sans-serif;
+      font-size: 1.25rem;
+      font-weight: 600;
+      margin-bottom: 1.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: var(--text-primary);
+    }
+
+    .panel-subtitle {
+      font-size: 0.85rem;
+      color: var(--text-secondary);
+      margin-top: -1.25rem;
+      margin-bottom: 1.5rem;
+      line-height: 1.4;
+    }
+
+    /* Search Input & Controls */
+    .search-container {
+      display: flex;
+      gap: 0.75rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .input-glow-focus {
+      flex: 1;
+      background: rgba(15, 23, 42, 0.8);
+      border: 1px solid var(--panel-border);
+      border-radius: 8px;
+      padding: 0.8rem 1rem;
+      color: var(--text-primary);
+      font-family: 'Inter', sans-serif;
+      font-size: 0.95rem;
+      outline: none;
+      transition: var(--transition);
+    }
+
+    .input-glow-focus:focus {
+      border-color: var(--accent-cyan);
+      box-shadow: 0 0 10px rgba(6, 182, 212, 0.2);
+    }
+
+    .btn {
+      background: linear-gradient(135deg, var(--accent-cyan), #0891b2);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      padding: 0.8rem 1.5rem;
+      font-family: 'Inter', sans-serif;
+      font-size: 0.9rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: var(--transition);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 15px rgba(6, 182, 212, 0.4);
+      filter: brightness(1.1);
+    }
+
+    .btn-secondary {
+      background: linear-gradient(135deg, var(--accent-magenta), #c084fc);
+    }
+
+    .btn-secondary:hover {
+      box-shadow: 0 4px 15px rgba(217, 70, 239, 0.4);
+    }
+
+    /* Results */
+    .results-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      max-height: 520px;
+      overflow-y: auto;
+      padding-right: 0.25rem;
+    }
+
+    .result-card {
+      background: rgba(30, 41, 59, 0.4);
+      border: 1px solid var(--panel-border);
+      border-radius: 10px;
+      padding: 1.25rem;
+      transition: var(--transition);
+    }
+
+    .result-card:hover {
+      border-color: rgba(255, 255, 255, 0.12);
+      background: rgba(30, 41, 59, 0.55);
+    }
+
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 0.75rem;
+    }
+
+    .card-title-group {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+    }
+
+    .card-title {
+      font-family: 'Outfit', sans-serif;
+      font-size: 1.05rem;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .card-meta {
+      font-size: 0.75rem;
+      color: var(--text-secondary);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .badge {
+      font-size: 0.7rem;
+      padding: 0.2rem 0.5rem;
+      border-radius: 4px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+    }
+
+    .badge-bug { background: rgba(244, 63, 94, 0.15); color: var(--accent-red); border: 1px solid rgba(244, 63, 94, 0.2); }
+    .badge-fix { background: rgba(16, 185, 129, 0.15); color: var(--accent-green); border: 1px solid rgba(16, 185, 129, 0.2); }
+    .badge-decision { background: rgba(217, 70, 239, 0.15); color: var(--accent-magenta); border: 1px solid rgba(217, 70, 239, 0.2); }
+    .badge-pattern { background: rgba(234, 179, 8, 0.15); color: var(--accent-yellow); border: 1px solid rgba(234, 179, 8, 0.2); }
+    .badge-lesson { background: rgba(234, 179, 8, 0.15); color: var(--accent-yellow); border: 1px solid rgba(234, 179, 8, 0.2); }
+    .badge-anti-pattern { background: rgba(244, 63, 94, 0.2); color: var(--accent-red); border: 1px solid rgba(244, 63, 94, 0.3); }
+    .badge-other { background: rgba(148, 163, 184, 0.15); color: var(--text-secondary); border: 1px solid rgba(148, 163, 184, 0.2); }
+
+    .score-badge {
+      background: rgba(6, 182, 212, 0.1);
+      border: 1px solid rgba(6, 182, 212, 0.2);
+      color: var(--accent-cyan);
+      font-family: monospace;
+      font-size: 0.8rem;
+      padding: 0.2rem 0.5rem;
+      border-radius: 4px;
+      font-weight: 500;
+    }
+
+    .card-content {
+      font-size: 0.85rem;
+      line-height: 1.5;
+      color: #cbd5e1;
+      white-space: pre-line;
+      margin-bottom: 0.75rem;
+    }
+
+    .card-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+    }
+
+    .tag {
+      font-size: 0.7rem;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      color: var(--text-secondary);
+      padding: 0.15rem 0.4rem;
+      border-radius: 4px;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 3rem 1.5rem;
+      color: var(--text-secondary);
+      font-size: 0.9rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    /* Form Styles */
+    .form-group {
+      margin-bottom: 1.25rem;
+    }
+
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+    }
+
+    label {
+      display: block;
+      font-size: 0.8rem;
+      font-weight: 500;
+      color: var(--text-secondary);
+      margin-bottom: 0.4rem;
+    }
+
+    select, textarea {
+      width: 100%;
+      background: rgba(15, 23, 42, 0.8);
+      border: 1px solid var(--panel-border);
+      border-radius: 8px;
+      padding: 0.8rem;
+      color: var(--text-primary);
+      font-family: 'Inter', sans-serif;
+      font-size: 0.9rem;
+      outline: none;
+      transition: var(--transition);
+    }
+
+    select:focus, textarea:focus {
+      border-color: var(--accent-cyan);
+      box-shadow: 0 0 10px rgba(6, 182, 212, 0.2);
+    }
+
+    textarea {
+      resize: vertical;
+      min-height: 100px;
+    }
+
+    .form-submit-btn {
+      width: 100%;
+      justify-content: center;
+      padding: 0.9rem;
+    }
+
+    /* Context viewer styling */
+    .context-viewer {
+      background: rgba(15, 23, 42, 0.8);
+      border: 1px solid var(--panel-border);
+      border-radius: 10px;
+      padding: 1.25rem;
+      font-family: monospace;
+      font-size: 0.85rem;
+      line-height: 1.5;
+      color: #e2e8f0;
+      max-height: 480px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      display: none;
+    }
+
+    .context-header-block {
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+      padding-bottom: 0.5rem;
+      margin-bottom: 0.5rem;
+      color: var(--accent-cyan);
+    }
+
+    .markdown-rendered h3 {
+      color: var(--accent-cyan);
+      font-size: 1rem;
+      margin-top: 1.25rem;
+      margin-bottom: 0.5rem;
+      border-bottom: 1px solid rgba(6, 182, 212, 0.2);
+      padding-bottom: 0.25rem;
+    }
+    .markdown-rendered p {
+      margin: 0.5rem 0;
+    }
+    .markdown-rendered ul {
+      margin: 0.5rem 0;
+      padding-left: 1.25rem;
+    }
+    .markdown-rendered li {
+      margin-bottom: 0.25rem;
+    }
+
+    /* Toast Notification */
+    .toast {
+      position: fixed;
+      bottom: 2rem;
+      right: 2rem;
+      background: rgba(15, 23, 42, 0.9);
+      border: 1px solid var(--accent-green);
+      border-radius: 8px;
+      padding: 1rem 1.5rem;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+      z-index: 1000;
+      transform: translateY(150%);
+      transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .toast.show {
+      transform: translateY(0);
+    }
+
+    .toast-success-icon {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: var(--accent-green);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.6rem;
+      color: #070a13;
+      font-weight: bold;
+    }
+
+    /* Doc section */
+    .doc-section {
+      margin-top: 3rem;
+      background: linear-gradient(135deg, rgba(30, 41, 59, 0.3), rgba(15, 23, 42, 0.3));
+      border: 1px solid var(--panel-border);
+      border-radius: 16px;
+      padding: 2.5rem;
+    }
+
+    .doc-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 2rem;
+      margin-top: 1.5rem;
+    }
+
+    .doc-col h4 {
+      font-family: 'Outfit', sans-serif;
+      font-size: 1.05rem;
+      font-weight: 600;
+      color: var(--accent-cyan);
+      margin-bottom: 0.75rem;
+    }
+
+    .doc-col p {
+      font-size: 0.85rem;
+      line-height: 1.6;
+      color: var(--text-secondary);
+    }
+
+    /* Responsive */
+    @media (max-width: 1024px) {
+      .dashboard-grid { grid-template-columns: repeat(2, 1fr); }
+      .main-layout { grid-template-columns: 1fr; }
+      .doc-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="logo-container">
+        <div class="logo-glow"></div>
+        <h1>DevBrain</h1>
+      </div>
+      <div class="mcp-status">
+        <div class="mcp-status-dot"></div>
+        <span>MCP REST Engine Connected</span>
+      </div>
+    </header>
+
+    <!-- Stats Grid -->
+    <div class="dashboard-grid">
+      <div class="stat-card">
+        <div class="stat-label">Total Memories</div>
+        <div class="stat-value" id="stat-memories">--</div>
+        <div class="stat-sub">📦 Active saved entries</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Tracked Projects</div>
+        <div class="stat-value" id="stat-projects">--</div>
+        <div class="stat-sub">📂 Registered codebases</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Brain Engine</div>
+        <div class="stat-value" style="font-size: 1.6rem; line-height: 2.25rem; font-weight:600; color:var(--accent-cyan)">Gemini 2.0</div>
+        <div class="stat-sub">🧠 Google Cloud AI Models</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Vector Storage</div>
+        <div class="stat-value" style="font-size: 1.6rem; line-height: 2.25rem; font-weight:600; color:var(--accent-magenta)">MongoDB Atlas</div>
+        <div class="stat-sub">⚡ 3072-dim Vector Search</div>
+      </div>
+    </div>
+
+    <!-- Main Workspace Split -->
+    <div class="main-layout">
+      
+      <!-- Left Panel: Playground Search & Context -->
+      <div class="panel">
+        <div class="panel-title">
+          <span>DevBrain Search & Synthesis Playground</span>
+          <div style="display:flex; gap:0.5rem">
+            <button class="btn" id="tab-search" style="padding: 0.4rem 0.8rem; font-size: 0.8rem;">Search</button>
+            <button class="btn btn-secondary" id="tab-context" style="padding: 0.4rem 0.8rem; font-size: 0.8rem;">AI Context</button>
+          </div>
+        </div>
+        <p class="panel-subtitle" id="playground-desc">Query your long-term technical memory with MongoDB Atlas Vector Search. Simply type a technical question or bug description below.</p>
+
+        <!-- Search Mode Layout -->
+        <div id="search-section">
+          <div class="search-container">
+            <input type="text" id="search-input" class="input-glow-focus" placeholder="Search bugs, architectural decisions or stack patterns..." />
+            <button class="btn" id="search-btn">
+              <span>Search</span>
+            </button>
+          </div>
+
+          <div class="results-grid" id="results-container">
+            <div class="empty-state">
+              <svg width="32" height="32" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+              <span>No search performed yet. Type a query above to test hybrid technical search.</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- AI Context Mode Layout -->
+        <div id="context-section" style="display: none;">
+          <div class="search-container">
+            <input type="text" id="context-query" class="input-glow-focus" placeholder="Topic filter (optional) e.g., auth, database..." />
+            <button class="btn btn-secondary" id="context-btn">
+              <span>Generate Context</span>
+            </button>
+          </div>
+
+          <div class="context-viewer" id="context-raw-container"></div>
+          <div class="panel" style="background: rgba(30, 41, 59, 0.2); border-color: rgba(255,255,255,0.03); margin-top: 1rem; display:none" id="context-rendered-panel">
+            <div class="stat-label" style="color:var(--accent-magenta)">Synthesized Dev Context (Formatted)</div>
+            <div class="markdown-rendered" id="context-rendered-container" style="font-size:0.9rem; line-height:1.6; color:#e2e8f0"></div>
+          </div>
+          <div class="empty-state" id="context-empty-state">
+            <svg width="32" height="32" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
+            <span>Generates fully synthesized and prioritized project context using Gemini 2.0 Flash and historical database logs.</span>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Right Panel: Save Memory Ingestor -->
+      <div class="panel">
+        <div class="panel-title">Ingest Technical Knowledge</div>
+        <p class="panel-subtitle">Manually seed memories to feed the Vector database. Your AI Agent will automatically read these when answering future queries.</p>
+        
+        <form id="ingest-form">
+          <div class="form-row">
+            <div class="form-group">
+              <label for="ingest-type">Entry Type</label>
+              <select id="ingest-type" required>
+                <option value="bug">Bug</option>
+                <option value="fix" selected>Fix</option>
+                <option value="decision">Decision</option>
+                <option value="pattern">Pattern</option>
+                <option value="lesson">Lesson</option>
+                <option value="stack">Stack</option>
+                <option value="anti-pattern">Anti-Pattern</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="ingest-category">Category</label>
+              <select id="ingest-category" required>
+                <option value="auth">auth</option>
+                <option value="database" selected>database</option>
+                <option value="deployment">deployment</option>
+                <option value="build">build</option>
+                <option value="config">config</option>
+                <option value="network">network</option>
+                <option value="performance">performance</option>
+                <option value="ui">ui</option>
+                <option value="data">data</option>
+                <option value="testing">testing</option>
+                <option value="security">security</option>
+                <option value="other">other</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="ingest-title">Short Title / Subject</label>
+            <input type="text" id="ingest-title" class="input-glow-focus" placeholder="e.g. Rate-limit 429 connection failures on startup" required />
+          </div>
+
+          <div class="form-group">
+            <label for="ingest-content">Full Description & Technical Solution</label>
+            <textarea id="ingest-content" placeholder="Describe the problem, root cause and exact technical resolution..." required></textarea>
+          </div>
+
+          <div class="form-group">
+            <label for="ingest-tags">Tags (comma-separated)</label>
+            <input type="text" id="ingest-tags" class="input-glow-focus" placeholder="e.g. mongodb, express, retry-delay, nodejs" />
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="ingest-error">Exact Error Pattern (optional)</label>
+              <input type="text" id="ingest-error" class="input-glow-focus" placeholder="e.g. RESOURCE_EXHAUSTED" />
+            </div>
+            <div class="form-group">
+              <label for="ingest-cause">Cause Archetype (optional)</label>
+              <input type="text" id="ingest-cause" class="input-glow-focus" placeholder="e.g. environment divergence" />
+            </div>
+          </div>
+
+          <button type="submit" class="btn form-submit-btn" style="margin-top: 1rem;" id="submit-btn">
+            <span>Ingest to DevBrain Database</span>
+          </button>
+        </form>
+      </div>
+
+    </div>
+
+    <!-- Compliant Documentation Section -->
+    <div class="doc-section">
+      <h3 style="font-family:'Outfit'; font-size:1.4rem; color:var(--text-primary);">Integration & Architecture</h3>
+      <div class="doc-grid">
+        <div class="doc-col">
+          <h4>Google Cloud Run</h4>
+          <p>This DevBrain instance runs inside a highly optimized Docker container deployed to Google Cloud Run, serving both as an HTTP JSON REST API for Google Cloud Agent Builder and as an SSE Streamable MCP endpoint on <code>/mcp</code>.</p>
+        </div>
+        <div class="doc-col">
+          <h4>MongoDB Atlas Vector Search</h4>
+          <p>Leverages high-dimensional technical embeddings (3072 dimensions) mapped by <code>gemini-embedding-001</code> and stores them natively in MongoDB Atlas. Employs hybrid keyword and vector cosine-similarity indices to achieve lightning-fast retrieval.</p>
+        </div>
+        <div class="doc-col">
+          <h4>Gemini AI Synthesis</h4>
+          <p>Integrates Gemini 2.0 Flash to automatically summarize and categorize session recaps, extract deep transferable archetypes, and compress ranked vector matches into actionable context blocks for downstream agents.</p>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Toast Toast Notification -->
+  <div class="toast" id="success-toast">
+    <div class="toast-success-icon">✓</div>
+    <span id="toast-message">Knowledge Ingested Successfully!</span>
+  </div>
+
+  <script>
+    // Tab switching
+    const tabSearch = document.getElementById('tab-search');
+    const tabContext = document.getElementById('tab-context');
+    const searchSection = document.getElementById('search-section');
+    const contextSection = document.getElementById('context-section');
+    const playDesc = document.getElementById('playground-desc');
+
+    tabSearch.addEventListener('click', () => {
+      searchSection.style.display = 'block';
+      contextSection.style.display = 'none';
+      playDesc.innerText = 'Query your long-term technical memory with MongoDB Atlas Vector Search. Simply type a technical question or bug description below.';
+    });
+
+    tabContext.addEventListener('click', () => {
+      searchSection.style.display = 'none';
+      contextSection.style.display = 'block';
+      playDesc.innerText = 'Simulate memory synthesis blocks compiled for standard LLM prompt headers. Gemini evaluates your entire project history and produces a ranked, aggregated snapshot.';
+    });
+
+    // Render Stats
+    async function loadStats() {
+      try {
+        const res = await fetch('/api/stats');
+        if (!res.ok) return;
+        const data = await res.json();
+        document.getElementById('stat-memories').innerText = data.totalEntries ?? 0;
+        document.getElementById('stat-projects').innerText = data.totalProjects ?? 0;
+      } catch (err) {
+        console.error('Failed to load stats', err);
+      }
+    }
+
+    // Toast show helper
+    function showToast(msg) {
+      const toast = document.getElementById('success-toast');
+      document.getElementById('toast-message').innerText = msg;
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 3500);
+    }
+
+    // Render Search Results
+    const searchBtn = document.getElementById('search-btn');
+    const searchInput = document.getElementById('search-input');
+    const resultsContainer = document.getElementById('results-container');
+
+    async function performSearch() {
+      const query = searchInput.value.trim();
+      if (!query) return;
+
+      searchBtn.disabled = true;
+      searchBtn.innerText = 'Searching...';
+
+      try {
+        const res = await fetch('/api/search', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query })
+        });
+        
+        if (!res.ok) throw new Error('Search failed');
+        const data = await res.json();
+        
+        resultsContainer.innerHTML = '';
+        const results = data.results ?? [];
+
+        if (results.length === 0) {
+          resultsContainer.innerHTML = \`<div class="empty-state">
+            <svg width="32" height="32" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+            <span>No technical matches found. Try another technical term or bug error log.</span>
+          </div>\`;
+        } else {
+          results.forEach(r => {
+            const card = document.createElement('div');
+            card.className = 'result-card';
+            
+            const badgeClass = 'badge-' + (r.type || 'other');
+            const matchScore = r.match || 'Match';
+
+            const tagsHTML = (r.tags || []).map(t => \`<span class="tag">\${t}</span>\`).join('');
+
+            card.innerHTML = \`
+              <div class="card-header">
+                <div class="card-title-group">
+                  <div class="card-title">\${r.title}</div>
+                  <div class="card-meta">
+                    <span class="badge \${badgeClass}">\${r.type}</span>
+                    <span>Project: <b>\${r.project}</b></span>
+                  </div>
+                </div>
+                <div class="score-badge">\${matchScore}</div>
+              </div>
+              <div class="card-content">\${r.content}</div>
+              <div class="card-tags">\${tagsHTML}</div>
+            \`;
+            resultsContainer.appendChild(card);
+          });
+        }
+      } catch (err) {
+        resultsContainer.innerHTML = \`<div class="empty-state" style="color:var(--accent-red)">
+          <span>Search encountered an error. Ensure GEMINI_API_KEY is active.</span>
+        </div>\`;
+      } finally {
+        searchBtn.disabled = false;
+        searchBtn.innerText = 'Search';
+      }
+    }
+
+    searchBtn.addEventListener('click', performSearch);
+    searchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') performSearch(); });
+
+    // Context Generator
+    const contextBtn = document.getElementById('context-btn');
+    const contextInput = document.getElementById('context-query');
+    const contextRaw = document.getElementById('context-raw-container');
+    const contextEmpty = document.getElementById('context-empty-state');
+    const contextRenderedPanel = document.getElementById('context-rendered-panel');
+    const contextRendered = document.getElementById('context-rendered-container');
+
+    function renderMarkdown(md) {
+      // simple MD parser for high-end styling
+      let html = md
+        .replace(/### (.*)/g, '<h3>$1</h3>')
+        .replace(/## (.*)/g, '<h3>$1</h3>')
+        .replace(/• (.*)/g, '<li>$1</li>')
+        .replace(/- (.*)/g, '<li>$1</li>')
+        .replace(/\`([^\`]+)\`/g, '<code style="background:rgba(255,255,255,0.08); padding:0.15rem 0.3rem; border-radius:4px; font-family:monospace; color:var(--accent-cyan)">$1</code>');
+      
+      // Wrap lists
+      html = html.replace(/(<li>.*<\/li>)/gs, '<ul>$1<\/ul>');
+      return html;
+    }
+
+    contextBtn.addEventListener('click', async () => {
+      const q = contextInput.value.trim();
+      contextBtn.disabled = true;
+      contextBtn.innerText = 'Synthesizing...';
+
+      try {
+        const res = await fetch('/api/context', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query: q })
+        });
+        if (!res.ok) throw new Error('Context synthesis failed');
+        const data = await res.json();
+        
+        contextEmpty.style.display = 'none';
+        contextRaw.style.display = 'block';
+        contextRaw.innerText = '=== MCP DEV_CONTEXT INJECTED ===\\n\\n' + data.text;
+        
+        contextRenderedPanel.style.display = 'block';
+        contextRendered.innerHTML = renderMarkdown(data.text);
+      } catch (err) {
+        showToast('Error generating AI context');
+      } finally {
+        contextBtn.disabled = false;
+        contextBtn.innerText = 'Generate Context';
+      }
+    });
+
+    // Ingestion Form Submit
+    const ingestForm = document.getElementById('ingest-form');
+    const submitBtn = document.getElementById('submit-btn');
+
+    ingestForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      submitBtn.disabled = true;
+      submitBtn.innerText = 'Ingesting...';
+
+      const type = document.getElementById('ingest-type').value;
+      const category = document.getElementById('ingest-category').value;
+      const title = document.getElementById('ingest-title').value.trim();
+      const content = document.getElementById('ingest-content').value.trim();
+      const tagsText = document.getElementById('ingest-tags').value.trim();
+      const error_pattern = document.getElementById('ingest-error').value.trim();
+      const cause_archetype = document.getElementById('ingest-cause').value.trim();
+
+      const tags = tagsText ? tagsText.split(',').map(t => t.trim()).filter(t => t) : [];
+
+      try {
+        const res = await fetch('/api/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type, title, content, tags, category,
+            error_pattern: error_pattern || undefined,
+            cause_archetype: cause_archetype || undefined
+          })
+        });
+
+        if (!res.ok) throw new Error('Failed to save memory');
+        const data = await res.json();
+        
+        showToast(\`✓ Ingested Entry: "\${title.slice(0, 30)}..."\`);
+        ingestForm.reset();
+        await loadStats();
+      } catch (err) {
+        showToast('Error saving entry: ' + err.message);
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.innerText = 'Ingest to DevBrain Database';
+      }
+    });
+
+    // On Load
+    loadStats();
+  </script>
+</body>
+</html>`;
+
     const httpServer = createServer(async (req, res) => {
       const url = req.url?.split('?')[0];
 
@@ -501,12 +1442,35 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         res.end(); return;
       }
 
+      if (req.method === 'GET' && url === '/') {
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end(HTML_DASHBOARD);
+        return;
+      }
+
       if (req.method === 'GET' && url === '/health') {
         json(res, 200, { status: 'ok', service: 'devbrain-mcp' }); return;
       }
 
       if (req.method === 'GET' && url === '/openapi.json') {
         json(res, 200, OPENAPI_SPEC); return;
+      }
+
+      if (req.method === 'GET' && url === '/api/stats') {
+        try {
+          const all = await getAllEntriesWithProjects();
+          const projects = await getAllProjects();
+          const counts: Record<string, number> = { bug: 0, fix: 0, note: 0, decision: 0, pattern: 0, lesson: 0, stack: 0, solution: 0, 'anti-pattern': 0 };
+          for (const e of all) { if (e.type in counts) counts[e.type]++; }
+          json(res, 200, {
+            totalEntries: all.length,
+            totalProjects: projects.length,
+            counts,
+          });
+        } catch (err) {
+          json(res, 500, { error: String(err) });
+        }
+        return;
       }
 
       // ── REST API for Agent Builder ─────────────────────────────────────────
@@ -613,7 +1577,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       console.log(`DevBrain MCP server listening on port ${PORT}`);
     });
   } else {
-    // stdio mode — local Claude Code
+    // stdio mode — local MCP client / agent
     const transport = new StdioServerTransport();
     await server.connect(transport);
   }

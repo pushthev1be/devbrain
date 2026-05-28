@@ -1,7 +1,7 @@
 {
   "name": "@devbrain/mcp",
   "version": "0.1.0",
-  "description": "DevBrain MCP server — connects DevBrain to Claude",
+  "description": "DevBrain MCP server — connects DevBrain to Gemini and other MCP-compliant agents",
   "bin": {
     "devbrain-mcp": "./dist/index.js"
   },

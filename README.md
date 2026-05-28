@@ -1,6 +1,6 @@
 # DevBrain
 
-Persistent developer memory for you and your AI agents. Captures knowledge from git commits, lets you save typed notes instantly, and injects ranked context into Claude before it starts work — so it already knows what broke before, what was decided, and why.
+Persistent developer memory for you and your AI agents. Captures technical knowledge from git commits, lets you save typed notes instantly, and injects ranked context into Gemini and other MCP-compliant agents before they start work — so they already know what broke before, what was decided, and why.
 
 <img width="923" height="866" alt="image" src="https://github.com/user-attachments/assets/68591649-0049-4e8d-bb72-620ffb604a91" />
 
@@ -8,7 +8,7 @@ Persistent developer memory for you and your AI agents. Captures knowledge from 
 
 ## How it works
 
-Every project you register gets two things: a git hook that captures knowledge from commits automatically, and an MCP server Claude Code connects to. When Claude starts a task it calls `get_context` to load your ranked engineering history. When it fixes a bug it calls `save_entry`. When you hit a known error pattern it finds the exact past fix — not just something semantically similar.
+Every project you register gets two things: a git hook that captures knowledge from commits automatically, and an MCP/HTTP server that Google Cloud Agent Builder, Gemini Code Assist, and other MCP clients connect to. When your agent starts a task, it calls `get_context` to load your ranked engineering history. When it fixes a bug, it calls `save_entry`. When you hit a known error pattern, it finds the exact past fix — not just something semantically similar.
 
 The memory compounds. An entry retrieved across multiple projects gets flagged as a cross-project pattern and surfaces in every future context load. An entry retrieved 3+ times gets promoted from `observation` to `confirmed` confidence.
 
@@ -33,9 +33,9 @@ mkdir -p ~/.devbrain
 echo "GEMINI_API_KEY=your_key_here" > ~/.devbrain/.env
 ```
 
-### Connect to Claude Code
+### Connect to your AI Agent or MCP Client
 
-Add to `~/.claude/mcp.json`:
+To run the MCP server locally using standard stdio transport, add this server block to your client configurations:
 
 ```json
 {
@@ -49,7 +49,7 @@ Add to `~/.claude/mcp.json`:
 }
 ```
 
-Restart Claude Code. DevBrain tools are now available in every session.
+For hosted developer teams, DevBrain is optimized for cloud deployment and supports Streamable HTTP (SSE) transport natively.
 
 ---
 
@@ -60,17 +60,19 @@ cd my-project
 devbrain /init
 ```
 
-Registers the project, detects the stack, installs the git hook. Then prints a block to paste into Claude Code chat. Claude creates `CLAUDE.md` with DevBrain instructions and scans the project — reading README, package.json, config files — saving what it finds as stack, decisions, and patterns. From that point Claude saves knowledge automatically during every session without being asked.
+Registers the project, detects the tech stack, installs the post-commit git hook, and creates `DEV_CONTEXT.md`.
 
-Run `devbrain /recap` after any session to extract and save anything Claude missed.
+`DEV_CONTEXT.md` provides prompt-level guidelines directing your AI agents (Gemini, Agent Builder, or terminal assistants) to automatically fetch technical history using `get_context` and log new learnings using `save_entry`. From that point on, your agent updates your project memory autonomously as you code.
+
+Run `devbrain /recap` after any coding session to extract and save anything your agent missed.
 
 ---
 
-## Claude Code integration
+## AI Agent Integration & MCP Tools
 
-Five MCP tools Claude calls automatically:
+Five MCP tools your agent calls automatically:
 
-| Tool | When Claude uses it |
+| Tool | When your agent uses it |
 |------|----------------------|
 | `get_context` | Start of any non-trivial task — loads ranked engineering history |
 | `search_knowledge` | Before debugging — searches by error text + semantic similarity |
@@ -78,7 +80,7 @@ Five MCP tools Claude calls automatically:
 | `query_entries` | Browse by type/category/recency — "show me all auth decisions" |
 | `get_project_summary` | Quick count of what's stored for a project |
 
-CLAUDE.md instructs Claude to call these automatically — you never need to ask.
+`DEV_CONTEXT.md` instructs the agent to invoke these tools automatically — you never need to prompt manually.
 
 ---
 
@@ -97,7 +99,7 @@ devbrain  ❯ /
   /browse       Scroll through all saved entries
   /save         Save entry  (bug: fix: stack: decision: anti-pattern: ...)
   /recap        AI-extract + save knowledge from a session
-  /prompt       Regenerate Claude Code setup block
+  /prompt       Regenerate agent DEV_CONTEXT.md setup block
   /summary      Project name, stack and recent entries
   /export       Export knowledge to zip file
   /open         Open ~/.devbrain in file explorer
@@ -153,7 +155,7 @@ Sections with 2+ entries are synthesized by Gemini into bullet-point insights. T
 
 ---
 
-## Retrieval
+## Technical Retrieval Ranking
 
 Search uses a two-pass approach: pattern matching on stored `errorPattern` fields first, then semantic cosine similarity on embeddings as fallback. This means pasting an exact error message finds the specific past fix even if the wording differs from how it was saved.
 
@@ -168,7 +170,7 @@ The same-project boost only fires when the entry already scores > 0.72 semantica
 
 ---
 
-## Knowledge fields
+## Knowledge Fields
 
 Every entry stores:
 
@@ -190,35 +192,19 @@ After `devbrain /init`, a post-commit hook runs after every commit. Gemini extra
 
 ---
 
-## Engineering decisions
+## Engineering & Architectural Decisions
 
-**JSON over SQLite** — the project targets Windows-first use where native module compilation is a common failure point. `better-sqlite3` requires node-gyp and Visual Studio build tools. Pure JSON with `readFileSync`/`writeFileSync` has zero native dependencies, works on every platform, and is trivially portable. The DB is a single file at `~/.devbrain/db.json`.
+**MongoDB Atlas for Cloud Scaling & Stored Vectors** — Employs a robust hosted MongoDB Atlas database for technical vector searches. High-dimensional technical embeddings (3072 dimensions) are matched against vector cosine similarity indexes directly in the cloud. Local pure JSON storage is maintained for offline development, ensuring absolute platform portability and zero startup friction.
 
-**Gemini over OpenAI** — `gemini-embedding-001` produces 3072-dimension embeddings vs OpenAI's 1536. Higher dimensionality improves retrieval precision for technical content where subtle semantic differences matter. Gemini 2.0 Flash handles extraction and synthesis at lower cost than GPT-4o.
+**Gemini 2.0 Flash & High-Dimensional Embeddings** — `gemini-embedding-001` produces 3072-dimension embeddings. Higher dimensionality improves retrieval precision for technical content where subtle semantic differences matter. Gemini 2.0 Flash handles automated knowledge extraction and context synthesis in real-time, providing extremely high-speed processing.
 
 **Two-pass retrieval over pure semantic search** — semantic similarity alone misses cases where the user pastes an exact error message that was saved with different surrounding words. Pattern matching on `errorPattern` runs first as a high-precision pass; semantic search runs as the fallback. This is the difference between finding the exact fix vs finding something vaguely related.
 
-**Stdio MCP over HTTP** — stdio transport requires no port allocation, no auth tokens in config, no process management. Starts with Claude Code, stops with Claude Code. HTTP would add operational complexity for no benefit in this use case.
+**Dual-Transport MCP: stdio and SSE Cloud Run** — DevBrain is built for standard local workflows via stdio transport, and easily scales to team-wide cloud deployments via a containerized SSE HTTP server. Deploying to Google Cloud Run enables instant cross-project access for hosted agent builders (such as Google Cloud Agent Builder).
 
-**Monorepo with npm workspaces** — `core` contains all domain logic and is shared between `cli` and `mcp`. This prevents the two surfaces from drifting — a change to search ranking or entry schema is reflected in both automatically. The alternative (two separate packages) would require manually keeping them in sync.
+**Monorepo with npm workspaces** — `core` contains all domain logic and is shared between `cli` and `mcp`. This prevents the two surfaces from drifting — a change to search ranking or entry schema is reflected in both automatically.
 
-**No TTL or automatic expiry** — entries don't expire. A bug fix from two years ago is still valid knowledge. The ranking formula deprioritizes old entries via the recency score, but never removes them. The user controls deletion via `/browse`.
-
-**Confidence tiers over arbitrary scoring** — `observation → corroborated → confirmed` maps directly to how knowledge actually becomes reliable: it's observed once, then seen to work again, then proven across multiple retrievals. Tiers also communicate uncertainty to Claude — a `confirmed` fix gets a higher confidence score in ranking.
-
----
-
-## Storage
-
-Everything is local. The only external calls are to the Gemini API.
-
-```
-~/.devbrain/
-  db.json          # all projects, entries, and processed commits
-  .env             # GEMINI_API_KEY
-  setup.json       # first-run onboarding state
-  *-export.zip     # exports
-```
+**Confidence tiers over arbitrary scoring** — `observation → corroborated → confirmed` maps directly to how knowledge actually becomes reliable: it's observed once, then seen to work again, then proven across multiple retrievals.
 
 ---
 
@@ -226,8 +212,9 @@ Everything is local. The only external calls are to the Gemini API.
 
 - **Runtime**: Node.js
 - **Language**: TypeScript
-- **AI**: Gemini 2.0 Flash (extraction, synthesis) · gemini-embedding-001 (semantic search, 3072-dim)
-- **Storage**: Pure JSON — no native dependencies
+- **AI Backend**: Gemini 2.0 Flash (extraction, synthesis) · gemini-embedding-001 (semantic search, 3072-dim)
+- **Database**: MongoDB Atlas (Vector Search indices)
+- **Deployment**: Google Cloud Run (SSE HTTP server transport)
 - **CLI**: inquirer · inquirer-autocomplete-prompt
-- **MCP**: `@modelcontextprotocol/sdk` (stdio transport)
+- **MCP**: `@modelcontextprotocol/sdk` (stdio & HTTP transport modes)
 - **Monorepo**: npm workspaces (`packages/core` · `packages/cli` · `packages/mcp`)
