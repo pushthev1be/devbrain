@@ -499,7 +499,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>DevBrain â€” Developer Memory</title>
+  <title>DevBrain &mdash; Developer Memory</title>
   <style>
     :root {
       --bg:         #1e1e1e;
@@ -515,371 +515,114 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       --green:      #4ec994;
       --red:        #f14c4c;
       --yellow:     #cca700;
-      --orange:     #ce9178;
-      --purple:     #c586c0;
       --mono:       'Consolas', 'Courier New', monospace;
       --ui:         -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      background: var(--bg);
-      color: var(--text);
-      font-family: var(--ui);
-      font-size: 13px;
-      line-height: 1.5;
-      min-height: 100vh;
-    }
-    a { color: var(--accent); text-decoration: none; }
-    /* â”€â”€ Layout â”€â”€ */
-    .titlebar {
-      height: 36px;
-      background: var(--surface2);
-      border-bottom: 1px solid var(--border);
-      display: flex;
-      align-items: center;
-      padding: 0 16px;
-      gap: 12px;
-      user-select: none;
-    }
-    .titlebar-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+    html, body { height: 100%; overflow: hidden; }
+    body { background: var(--bg); color: var(--text); font-family: var(--ui); font-size: 13px; line-height: 1.5; display: flex; flex-direction: column; }
+    .titlebar { height: 36px; background: var(--surface2); border-bottom: 1px solid var(--border); display: flex; align-items: center; padding: 0 16px; gap: 12px; flex-shrink: 0; }
+    .titlebar-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
     .titlebar-name { font-size: 13px; color: var(--text2); font-family: var(--mono); }
-    .titlebar-badge {
-      margin-left: auto;
-      font-size: 11px;
-      color: var(--green);
-      background: transparent;
-      border: 1px solid #4ec99440;
-      padding: 2px 8px;
-      border-radius: 2px;
-      font-family: var(--mono);
-    }
-    .statusbar {
-      height: 22px;
-      background: var(--accent);
-      display: flex;
-      align-items: center;
-      padding: 0 12px;
-      gap: 16px;
-      font-size: 11px;
-      color: #fff;
-      font-family: var(--mono);
-    }
-    .statusbar-item { opacity: 0.9; }
-    .layout {
-      display: grid;
-      grid-template-columns: 220px 1fr;
-      height: calc(100vh - 58px);
-      overflow: hidden;
-    }
-    /* â”€â”€ Sidebar â”€â”€ */
-    .sidebar {
-      background: var(--surface);
-      border-right: 1px solid var(--border);
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-    }
-    .sidebar-section-label {
-      font-size: 11px;
-      font-weight: 600;
-      color: var(--text2);
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      padding: 8px 12px 4px;
-    }
-    .sidebar-item {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 5px 12px;
-      cursor: pointer;
-      color: var(--text2);
-      font-size: 13px;
-      border: none;
-      background: none;
-      width: 100%;
-      text-align: left;
-    }
+    .titlebar-badge { margin-left: auto; font-size: 11px; color: var(--green); border: 1px solid rgba(78,201,148,0.3); padding: 2px 8px; font-family: var(--mono); }
+    .layout { display: grid; grid-template-columns: 210px 1fr; flex: 1; overflow: hidden; }
+    .sidebar { background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow-y: auto; }
+    .sidebar-label { font-size: 11px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: 0.08em; padding: 10px 12px 4px; }
+    .sidebar-item { display: flex; align-items: center; gap: 8px; padding: 5px 12px; cursor: pointer; color: var(--text2); font-size: 13px; border: none; background: none; width: 100%; text-align: left; }
     .sidebar-item:hover { background: var(--surface2); color: var(--text); }
     .sidebar-item.active { background: var(--surface2); color: var(--text); }
-    .sidebar-item .icon { width: 16px; font-size: 12px; flex-shrink: 0; color: var(--text3); }
-    .sidebar-divider { height: 1px; background: var(--border); margin: 6px 0; }
-    .stat-block {
-      padding: 10px 12px;
-      border-bottom: 1px solid var(--border);
-    }
-    .stat-row { display: flex; justify-content: space-between; align-items: center; padding: 3px 0; }
-    .stat-label { color: var(--text2); font-size: 12px; }
-    .stat-value { color: var(--accent); font-family: var(--mono); font-size: 12px; font-weight: 600; }
-    /* â”€â”€ Main Editor Area â”€â”€ */
-    .editor-area {
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-    }
-    .tab-bar {
-      background: var(--surface2);
-      border-bottom: 1px solid var(--border);
-      display: flex;
-      flex-shrink: 0;
-    }
-    .tab {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      padding: 0 16px;
-      height: 35px;
-      font-size: 13px;
-      color: var(--text2);
-      border-right: 1px solid var(--border);
-      cursor: pointer;
-      white-space: nowrap;
-      background: var(--surface2);
-      border: none;
-      border-right: 1px solid var(--border);
-      border-bottom: 2px solid transparent;
-    }
+    .sidebar-item .ic { width: 14px; font-size: 11px; flex-shrink: 0; color: var(--text3); text-align: center; }
+    .sidebar-divider { height: 1px; background: var(--border); margin: 6px 0; flex-shrink: 0; }
+    .stat-block { padding: 8px 12px 10px; border-bottom: 1px solid var(--border); }
+    .stat-row { display: flex; justify-content: space-between; padding: 3px 0; }
+    .sl { color: var(--text2); font-size: 12px; }
+    .sv { color: var(--accent); font-family: var(--mono); font-size: 12px; font-weight: 600; }
+    .mono-sm { font-family: var(--mono); font-size: 11px; color: var(--text3); }
+    .editor-area { display: flex; flex-direction: column; overflow: hidden; }
+    .tab-bar { background: var(--surface2); border-bottom: 1px solid var(--border); display: flex; flex-shrink: 0; }
+    .tab { display: flex; align-items: center; height: 35px; padding: 0 16px; font-size: 13px; color: var(--text2); border: none; border-right: 1px solid var(--border); border-bottom: 2px solid transparent; cursor: pointer; background: var(--surface2); white-space: nowrap; font-family: var(--mono); }
     .tab:hover { color: var(--text); background: var(--surface); }
     .tab.active { color: var(--text); background: var(--bg); border-bottom: 2px solid var(--accent); }
     .editor-panel { display: none; flex: 1; overflow-y: auto; padding: 20px 24px; }
     .editor-panel.active { display: block; }
-    /* â”€â”€ Search Panel â”€â”€ */
-    .search-row {
-      display: flex;
-      gap: 8px;
-      margin-bottom: 16px;
-    }
-    .vscode-input {
-      flex: 1;
-      background: var(--surface2);
-      border: 1px solid var(--border);
-      color: var(--text);
-      font-family: var(--mono);
-      font-size: 13px;
-      padding: 5px 8px;
-      outline: none;
-      border-radius: 0;
-    }
-    .vscode-input:focus { border-color: var(--accent); }
-    .vscode-input::placeholder { color: var(--text3); }
-    .vscode-btn {
-      background: var(--accent-dim);
-      color: #fff;
-      border: none;
-      padding: 5px 14px;
-      font-size: 13px;
-      font-family: var(--ui);
-      cursor: pointer;
-      white-space: nowrap;
-    }
-    .vscode-btn:hover { background: var(--accent); }
-    .vscode-btn:disabled { opacity: 0.5; cursor: default; }
-    .vscode-btn-ghost {
-      background: transparent;
-      color: var(--text2);
-      border: 1px solid var(--border);
-      padding: 5px 14px;
-      font-size: 13px;
-      font-family: var(--ui);
-      cursor: pointer;
-    }
-    .vscode-btn-ghost:hover { background: var(--surface2); color: var(--text); }
-    /* â”€â”€ Results â”€â”€ */
+    .info-strip { display: grid; grid-template-columns: repeat(3,1fr); gap: 1px; background: var(--border); border: 1px solid var(--border); margin-bottom: 18px; }
+    .info-cell { background: var(--surface); padding: 10px 14px; }
+    .ic-label { font-size: 10px; color: var(--text3); font-family: var(--mono); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 3px; }
+    .ic-value { font-size: 20px; font-family: var(--mono); color: var(--text); font-weight: 600; }
+    .ic-sub { font-size: 11px; color: var(--text2); font-family: var(--mono); margin-top: 2px; }
+    .search-row { display: flex; gap: 8px; margin-bottom: 14px; }
+    .vi { flex: 1; background: var(--surface2); border: 1px solid var(--border); color: var(--text); font-family: var(--mono); font-size: 13px; padding: 5px 8px; outline: none; }
+    .vi:focus { border-color: var(--accent); }
+    .vi::placeholder { color: var(--text3); }
+    .vbtn { background: var(--accent-dim); color: #fff; border: none; padding: 5px 16px; font-size: 13px; font-family: var(--ui); cursor: pointer; white-space: nowrap; }
+    .vbtn:hover { background: var(--accent); }
+    .vbtn:disabled { opacity: 0.45; cursor: default; }
     .results-list { display: flex; flex-direction: column; gap: 1px; }
-    .result-item {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      padding: 10px 14px;
-    }
-    .result-item:hover { background: var(--surface2); border-color: var(--border2); }
-    .result-header { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
-    .result-title { color: var(--text); font-size: 13px; flex: 1; }
-    .result-meta { color: var(--text2); font-size: 11px; font-family: var(--mono); margin-bottom: 4px; }
-    .result-content { color: var(--text2); font-size: 12px; font-family: var(--mono); line-height: 1.4; }
-    .result-tags { display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap; }
-    .type-badge {
-      font-size: 10px;
-      font-family: var(--mono);
-      padding: 1px 5px;
-      border: 1px solid;
-      border-radius: 2px;
-      text-transform: lowercase;
-    }
-    .type-bug      { color: var(--red);    border-color: #f14c4c40; background: #f14c4c0d; }
-    .type-fix      { color: var(--green);  border-color: #4ec99440; background: #4ec9940d; }
-    .type-decision { color: var(--purple); border-color: #c586c040; background: #c586c00d; }
-    .type-pattern  { color: var(--yellow); border-color: #cca70040; background: #cca7000d; }
-    .type-lesson   { color: var(--yellow); border-color: #cca70040; background: #cca7000d; }
-    .type-anti-pattern { color: var(--red); border-color: #f14c4c40; background: #f14c4c0d; }
-    .type-stack    { color: var(--accent); border-color: #007acc40; background: #007acc0d; }
-    .type-note     { color: var(--text2);  border-color: var(--border); background: transparent; }
-    .type-default  { color: var(--text2);  border-color: var(--border); background: transparent; }
-    .score-tag { font-size: 10px; font-family: var(--mono); color: var(--text3); }
-    .tag-chip {
-      font-size: 10px;
-      font-family: var(--mono);
-      color: var(--text3);
-      background: var(--surface2);
-      border: 1px solid var(--border);
-      padding: 1px 5px;
-    }
-    /* â”€â”€ Form â”€â”€ */
+    .ri { background: var(--surface); border: 1px solid var(--border); padding: 10px 14px; }
+    .ri:hover { background: var(--surface2); border-color: var(--border2); }
+    .rh { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; }
+    .rt { color: var(--text); font-size: 13px; flex: 1; }
+    .rm { color: var(--text2); font-size: 11px; font-family: var(--mono); margin-bottom: 3px; }
+    .rc { color: var(--text2); font-size: 12px; font-family: var(--mono); line-height: 1.4; }
+    .rtags { display: flex; gap: 4px; margin-top: 5px; flex-wrap: wrap; }
+    .tb { font-size: 10px; font-family: var(--mono); padding: 1px 5px; border: 1px solid; }
+    .t-bug       { color: #f14c4c; border-color: rgba(241,76,76,0.3);   background: rgba(241,76,76,0.07); }
+    .t-fix       { color: #4ec994; border-color: rgba(78,201,148,0.3);  background: rgba(78,201,148,0.07); }
+    .t-decision  { color: #c586c0; border-color: rgba(197,134,192,0.3); background: rgba(197,134,192,0.07); }
+    .t-pattern   { color: #cca700; border-color: rgba(204,167,0,0.3);   background: rgba(204,167,0,0.07); }
+    .t-lesson    { color: #cca700; border-color: rgba(204,167,0,0.3);   background: rgba(204,167,0,0.07); }
+    .t-anti      { color: #f14c4c; border-color: rgba(241,76,76,0.35);  background: rgba(241,76,76,0.1); }
+    .t-stack     { color: #007acc; border-color: rgba(0,122,204,0.3);   background: rgba(0,122,204,0.07); }
+    .t-default   { color: var(--text2); border-color: var(--border); }
+    .sc { font-size: 10px; font-family: var(--mono); color: var(--text3); }
+    .tag-chip { font-size: 10px; font-family: var(--mono); color: var(--text3); background: var(--surface2); border: 1px solid var(--border); padding: 1px 5px; }
+    .empty { padding: 28px 0; color: var(--text3); font-family: var(--mono); font-size: 12px; text-align: center; }
     .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    .form-group { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
-    .form-group.full { grid-column: 1 / -1; }
-    .form-label { font-size: 11px; color: var(--text2); font-family: var(--mono); }
-    .vscode-select {
-      background: var(--surface2);
-      border: 1px solid var(--border);
-      color: var(--text);
-      font-family: var(--mono);
-      font-size: 13px;
-      padding: 5px 8px;
-      outline: none;
-      width: 100%;
-      border-radius: 0;
-    }
-    .vscode-select:focus { border-color: var(--accent); }
-    .vscode-textarea {
-      background: var(--surface2);
-      border: 1px solid var(--border);
-      color: var(--text);
-      font-family: var(--mono);
-      font-size: 12px;
-      padding: 6px 8px;
-      outline: none;
-      resize: vertical;
-      min-height: 80px;
-      width: 100%;
-      border-radius: 0;
-      line-height: 1.5;
-    }
-    .vscode-textarea:focus { border-color: var(--accent); }
-    /* â”€â”€ Context viewer â”€â”€ */
-    .context-pre {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      padding: 14px 16px;
-      font-family: var(--mono);
-      font-size: 12px;
-      line-height: 1.6;
-      color: var(--text2);
-      white-space: pre-wrap;
-      overflow-y: auto;
-      max-height: 500px;
-      display: none;
-    }
-    .context-pre .ctx-heading { color: var(--accent); }
-    .context-pre .ctx-sub { color: var(--text); font-weight: 600; }
-    .context-pre .ctx-entry-bug { color: var(--red); }
-    .context-pre .ctx-entry-fix { color: var(--green); }
-    .context-pre .ctx-entry { color: var(--text2); }
-    /* â”€â”€ Empty state â”€â”€ */
-    .empty {
-      padding: 32px 0;
-      color: var(--text3);
-      font-family: var(--mono);
-      font-size: 12px;
-      text-align: center;
-    }
-    /* â”€â”€ Toast â”€â”€ */
-    .toast {
-      position: fixed;
-      bottom: 28px;
-      right: 24px;
-      background: var(--surface2);
-      border: 1px solid var(--accent);
-      color: var(--text);
-      padding: 8px 16px;
-      font-size: 12px;
-      font-family: var(--mono);
-      transform: translateY(80px);
-      opacity: 0;
-      transition: transform 0.2s ease, opacity 0.2s ease;
-      z-index: 999;
-    }
+    .fg { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+    .fg.full { grid-column: 1 / -1; }
+    .fl { font-size: 11px; color: var(--text2); font-family: var(--mono); }
+    .vs { width: 100%; background: var(--surface2); border: 1px solid var(--border); color: var(--text); font-family: var(--mono); font-size: 13px; padding: 5px 8px; outline: none; }
+    .vs:focus { border-color: var(--accent); }
+    .vta { width: 100%; background: var(--surface2); border: 1px solid var(--border); color: var(--text); font-family: var(--mono); font-size: 12px; padding: 6px 8px; outline: none; resize: vertical; min-height: 80px; line-height: 1.5; }
+    .vta:focus { border-color: var(--accent); }
+    .ctx-pre { background: var(--surface); border: 1px solid var(--border); padding: 14px 16px; font-family: var(--mono); font-size: 12px; line-height: 1.6; color: var(--text2); white-space: pre-wrap; overflow-y: auto; max-height: calc(100vh - 200px); display: none; }
+    .toast { position: fixed; bottom: 26px; right: 20px; background: var(--surface2); border: 1px solid var(--accent); color: var(--text); padding: 7px 14px; font-size: 12px; font-family: var(--mono); transform: translateY(60px); opacity: 0; transition: transform 0.2s ease, opacity 0.2s ease; z-index: 999; }
     .toast.show { transform: translateY(0); opacity: 1; }
-    /* â”€â”€ Scrollbar â”€â”€ */
-    ::-webkit-scrollbar { width: 8px; }
-    ::-webkit-scrollbar-track { background: var(--bg); }
-    ::-webkit-scrollbar-thumb { background: var(--border2); }
-    ::-webkit-scrollbar-thumb:hover { background: #5a5a5a; }
-    /* â”€â”€ Info strip â”€â”€ */
-    .info-strip {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 1px;
-      background: var(--border);
-      border: 1px solid var(--border);
-      margin-bottom: 20px;
-    }
-    .info-cell {
-      background: var(--surface);
-      padding: 10px 14px;
-    }
-    .info-cell-label { font-size: 10px; color: var(--text3); font-family: var(--mono); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 3px; }
-    .info-cell-value { font-size: 18px; font-family: var(--mono); color: var(--text); font-weight: 600; }
-    .info-cell-sub { font-size: 11px; color: var(--text2); font-family: var(--mono); margin-top: 2px; }
+    .statusbar { height: 22px; background: var(--accent); display: flex; align-items: center; padding: 0 12px; gap: 16px; font-size: 11px; color: #fff; font-family: var(--mono); flex-shrink: 0; }
+    ::-webkit-scrollbar { width: 8px; } ::-webkit-scrollbar-track { background: var(--bg); } ::-webkit-scrollbar-thumb { background: var(--border2); }
   </style>
 </head>
 <body>
-
   <div class="titlebar">
     <div class="titlebar-dot"></div>
-    <span class="titlebar-name">devbrain - developer memory</span>
-    <span class="titlebar-badge" id="conn-badge">â— connected</span>
+    <span class="titlebar-name">devbrain &mdash; developer memory</span>
+    <span class="titlebar-badge" id="conn-badge">&#9679; connected</span>
   </div>
 
   <div class="layout">
-
-    <!-- Sidebar -->
     <div class="sidebar">
       <div class="stat-block">
-        <div class="sidebar-section-label">Database</div>
-        <div class="stat-row"><span class="stat-label">entries</span><span class="stat-value" id="stat-memories">â€”</span></div>
-        <div class="stat-row"><span class="stat-label">projects</span><span class="stat-value" id="stat-projects">â€”</span></div>
+        <div class="sidebar-label">Database</div>
+        <div class="stat-row"><span class="sl">entries</span><span class="sv" id="stat-memories">&mdash;</span></div>
+        <div class="stat-row"><span class="sl">projects</span><span class="sv" id="stat-projects">&mdash;</span></div>
       </div>
-
-      <div class="sidebar-section-label" style="margin-top:8px;">Views</div>
-      <button class="sidebar-item active" id="nav-search" onclick="switchTab('search')">
-        <span class="icon">âŒ•</span> Search
-      </button>
-      <button class="sidebar-item" id="nav-context" onclick="switchTab('context')">
-        <span class="icon">â‰¡</span> Context
-      </button>
-      <button class="sidebar-item" id="nav-ingest" onclick="switchTab('ingest')">
-        <span class="icon">+</span> Save Entry
-      </button>
-
+      <div class="sidebar-label" style="margin-top:8px">Views</div>
+      <button class="sidebar-item active" id="nav-search" onclick="switchTab('search')"><span class="ic">&#9654;</span> Search</button>
+      <button class="sidebar-item" id="nav-context" onclick="switchTab('context')"><span class="ic">&#8801;</span> Context</button>
+      <button class="sidebar-item" id="nav-ingest" onclick="switchTab('ingest')"><span class="ic">+</span> Save Entry</button>
       <div class="sidebar-divider"></div>
-      <div class="sidebar-section-label">Stack</div>
-      <div class="sidebar-item" style="cursor:default; color: var(--text3);">
-        <span class="icon">â—†</span> Gemini 2.0 Flash
-      </div>
-      <div class="sidebar-item" style="cursor:default; color: var(--text3);">
-        <span class="icon">â—†</span> MongoDB Atlas
-      </div>
-      <div class="sidebar-item" style="cursor:default; color: var(--text3);">
-        <span class="icon">â—†</span> Google Cloud Run
-      </div>
-
+      <div class="sidebar-label">Stack</div>
+      <div class="sidebar-item" style="cursor:default;color:var(--text3)"><span class="ic">&diams;</span> Gemini 2.0 Flash</div>
+      <div class="sidebar-item" style="cursor:default;color:var(--text3)"><span class="ic">&diams;</span> MongoDB Atlas</div>
+      <div class="sidebar-item" style="cursor:default;color:var(--text3)"><span class="ic">&diams;</span> Google Cloud Run</div>
       <div class="sidebar-divider"></div>
-      <div class="sidebar-section-label">Endpoints</div>
-      <div class="sidebar-item" style="cursor:default; font-family:var(--mono); font-size:11px; color:var(--text3);">
-        POST /api/search
-      </div>
-      <div class="sidebar-item" style="cursor:default; font-family:var(--mono); font-size:11px; color:var(--text3);">
-        POST /api/save
-      </div>
-      <div class="sidebar-item" style="cursor:default; font-family:var(--mono); font-size:11px; color:var(--text3);">
-        POST /api/context
-      </div>
-      <div class="sidebar-item" style="cursor:default; font-family:var(--mono); font-size:11px; color:var(--text3);">
-        GET  /mcp  (SSE)
-      </div>
+      <div class="sidebar-label">Endpoints</div>
+      <div class="sidebar-item" style="cursor:default"><span class="mono-sm">POST /api/search</span></div>
+      <div class="sidebar-item" style="cursor:default"><span class="mono-sm">POST /api/save</span></div>
+      <div class="sidebar-item" style="cursor:default"><span class="mono-sm">POST /api/context</span></div>
+      <div class="sidebar-item" style="cursor:default"><span class="mono-sm">GET  /mcp  (SSE)</span></div>
     </div>
 
-    <!-- Editor area -->
     <div class="editor-area">
       <div class="tab-bar">
         <button class="tab active" id="tab-search" onclick="switchTab('search')">search_knowledge</button>
@@ -887,256 +630,179 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         <button class="tab" id="tab-ingest" onclick="switchTab('ingest')">save_entry</button>
       </div>
 
-      <!-- Search panel -->
       <div class="editor-panel active" id="panel-search">
         <div class="info-strip">
-          <div class="info-cell">
-            <div class="info-cell-label">total entries</div>
-            <div class="info-cell-value" id="stat2-memories">â€”</div>
-            <div class="info-cell-sub">across all projects</div>
-          </div>
-          <div class="info-cell">
-            <div class="info-cell-label">projects tracked</div>
-            <div class="info-cell-value" id="stat2-projects">â€”</div>
-            <div class="info-cell-sub">registered codebases</div>
-          </div>
-          <div class="info-cell">
-            <div class="info-cell-label">vector dimensions</div>
-            <div class="info-cell-value">3072</div>
-            <div class="info-cell-sub">gemini-embedding-001</div>
-          </div>
+          <div class="info-cell"><div class="ic-label">total entries</div><div class="ic-value" id="stat2-memories">&mdash;</div><div class="ic-sub">across all projects</div></div>
+          <div class="info-cell"><div class="ic-label">projects tracked</div><div class="ic-value" id="stat2-projects">&mdash;</div><div class="ic-sub">registered codebases</div></div>
+          <div class="info-cell"><div class="ic-label">vector dimensions</div><div class="ic-value">3072</div><div class="ic-sub">gemini-embedding-001</div></div>
         </div>
-
         <div class="search-row">
-          <input type="text" id="search-input" class="vscode-input" placeholder="Search bugs, decisions, patterns â€” paste exact error message for best results" />
-          <button class="vscode-btn" id="search-btn" onclick="performSearch()">Search</button>
+          <input type="text" id="search-input" class="vi" placeholder="Search bugs, decisions, patterns &mdash; paste exact error message for best results" />
+          <button class="vbtn" id="search-btn" onclick="performSearch()">Search</button>
         </div>
-        <div id="results-container">
-          <div class="empty">// no search performed yet â€” type a query above</div>
-        </div>
+        <div id="results-container"><div class="empty">// no search performed yet &mdash; type a query above</div></div>
       </div>
 
-      <!-- Context panel -->
       <div class="editor-panel" id="panel-context">
-        <p style="color:var(--text2); font-size:12px; font-family:var(--mono); margin-bottom:14px;">
-          // Synthesizes ranked project history into a context block ready for LLM prompt injection.
-        </p>
+        <p style="color:var(--text2);font-size:12px;font-family:var(--mono);margin-bottom:14px">// Synthesizes ranked project history into a context block ready for LLM prompt injection.</p>
         <div class="search-row">
-          <input type="text" id="context-query" class="vscode-input" placeholder="Optional topic filter â€” e.g. auth, database, deployment" />
-          <button class="vscode-btn" id="context-btn" onclick="generateContext()">Generate Context</button>
+          <input type="text" id="context-query" class="vi" placeholder="Optional topic filter &mdash; e.g. auth, database, deployment" />
+          <button class="vbtn" id="context-btn" onclick="generateContext()">Generate Context</button>
         </div>
-        <pre class="context-pre" id="context-output"></pre>
+        <pre class="ctx-pre" id="context-output"></pre>
         <div class="empty" id="context-empty">// context will appear here</div>
       </div>
 
-      <!-- Save entry panel -->
       <div class="editor-panel" id="panel-ingest">
-        <p style="color:var(--text2); font-size:12px; font-family:var(--mono); margin-bottom:16px;">
-          // Seed technical memory. Entries are embedded with Gemini and stored in MongoDB Atlas for vector retrieval.
-        </p>
+        <p style="color:var(--text2);font-size:12px;font-family:var(--mono);margin-bottom:16px">// Seed technical memory. Entries are embedded with Gemini and stored in MongoDB Atlas for vector retrieval.</p>
         <form id="ingest-form" onsubmit="submitEntry(event)">
           <div class="form-grid">
-            <div class="form-group">
-              <label class="form-label">type</label>
-              <select id="ingest-type" class="vscode-select" required>
-                <option value="bug">bug</option>
-                <option value="fix" selected>fix</option>
-                <option value="decision">decision</option>
-                <option value="pattern">pattern</option>
-                <option value="lesson">lesson</option>
-                <option value="stack">stack</option>
+            <div class="fg"><label class="fl">type</label>
+              <select id="ingest-type" class="vs" required>
+                <option value="bug">bug</option><option value="fix" selected>fix</option>
+                <option value="decision">decision</option><option value="pattern">pattern</option>
+                <option value="lesson">lesson</option><option value="stack">stack</option>
                 <option value="anti-pattern">anti-pattern</option>
               </select>
             </div>
-            <div class="form-group">
-              <label class="form-label">category</label>
-              <select id="ingest-category" class="vscode-select" required>
-                <option value="auth">auth</option>
-                <option value="database" selected>database</option>
-                <option value="deployment">deployment</option>
-                <option value="build">build</option>
-                <option value="config">config</option>
-                <option value="network">network</option>
-                <option value="performance">performance</option>
-                <option value="ui">ui</option>
-                <option value="data">data</option>
-                <option value="testing">testing</option>
-                <option value="security">security</option>
-                <option value="other">other</option>
+            <div class="fg"><label class="fl">category</label>
+              <select id="ingest-category" class="vs" required>
+                <option value="auth">auth</option><option value="database" selected>database</option>
+                <option value="deployment">deployment</option><option value="build">build</option>
+                <option value="config">config</option><option value="network">network</option>
+                <option value="performance">performance</option><option value="ui">ui</option>
+                <option value="data">data</option><option value="testing">testing</option>
+                <option value="security">security</option><option value="other">other</option>
               </select>
             </div>
-            <div class="form-group full">
-              <label class="form-label">title â€” specific and searchable</label>
-              <input type="text" id="ingest-title" class="vscode-input" placeholder="e.g. MongoDB authSource=admin required in production URI" required />
+            <div class="fg full"><label class="fl">title &mdash; specific and searchable</label>
+              <input type="text" id="ingest-title" class="vi" placeholder="e.g. MongoDB authSource=admin required in production URI" required />
             </div>
-            <div class="form-group full">
-              <label class="form-label">content â€” symptom + root cause + fix</label>
-              <textarea id="ingest-content" class="vscode-textarea" placeholder="Describe the problem, root cause, and exact resolution..." required></textarea>
+            <div class="fg full"><label class="fl">content &mdash; symptom + root cause + fix</label>
+              <textarea id="ingest-content" class="vta" placeholder="Describe the problem, root cause, and exact resolution..." required></textarea>
             </div>
-            <div class="form-group">
-              <label class="form-label">error_pattern (exact error text)</label>
-              <input type="text" id="ingest-error" class="vscode-input" placeholder="MongoServerError: Authentication failed" />
+            <div class="fg"><label class="fl">error_pattern (exact error text)</label>
+              <input type="text" id="ingest-error" class="vi" placeholder="MongoServerError: Authentication failed" />
             </div>
-            <div class="form-group">
-              <label class="form-label">cause_archetype (abstract pattern)</label>
-              <input type="text" id="ingest-cause" class="vscode-input" placeholder="environment config divergence" />
+            <div class="fg"><label class="fl">cause_archetype (abstract pattern)</label>
+              <input type="text" id="ingest-cause" class="vi" placeholder="environment config divergence" />
             </div>
-            <div class="form-group full">
-              <label class="form-label">tags (comma-separated)</label>
-              <input type="text" id="ingest-tags" class="vscode-input" placeholder="mongodb, auth, production, connection-string" />
+            <div class="fg full"><label class="fl">tags (comma-separated)</label>
+              <input type="text" id="ingest-tags" class="vi" placeholder="mongodb, auth, production, connection-string" />
             </div>
           </div>
-          <button type="submit" class="vscode-btn" id="submit-btn" style="width:100%; padding:8px;">Save to DevBrain</button>
+          <button type="submit" class="vbtn" id="submit-btn" style="width:100%;padding:8px;margin-top:4px">Save to DevBrain</button>
         </form>
       </div>
-
     </div>
   </div>
 
   <div class="statusbar">
-    <span class="statusbar-item">devbrain v0.1.0</span>
-    <span class="statusbar-item">|</span>
-    <span class="statusbar-item">Gemini 2.0 Flash</span>
-    <span class="statusbar-item">|</span>
-    <span class="statusbar-item">MongoDB Atlas</span>
-    <span class="statusbar-item">|</span>
-    <span class="statusbar-item">MCP: /mcp</span>
+    <span>devbrain v0.1.0</span><span>|</span>
+    <span>Gemini 2.0 Flash</span><span>|</span>
+    <span>MongoDB Atlas</span><span>|</span>
+    <span>MCP: /mcp</span>
   </div>
 
-  <div class="toast" id="success-toast" id="toast-message">entry saved</div>
+  <div class="toast" id="toast">saved</div>
 
   <script>
     function switchTab(name) {
-      ['search','context','ingest'].forEach(t => {
+      ['search','context','ingest'].forEach(function(t) {
         document.getElementById('panel-' + t).classList.toggle('active', t === name);
         document.getElementById('tab-' + t).classList.toggle('active', t === name);
-        const nav = document.getElementById('nav-' + t);
-        if (nav) nav.classList.toggle('active', t === name);
+        var n = document.getElementById('nav-' + t);
+        if (n) n.classList.toggle('active', t === name);
       });
     }
-
     async function loadStats() {
       try {
-        const res = await fetch('/api/stats');
-        const data = await res.json();
-        const e = data.totalEntries ?? 0;
-        const p = data.totalProjects ?? 0;
+        var r = await fetch('/api/stats');
+        var d = await r.json();
+        var e = d.totalEntries != null ? d.totalEntries : 0;
+        var p = d.totalProjects != null ? d.totalProjects : 0;
         document.getElementById('stat-memories').innerText = e;
         document.getElementById('stat-projects').innerText = p;
         document.getElementById('stat2-memories').innerText = e;
         document.getElementById('stat2-projects').innerText = p;
-      } catch {}
+      } catch(err) {}
     }
-
-    function showToast(msg) {
-      const t = document.getElementById('success-toast');
-      t.innerText = msg;
-      t.classList.add('show');
-      setTimeout(() => t.classList.remove('show'), 3000);
+    function toast(msg) {
+      var t = document.getElementById('toast');
+      t.innerText = msg; t.classList.add('show');
+      setTimeout(function() { t.classList.remove('show'); }, 2800);
     }
-
-    function typeBadgeClass(type) {
-      const map = { bug:'type-bug', fix:'type-fix', decision:'type-decision', pattern:'type-pattern', lesson:'type-lesson', 'anti-pattern':'type-anti-pattern', stack:'type-stack', note:'type-note' };
-      return map[type] || 'type-default';
+    function typeClass(type) {
+      var m = {bug:'t-bug',fix:'t-fix',decision:'t-decision',pattern:'t-pattern',lesson:'t-lesson','anti-pattern':'t-anti',stack:'t-stack'};
+      return m[type] || 't-default';
     }
-
     async function performSearch() {
-      const query = document.getElementById('search-input').value.trim();
-      if (!query) return;
-      const btn = document.getElementById('search-btn');
-      const container = document.getElementById('results-container');
+      var q = document.getElementById('search-input').value.trim();
+      if (!q) return;
+      var btn = document.getElementById('search-btn');
+      var box = document.getElementById('results-container');
       btn.disabled = true; btn.innerText = 'Searching...';
-      container.innerHTML = '<div class="empty">// searching...</div>';
+      box.innerHTML = '<div class="empty">// searching...</div>';
       try {
-        const res = await fetch('/api/search', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ query }) });
-        const data = await res.json();
-        const results = data.results ?? [];
-        if (results.length === 0) {
-          container.innerHTML = '<div class="empty">// no matches found</div>';
-        } else {
-          container.innerHTML = '';
-          const list = document.createElement('div');
-          list.className = 'results-list';
-          results.forEach(r => {
-            const item = document.createElement('div');
-            item.className = 'result-item';
-            const tagsHTML = (r.tags||[]).map(t => \`<span class="tag-chip">\${t}</span>\`).join('');
-            item.innerHTML = \`
-              <div class="result-header">
-                <span class="type-badge \${typeBadgeClass(r.type)}">\${r.type}</span>
-                <span class="result-title">\${r.title}</span>
-                <span class="score-tag">\${r.match}</span>
-              </div>
-              <div class="result-meta">\${r.project}</div>
-              <div class="result-content">\${r.content}</div>
-              \${tagsHTML ? '<div class="result-tags">' + tagsHTML + '</div>' : ''}
-            \`;
-            list.appendChild(item);
-          });
-          container.appendChild(list);
-        }
-      } catch {
-        container.innerHTML = '<div class="empty" style="color:var(--red)">// search error</div>';
-      } finally {
-        btn.disabled = false; btn.innerText = 'Search';
-      }
+        var r = await fetch('/api/search', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q})});
+        var d = await r.json();
+        var res = d.results || [];
+        if (!res.length) { box.innerHTML = '<div class="empty">// no matches found</div>'; return; }
+        var list = document.createElement('div'); list.className = 'results-list';
+        res.forEach(function(item) {
+          var el = document.createElement('div'); el.className = 'ri';
+          var tags = (item.tags||[]).map(function(t) { return '<span class="tag-chip">' + t + '</span>'; }).join('');
+          el.innerHTML = '<div class="rh"><span class="tb ' + typeClass(item.type) + '">' + item.type + '</span><span class="rt">' + item.title + '</span><span class="sc">' + item.match + '</span></div><div class="rm">' + item.project + '</div><div class="rc">' + item.content + '</div>' + (tags ? '<div class="rtags">' + tags + '</div>' : '');
+          list.appendChild(el);
+        });
+        box.innerHTML = ''; box.appendChild(list);
+      } catch(err) { box.innerHTML = '<div class="empty" style="color:var(--red)">// search error</div>'; }
+      finally { btn.disabled = false; btn.innerText = 'Search'; }
     }
-
     async function generateContext() {
-      const q = document.getElementById('context-query').value.trim();
-      const btn = document.getElementById('context-btn');
-      const output = document.getElementById('context-output');
-      const empty = document.getElementById('context-empty');
+      var q = document.getElementById('context-query').value.trim();
+      var btn = document.getElementById('context-btn');
+      var out = document.getElementById('context-output');
+      var emp = document.getElementById('context-empty');
       btn.disabled = true; btn.innerText = 'Generating...';
       try {
-        const res = await fetch('/api/context', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ query: q }) });
-        const data = await res.json();
-        output.style.display = 'block';
-        empty.style.display = 'none';
-        output.textContent = data.text;
-      } catch {
-        showToast('context generation failed');
-      } finally {
-        btn.disabled = false; btn.innerText = 'Generate Context';
-      }
+        var r = await fetch('/api/context',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q})});
+        var d = await r.json();
+        out.style.display = 'block'; emp.style.display = 'none';
+        out.textContent = d.text;
+      } catch(err) { toast('context generation failed'); }
+      finally { btn.disabled = false; btn.innerText = 'Generate Context'; }
     }
-
     async function submitEntry(e) {
       e.preventDefault();
-      const btn = document.getElementById('submit-btn');
+      var btn = document.getElementById('submit-btn');
       btn.disabled = true; btn.innerText = 'Saving...';
-      const title    = document.getElementById('ingest-title').value.trim();
-      const tagsRaw  = document.getElementById('ingest-tags').value.trim();
-      const payload  = {
-        type:            document.getElementById('ingest-type').value,
-        category:        document.getElementById('ingest-category').value,
-        title,
-        content:         document.getElementById('ingest-content').value.trim(),
-        tags:            tagsRaw ? tagsRaw.split(',').map(t => t.trim()).filter(Boolean) : [],
-        error_pattern:   document.getElementById('ingest-error').value.trim() || undefined,
+      var title = document.getElementById('ingest-title').value.trim();
+      var tagsRaw = document.getElementById('ingest-tags').value.trim();
+      var payload = {
+        type: document.getElementById('ingest-type').value,
+        category: document.getElementById('ingest-category').value,
+        title: title,
+        content: document.getElementById('ingest-content').value.trim(),
+        tags: tagsRaw ? tagsRaw.split(',').map(function(t){return t.trim();}).filter(Boolean) : [],
+        error_pattern: document.getElementById('ingest-error').value.trim() || undefined,
         cause_archetype: document.getElementById('ingest-cause').value.trim() || undefined,
       };
       try {
-        const res = await fetch('/api/save', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
-        if (!res.ok) throw new Error();
-        showToast(\`saved: \${title.slice(0,40)}\`);
+        var r = await fetch('/api/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+        if (!r.ok) throw new Error();
+        toast('saved: ' + title.slice(0,40));
         document.getElementById('ingest-form').reset();
         await loadStats();
-      } catch {
-        showToast('save failed');
-      } finally {
-        btn.disabled = false; btn.innerText = 'Save to DevBrain';
-      }
+      } catch(err) { toast('save failed'); }
+      finally { btn.disabled = false; btn.innerText = 'Save to DevBrain'; }
     }
-
-    document.getElementById('search-input').addEventListener('keydown', e => { if (e.key === 'Enter') performSearch(); });
-
+    document.getElementById('search-input').addEventListener('keydown', function(e) { if (e.key==='Enter') performSearch(); });
     loadStats();
   </script>
 </body>
 </html>`;
-
-    const httpServer = createServer(async (req, res) => {
+const httpServer = createServer(async (req, res) => {
       const url = req.url?.split('?')[0];
 
       if (req.method === 'OPTIONS') {
