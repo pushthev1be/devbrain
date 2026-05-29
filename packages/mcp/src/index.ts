@@ -826,7 +826,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
   <div class="titlebar">
     <div class="titlebar-dot"></div>
-    <span class="titlebar-name">devbrain â€” developer memory</span>
+    <span class="titlebar-name">devbrain - developer memory</span>
     <span class="titlebar-badge" id="conn-badge">â— connected</span>
   </div>
 
