@@ -33,6 +33,14 @@ mkdir -p ~/.devbrain
 echo "GEMINI_API_KEY=your_key_here" > ~/.devbrain/.env
 ```
 
+### Running Offline (Mock Mode)
+
+To run DevBrain completely offline for development, testing, or recording demonstrations without requiring an active Gemini API key, enable **Mock Mode** in your environment:
+- **Bash / Git Bash**: `export DEVBRAIN_MOCK="true"`
+- **PowerShell**: `$env:DEVBRAIN_MOCK="true"`
+
+This intercepts Gemini API calls and returns pre-computed high-fidelity synthetic vectors and technical memory mockups.
+
 ### Connect to your AI Agent or MCP Client
 
 To run the MCP server locally using standard stdio transport, add this server block to your client configurations:
@@ -198,9 +206,13 @@ After `devbrain /init`, a post-commit hook runs after every commit. Gemini extra
 
 **Gemini 2.0 Flash & High-Dimensional Embeddings** — `gemini-embedding-001` produces 3072-dimension embeddings. Higher dimensionality improves retrieval precision for technical content where subtle semantic differences matter. Gemini 2.0 Flash handles automated knowledge extraction and context synthesis in real-time, providing extremely high-speed processing.
 
+**High-Fidelity Offline Mock Mode (`DEVBRAIN_MOCK=true`)** — Integrates a comprehensive simulation engine that intercepts all Gemini LLM and embedding API calls. When enabled, it dynamically serves realistic mock extractions, classifications, and project recaps. This enables offline development, CI/CD testing, and rate-limit-free video demonstrations without requiring active API keys.
+
+**Stateless SSE HTTP Request Isolation** — Re-architected the MCP SSE server endpoint to dynamically spin up an isolated, fresh MCP `Server` and `StreamableHTTPServerTransport` instance per incoming connection. This eliminates session cross-talk, memory leaks, and state pollution typical of stateless standard HTTP servers handling concurrent agent requests.
+
 **Two-pass retrieval over pure semantic search** — semantic similarity alone misses cases where the user pastes an exact error message that was saved with different surrounding words. Pattern matching on `errorPattern` runs first as a high-precision pass; semantic search runs as the fallback. This is the difference between finding the exact fix vs finding something vaguely related.
 
-**Dual-Transport MCP: stdio and SSE Cloud Run** — DevBrain is built for standard local workflows via stdio transport, and easily scales to team-wide cloud deployments via a containerized SSE HTTP server. Deploying to Google Cloud Run enables instant cross-project access for hosted agent builders (such as Google Cloud Agent Builder).
+**Dual-Transport MCP: stdio and SSE Cloud Run** — DevBrain is built for standard local workflows via stdio transport, and easily scales to team-wide cloud deployments via a containerized SSE HTTP server. Deploying to Google Cloud Run enables instant cross-project access for hosted agent builders (such as Google Cloud Agent Builder) and serves a highly polished, responsive, VS Code-inspired dark theme developer dashboard.
 
 **Monorepo with npm workspaces** — `core` contains all domain logic and is shared between `cli` and `mcp`. This prevents the two surfaces from drifting — a change to search ranking or entry schema is reflected in both automatically.
 

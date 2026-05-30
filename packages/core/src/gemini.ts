@@ -40,6 +40,40 @@ function getClient(): GoogleGenerativeAI {
 }
 
 export async function extractKnowledge(diff: string, commitMessage: string): Promise<ExtractedKnowledge | null> {
+  if (process.env.DEVBRAIN_MOCK === 'true') {
+    const msg = commitMessage.toLowerCase();
+    if (msg.includes('stale') || msg.includes('closure') || msg.includes('counter')) {
+      return {
+        problem: "React state value inside useEffect captures stale value due to empty dependency array closure",
+        solution: "Resolved the stale closure bug by using a functional state updater inside the interval callback (setCount(prev => prev + 1))",
+        tags: ["react", "hooks", "stale-closure", "useEffect", "useState"],
+        type: "fix",
+        category: "performance",
+        errorPattern: "React hook captures stale state value",
+        causeArchetype: "stale closure capture in hook lifecycle"
+      };
+    }
+    const isFix = msg.includes('fix') || msg.includes('resolve') || msg.includes('leak');
+    if (isFix) {
+      return {
+        problem: "React memory leak due to missing event listener unsubscribe/cleanup inside useEffect hook",
+        solution: "Resolved the memory leak by ensuring the useEffect hook returns a cleanup callback that removes the listener using statusEmitter.off()",
+        tags: ["react", "typescript", "memory-leak", "hooks", "event-emitter"],
+        type: "fix",
+        category: "performance",
+        errorPattern: "MaxListenersExceededWarning: Possible EventEmitter memory leak detected",
+        causeArchetype: "missing cleanup callback in lifecycle subscription"
+      };
+    }
+    return {
+      problem: "Initial status monitor system dashboard component",
+      solution: "Created baseline dashboard subscribing to statusEmitter.on() events",
+      tags: ["react", "ui", "event-emitter"],
+      type: "note",
+      category: "ui"
+    };
+  }
+
   try {
     const model = getClient().getGenerativeModel({ model: 'gemini-2.0-flash' });
 
@@ -82,6 +116,20 @@ If this commit is just a merge, version bump, or has no meaningful knowledge, re
 }
 
 export async function getEmbedding(text: string): Promise<number[]> {
+  if (process.env.DEVBRAIN_MOCK === 'true') {
+    // Return a reproducible pseudo-random vector of 3072 dimensions
+    const vec = new Array(3072).fill(0);
+    let hash = 0;
+    for (let i = 0; i < text.length; i++) {
+      hash = (hash << 5) - hash + text.charCodeAt(i);
+      hash |= 0;
+    }
+    for (let i = 0; i < 3072; i++) {
+      vec[i] = Math.sin(hash + i) * 0.1;
+    }
+    return vec;
+  }
+
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error('GEMINI_API_KEY is not set');
 
@@ -108,6 +156,10 @@ export async function getEmbedding(text: string): Promise<number[]> {
 }
 
 export async function summarizeProjectHistory(entries: { title: string; content: string; type: string }[]): Promise<string> {
+  if (process.env.DEVBRAIN_MOCK === 'true') {
+    return "This project contains registered learnings around clean resource management in React lifecycle events. The team identified and resolved a memory leak due to non-cleared event listeners in useEffect.";
+  }
+
   if (entries.length === 0) return 'No knowledge captured yet.';
 
   try {
@@ -127,6 +179,10 @@ export async function synthesizeSection(
   label: string,
   entries: { type: string; title: string; content: string }[]
 ): Promise<string | null> {
+  if (process.env.DEVBRAIN_MOCK === 'true') {
+    return "• ALWAYS return cleanups for event subscriptions inside React hooks\n• Standardize off-listeners in statusEmitter calls";
+  }
+
   if (entries.length < 2 || !process.env.GEMINI_API_KEY) return null;
   try {
     const model = getClient().getGenerativeModel({ model: 'gemini-2.0-flash' });
@@ -145,6 +201,14 @@ export async function synthesizeSection(
 }
 
 export async function classifyQuery(query: string): Promise<{ category: EntryCategory; errorPattern?: string }> {
+  if (process.env.DEVBRAIN_MOCK === 'true') {
+    const q = query.toLowerCase();
+    if (q.includes('leak') || q.includes('emitter') || q.includes('react')) {
+      return { category: 'performance', errorPattern: 'MaxListenersExceededWarning' };
+    }
+    return { category: 'other' };
+  }
+
   const categoryList = ENTRY_CATEGORIES.join(' | ');
   try {
     const model = getClient().getGenerativeModel({ model: 'gemini-2.0-flash' });
@@ -213,6 +277,10 @@ export async function recapSession(sessionText: string): Promise<RecapEntry[]> {
 }
 
 export async function findMatchExplanation(query: string, matchedEntry: { title: string; content: string }): Promise<string> {
+  if (process.env.DEVBRAIN_MOCK === 'true') {
+    return "This past solution shows how to correctly clean up event listeners to resolve performance memory leaks.";
+  }
+
   try {
     const model = getClient().getGenerativeModel({ model: 'gemini-2.0-flash' });
 

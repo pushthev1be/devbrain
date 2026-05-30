@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env node
+#!/usr/bin/env node
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
@@ -27,6 +27,39 @@ if (!process.env.GEMINI_API_KEY && existsSync(envPath)) {
     if (k?.trim()) process.env[k.trim()] = v.join('=').trim();
   }
 }
+
+function saveConfirmation(
+  type: string, title: string,
+  category?: string, causeArchetype?: string, errorPattern?: string
+): string {
+  const cat   = category && category !== 'other' ? ` ${category}` : '';
+  const short = title.slice(0, 65);
+
+  if (type === 'fix') {
+    if (causeArchetype) return `Stored recurring${cat} fix archetype: ${causeArchetype.slice(0, 70)}`;
+    if (errorPattern)   return `Saved new${cat} fix â€” error pattern stored for future matching`;
+    return `Saved new${cat} fix: ${short}`;
+  }
+  if (type === 'decision')     return `Detected architectural decision: ${short}`;
+  if (type === 'anti-pattern') {
+    if (causeArchetype) return `Stored anti-pattern archetype: ${causeArchetype.slice(0, 70)}`;
+    return `Stored${cat} anti-pattern to avoid: ${short}`;
+  }
+  if (type === 'bug') {
+    if (causeArchetype) return `Stored${cat} bug + root-cause archetype: ${causeArchetype.slice(0, 70)}`;
+    return `Stored${cat} bug: ${short}`;
+  }
+  if (type === 'pattern') return `Captured reusable${cat} pattern: ${short}`;
+  if (type === 'lesson') {
+    if (causeArchetype) return `Stored recurring issue archetype: ${causeArchetype.slice(0, 70)}`;
+    return `Captured hard-won${cat} lesson: ${short}`;
+  }
+  if (type === 'stack')    return `Stack snapshot saved: ${short}`;
+  if (type === 'solution') return `Saved${cat} solution: ${short}`;
+  return `Saved [${type}]${cat ? ' Â· ' + cat.trim() : ''}: ${short}`;
+}
+
+function createMcpServer() {
 
 const server = new Server(
   { name: 'devbrain', version: '0.1.0' },
@@ -175,36 +208,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
   ],
 }));
 
-function saveConfirmation(
-  type: string, title: string,
-  category?: string, causeArchetype?: string, errorPattern?: string
-): string {
-  const cat   = category && category !== 'other' ? ` ${category}` : '';
-  const short = title.slice(0, 65);
 
-  if (type === 'fix') {
-    if (causeArchetype) return `Stored recurring${cat} fix archetype: ${causeArchetype.slice(0, 70)}`;
-    if (errorPattern)   return `Saved new${cat} fix â€” error pattern stored for future matching`;
-    return `Saved new${cat} fix: ${short}`;
-  }
-  if (type === 'decision')     return `Detected architectural decision: ${short}`;
-  if (type === 'anti-pattern') {
-    if (causeArchetype) return `Stored anti-pattern archetype: ${causeArchetype.slice(0, 70)}`;
-    return `Stored${cat} anti-pattern to avoid: ${short}`;
-  }
-  if (type === 'bug') {
-    if (causeArchetype) return `Stored${cat} bug + root-cause archetype: ${causeArchetype.slice(0, 70)}`;
-    return `Stored${cat} bug: ${short}`;
-  }
-  if (type === 'pattern') return `Captured reusable${cat} pattern: ${short}`;
-  if (type === 'lesson') {
-    if (causeArchetype) return `Stored recurring issue archetype: ${causeArchetype.slice(0, 70)}`;
-    return `Captured hard-won${cat} lesson: ${short}`;
-  }
-  if (type === 'stack')    return `Stack snapshot saved: ${short}`;
-  if (type === 'solution') return `Saved${cat} solution: ${short}`;
-  return `Saved [${type}]${cat ? ' Â· ' + cat.trim() : ''}: ${short}`;
-}
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
@@ -407,6 +411,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     };
   }
 });
+
+  return server;
+}
 
 (async () => {
   const PORT = process.env.PORT ? parseInt(process.env.PORT) : null;
@@ -927,9 +934,10 @@ const httpServer = createServer(async (req, res) => {
             if (acceptIdx !== -1) rh[acceptIdx + 1] = 'application/json, text/event-stream';
             else rh.push('Accept', 'application/json, text/event-stream');
           }
-          // SDK stateless mode requires a fresh transport per request
+          // SDK stateless mode requires a fresh transport and server instance per request
+          const mcpServer = createMcpServer();
           const mcpTransport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-          await server.connect(mcpTransport);
+          await mcpServer.connect(mcpTransport);
           await mcpTransport.handleRequest(req, res);
         } catch (err) {
           console.error('MCP transport error:', err);
@@ -946,7 +954,8 @@ const httpServer = createServer(async (req, res) => {
     });
   } else {
     // stdio mode â€” local MCP client / agent
+    const mcpServer = createMcpServer();
     const transport = new StdioServerTransport();
-    await server.connect(transport);
+    await mcpServer.connect(transport);
   }
 })();
