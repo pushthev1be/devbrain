@@ -35,15 +35,17 @@ echo "GEMINI_API_KEY=your_key_here" > ~/.devbrain/.env
 
 ### Running Offline (Mock Mode)
 
-To run DevBrain completely offline for development, testing, or recording demonstrations without requiring an active Gemini API key, enable **Mock Mode** in your environment:
-- **Bash / Git Bash**: `export DEVBRAIN_MOCK="true"`
-- **PowerShell**: `$env:DEVBRAIN_MOCK="true"`
 
-This intercepts Gemini API calls and returns pre-computed high-fidelity synthetic vectors and technical memory mockups.
 
-### Connect to your AI Agent or MCP Client
 
-To run the MCP server locally using standard stdio transport, add this server block to your client configurations:
+https://github.com/user-attachments/assets/ca8cff35-a53c-4d21-b518-b388f7dbf90e
+
+
+
+
+
+
+Add to `~/.claude/mcp.json`:
 
 ```json
 {
