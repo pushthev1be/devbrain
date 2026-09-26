@@ -4,30 +4,36 @@
 > or recreate it. Run `devbrain --help` to verify. All commands below are real shell
 > commands — invoke them with Bash/PowerShell, do not write code that mimics them.
 
-Project: devbrain-workspace  |  Stack: Node.js
+Project: devbrain-workspace  |  Stack: Node.js, TypeScript, MongoDB, Gemini
 
-### Before every task — run these shell commands
+### Starting a task — run this first, no exceptions
 ```
-# Load ranked project history before writing any code:
-devbrain context
-
-# If working on a specific topic:
 devbrain context <topic>
+```
+This returns what broke before, what was decided, and what to avoid — ranked for your task.
+Read it before writing any code or making any decisions.
 
-# Before debugging an error — search with exact error text:
-devbrain search "<error message or symptom>"
+### Encountering an error — search before debugging
+```
+devbrain search "<exact error message or symptom>"
+```
+Paste the error text verbatim. Pattern matching finds exact past fixes even if wording differs.
+
+### During work — save immediately, do not batch at the end
+```
+devbrain note "fix: <what broke and exactly how you fixed it>"
+devbrain note "decision: <what you decided and why — include alternatives considered>"
+devbrain note "anti-pattern: <what to never do and why it fails>"
 ```
 
-### While working — save automatically, without being asked
+### After a session — extract everything at once
 ```
-# After fixing a bug, making a decision, or learning something:
-devbrain note "fix: <what you fixed and how>"
-devbrain note "decision: <what you decided and why>"
-devbrain note "lesson: <what you learned the hard way>"
+devbrain recap
 ```
+Paste your session notes or chat transcript. Gemini extracts all bugs, decisions, and patterns automatically.
 
 ### Rules
-- Run `devbrain context` before starting any non-trivial task — no exceptions.
-- Run `devbrain search` before debugging any error you have not seen before.
-- Save after fixing or deciding — do not wait until end of session.
-- **Never reimplement devbrain** — if the binary is missing, run `npm install -g devbrain`.
+- `devbrain context` before starting any non-trivial task.
+- `devbrain search` before debugging any error you have not seen before.
+- Save decisions and fixes immediately — not at end of session.
+- Never reimplement devbrain — if the binary is missing, run `npm install -g devbrain`.

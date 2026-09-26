@@ -22,7 +22,7 @@ Every project you register gets two things: a git hook that captures knowledge f
 The memory compounds. An entry retrieved across multiple projects gets flagged as a cross-project pattern and surfaces in every future context load. An entry retrieved 3+ times gets promoted from `observation` to `confirmed` confidence.
 
 ### Shared Knowledge Across Codebases
-Every registered project writes to one shared MongoDB Atlas knowledge base, so a team pointing at the same database builds collective memory:
+Every registered project writes to one knowledge base — local by default, or a shared MongoDB Atlas cluster when `MONGODB_URI` is set. Across your own projects this works either way; a *team* sharing collective memory is what pointing several machines at the same Atlas database gives you:
 - **The Team Feed**: The web dashboard renders a shared activity timeline of the latest fixes, decisions, and patterns across all registered codebases, each labeled with its project and stack.
 - **CLI sibling alerts**: When you load context in the CLI, DevBrain surfaces the most recent entries from your *other* projects (e.g. surfacing a layout fix saved in a mobile repo while you work on a web frontend), so solutions cross repository boundaries instead of being re-derived.
 
@@ -43,7 +43,27 @@ npm run build --workspace=packages/mcp
 cd packages/cli && npm link
 ```
 
-DevBrain runs Gemini on one of two backends. For hosted/production it uses **Gemini on Vertex AI** (Google Cloud); for quick local dev it can fall back to the **Gemini Developer API** (AI Studio).
+Then run the setup wizard:
+
+```bash
+devbrain setup
+```
+
+It asks two things — where to keep your memory, and your Gemini credentials — and writes them to `~/.devbrain/.env`. You can re-run it anytime.
+
+### Storage: local by default
+
+**No database required.** With `MONGODB_URI` unset, DevBrain stores everything in `~/.devbrain/db.json` and ranks embeddings in memory. Saving, searching, context and git auto-capture all work with nothing provisioned.
+
+Set `MONGODB_URI` when you want to:
+- share one knowledge base across a team or several machines
+- use **Atlas Vector Search** server-side instead of in-memory ranking (create a 3072-dim cosine index named `embedding_index` on the `entries` collection)
+
+Switching is just the env var — the two backends are interchangeable at runtime.
+
+### Gemini credentials
+
+Semantic search and auto-capture need Gemini; saving and recalling notes don't. DevBrain runs Gemini on one of two backends: **Vertex AI** (Google Cloud) for hosted/production, or the **Gemini Developer API** (AI Studio) for local dev.
 
 For local dev, get a free key at [aistudio.google.com](https://aistudio.google.com):
 
@@ -52,7 +72,7 @@ mkdir -p ~/.devbrain
 echo "GEMINI_API_KEY=your_key_here" > ~/.devbrain/.env
 ```
 
-To run on Google Cloud AI instead, see [Running on Vertex AI](#running-on-vertex-ai-google-cloud) below.
+To run on Google Cloud AI instead, see [Running on Vertex AI](#running-on-vertex-ai-google-cloud) below. To try DevBrain with no credentials at all, see [Mock Mode](#running-offline-mock-mode).
 
 ### Running Offline (Mock Mode)
 
@@ -123,10 +143,22 @@ When `GOOGLE_GENAI_USE_VERTEXAI` is unset or `false`, DevBrain falls back to the
 
 ```bash
 cd my-project
-devbrain /init
+devbrain init
+devbrain backfill        # import knowledge from commits you already made
 ```
 
-Registers the project, detects the tech stack, installs the post-commit git hook, and creates `DEV_CONTEXT.md`.
+`init` registers the project, detects the tech stack, installs the post-commit git hook, and creates `DEV_CONTEXT.md`.
+
+### Don't start from empty
+
+The git hook only sees commits made from now on, so a freshly initialised project has nothing to recall. `devbrain backfill` reads commits that already happened — one Gemini extraction each — so `devbrain context` is useful on day one instead of in three weeks.
+
+```bash
+devbrain backfill        # last 20 commits (default)
+devbrain backfill 100    # go further back
+```
+
+Entries are dated by their original commit, so history reads in the right order. Processed commits are recorded, so the command is safe to re-run: it resumes where it stopped and skips what it already imported. If Gemini rate-limits mid-run, it stops cleanly and tells you to re-run.
 
 `DEV_CONTEXT.md` provides prompt-level guidelines directing your AI agents (Gemini, Agent Builder, or terminal assistants) to automatically fetch technical history using `get_context` and log new learnings using `save_entry`. From that point on, your agent updates your project memory autonomously as you code.
 
@@ -165,6 +197,7 @@ devbrain  ❯ /
   /browse       Scroll through all saved entries
   /save         Save entry  (bug: fix: stack: decision: anti-pattern: ...)
   /recap        AI-extract + save knowledge from a session
+  /backfill     Import knowledge from past commits
   /prompt       Regenerate agent DEV_CONTEXT.md setup block
   /summary      Project name, stack and recent entries
   /export       Export knowledge to zip file
