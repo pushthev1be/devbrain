@@ -1,7 +1,8 @@
-import type { Entry, EntryCategory, Project, SearchResult, ContextEntry, DevBrainContext } from './types';
+import type { Entry, EntryCategory, Project, SearchResult, ContextEntry, DevBrainContext, EntrySection } from './types';
+import { sectionFor, normalizeType } from './types';
 import { synthesizeSection } from './gemini';
 
-function cosineSimilarity(a: number[], b: number[]): number {
+export function cosineSimilarity(a: number[], b: number[]): number {
   if (a.length !== b.length || a.length === 0) return 0;
   let dot = 0, magA = 0, magB = 0;
   for (let i = 0; i < a.length; i++) {
@@ -180,13 +181,21 @@ export function buildContext(
     r.entry.type !== 'stack' && r.entry.type !== 'note' && r.entry.type !== 'image'
   );
 
+  // Route by the registry rather than by hand-written type lists. Previously
+  // `note` and `solution` matched no branch at all, so those entries were stored
+  // and then never shown — `devbrain note "..."` without a prefix vanished.
+  const inSection = (name: EntrySection, limit: number) =>
+    dedupe(active.filter(r => sectionFor(r.entry.type) === name), limit);
+
   return {
     crossProjectPatterns: crossProjectEligible.length > 0 ? dedupe(crossProjectEligible, 5) : undefined,
-    issues:               dedupe(active.filter(r => r.entry.type === 'bug' || r.entry.type === 'fix'), 5),
-    decisions:            dedupe(active.filter(r => r.entry.type === 'decision'), 5),
-    patterns:             dedupe(active.filter(r => r.entry.type === 'pattern' || r.entry.type === 'lesson'), 5),
-    antiPatterns:         dedupe(active.filter(r => r.entry.type === 'anti-pattern'), 4),
-    stacks:               dedupe(active.filter(r => r.entry.type === 'stack'), 3),
+    issues:               inSection('issues', 5),
+    decisions:            inSection('decisions', 5),
+    architecture:         inSection('architecture', 4),
+    patterns:             inSection('patterns', 5),
+    antiPatterns:         inSection('antiPatterns', 4),
+    stacks:               inSection('stack', 3),
+    notes:                inSection('notes', 4),
     supersededDecisions:  superseded.length > 0 ? dedupe(superseded, 3) : undefined,
     currentProject,
   };
@@ -220,7 +229,8 @@ export async function compressContext(ctx: DevBrainContext): Promise<DevBrainCon
 
 export function formatContext(ctx: DevBrainContext, query?: string): string {
   const projectName = ctx.currentProject?.name ?? 'DevBrain';
-  const total = ctx.issues.length + ctx.decisions.length + ctx.patterns.length + ctx.antiPatterns.length + ctx.stacks.length;
+  const total = ctx.issues.length + ctx.decisions.length + ctx.architecture.length
+    + ctx.patterns.length + ctx.antiPatterns.length + ctx.stacks.length + ctx.notes.length;
 
   if (total === 0 && !ctx.crossProjectPatterns?.length) {
     return `# DevBrain Context — ${projectName}\n\nNo relevant knowledge found${query ? ` for "${query}"` : ''}.`;
@@ -250,7 +260,7 @@ export function formatContext(ctx: DevBrainContext, query?: string): string {
       lines.push(ctx.synthesis.issues);
     } else {
       ctx.issues.forEach((r, i) => {
-        lines.push(`${i + 1}. [${r.entry.type}] ${r.entry.title}`);
+        lines.push(`${i + 1}. [${normalizeType(r.entry.type)}] ${r.entry.title}`);
         lines.push(`   ${r.project.name} · ${timeAgo(r.entry.createdAt)}`);
         if (r.entry.content) lines.push(`   → ${r.entry.content.slice(0, 160)}`);
         if (r.entry.tags.length) lines.push(`   tags: ${r.entry.tags.join(', ')}`);
@@ -271,6 +281,17 @@ export function formatContext(ctx: DevBrainContext, query?: string): string {
         }
       });
     }
+    lines.push('');
+  }
+
+  if (ctx.architecture.length > 0) {
+    lines.push('## Architecture');
+    ctx.architecture.forEach(r => {
+      lines.push(`- ${r.entry.title}`);
+      if (r.entry.content && r.entry.content !== r.entry.title) {
+        lines.push(`  → ${r.entry.content.slice(0, 120)}`);
+      }
+    });
     lines.push('');
   }
 
@@ -307,6 +328,19 @@ export function formatContext(ctx: DevBrainContext, query?: string): string {
   if (ctx.stacks.length > 0) {
     lines.push('## Stack Notes');
     ctx.stacks.forEach(r => lines.push(`- ${r.entry.title}`));
+    lines.push('');
+  }
+
+  // Unclassified saves still surface here. Without this section a bare
+  // `devbrain note "..."` was stored and then never shown again.
+  if (ctx.notes.length > 0) {
+    lines.push('## Notes');
+    ctx.notes.forEach(r => {
+      lines.push(`- ${r.entry.title}`);
+      if (r.entry.content && r.entry.content !== r.entry.title) {
+        lines.push(`  → ${r.entry.content.slice(0, 120)}`);
+      }
+    });
     lines.push('');
   }
 

@@ -20,18 +20,77 @@ export function getRepoRoot(cwd: string): string | null {
   }
 }
 
-export function getLastCommit(repoPath: string): CommitInfo | null {
+// A single commit's diff can dwarf execSync's 1MB default maxBuffer, which would
+// throw and silently yield no knowledge for exactly the large refactors worth
+// remembering. Read generously, then cap: extractKnowledge only uses the first
+// 6000 chars anyway.
+const DIFF_MAX_BUFFER = 32 * 1024 * 1024;
+const DIFF_CHAR_LIMIT = 20_000;
+
+function readCommit(repoPath: string, ref: string): CommitInfo | null {
   try {
-    const hash = execSync('git rev-parse HEAD', { cwd: repoPath, stdio: 'pipe' }).toString().trim();
-    const message = execSync('git log -1 --format=%s', { cwd: repoPath, stdio: 'pipe' }).toString().trim();
-    const timestamp = parseInt(execSync('git log -1 --format=%ct', { cwd: repoPath, stdio: 'pipe' }).toString().trim(), 10) * 1000;
+    const git = (args: string, maxBuffer?: number) =>
+      execSync(`git ${args}`, { cwd: repoPath, stdio: 'pipe', maxBuffer }).toString().trim();
 
-    const stat = execSync('git show --stat --format="" HEAD', { cwd: repoPath, stdio: 'pipe' }).toString().trim();
-    const diff = execSync('git show --format="" HEAD', { cwd: repoPath, stdio: 'pipe' }).toString().trim();
+    const hash = git(`rev-parse ${ref}`);
+    const message = git(`log -1 --format=%s ${hash}`);
+    const timestamp = parseInt(git(`log -1 --format=%ct ${hash}`), 10) * 1000;
 
-    return { hash, message, diff: `${stat}\n\n${diff}`, timestamp };
+    const stat = git(`show --stat --format="" ${hash}`, DIFF_MAX_BUFFER);
+    const diff = git(`show --format="" ${hash}`, DIFF_MAX_BUFFER);
+
+    return {
+      hash,
+      message,
+      timestamp,
+      diff: `${stat}\n\n${diff}`.slice(0, DIFF_CHAR_LIMIT),
+    };
   } catch {
     return null;
+  }
+}
+
+export function getLastCommit(repoPath: string): CommitInfo | null {
+  return readCommit(repoPath, 'HEAD');
+}
+
+/**
+ * Most recent commits, newest first, for backfilling an existing repo's history.
+ * Merges are excluded: they carry no authored knowledge and extractKnowledge
+ * discards them anyway, so skipping them means `limit` buys real commits.
+ */
+export function getRecentCommits(repoPath: string, limit = 20): CommitInfo[] {
+  if (limit <= 0) return [];
+  try {
+    const hashes = execSync(`git log --no-merges --format=%H -n ${limit}`, {
+      cwd: repoPath,
+      stdio: 'pipe',
+    })
+      .toString()
+      .trim()
+      .split('\n')
+      .map(h => h.trim())
+      .filter(Boolean);
+
+    return hashes
+      .map(h => readCommit(repoPath, h))
+      .filter((c): c is CommitInfo => c !== null);
+  } catch {
+    return [];
+  }
+}
+
+/** Total non-merge commits in the repo — used to size a backfill before running it. */
+export function countCommits(repoPath: string): number {
+  try {
+    const out = execSync('git rev-list --no-merges --count HEAD', {
+      cwd: repoPath,
+      stdio: 'pipe',
+    }).toString().trim();
+    const n = parseInt(out, 10);
+    return Number.isFinite(n) ? n : 0;
+  } catch {
+    return 0;
   }
 }
 

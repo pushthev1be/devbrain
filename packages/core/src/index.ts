@@ -4,3 +4,6 @@ export * from './gemini';
 export * from './stack';
 export * from './git';
 export * from './search';
+export * from './dossier';
+export * from './dedupe';
+export * from './sessions';
