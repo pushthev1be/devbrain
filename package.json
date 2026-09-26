@@ -6,9 +6,17 @@
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",
-    "dev": "npm run dev -w packages/cli"
+    "dev": "npm run dev -w packages/cli",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@google/adk": "^1.1.0"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^5.0.2",
+    "typescript": "5.4",
+    "vitest": "^5.0.2"
   }
 }
