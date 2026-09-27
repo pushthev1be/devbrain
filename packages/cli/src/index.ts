@@ -504,6 +504,10 @@ const BACKFILL_MAX     = 500;
 // because it runs after every commit. Catches anything missed while DevBrain was
 // offline, rate-limited, or not yet installed.
 const AUTO_SWEEP       = 8;
+// How many rate-limit windows a single commit will wait out before giving up.
+const BACKFILL_MAX_WAITS = 6;
+
+const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
 /**
  * Extract knowledge from commits that already happened.
@@ -585,21 +589,40 @@ async function handleBackfill(
     const label  = `${DIM}[${i + 1}/${pending.length}]${RESET}`;
     const short  = commit.message.length > 48 ? `${commit.message.slice(0, 48)}…` : commit.message;
 
-    let knowledge;
-    try {
-      knowledge = await extractKnowledge(commit.diff, commit.message);
-    } catch (err) {
-      if (err instanceof RateLimitError) {
-        // Stop rather than burn through the remaining commits failing; the
-        // processed-commit log means re-running picks up exactly here.
-        console.log(`\n  ${YELLOW}Gemini rate limit reached${RESET} after ${saved} saved.`);
-        console.log(`  ${DIM}Retry in ~${err.retryAfter}s — re-run ${RESET}${CYAN}devbrain backfill${RESET}${DIM} to resume.${RESET}\n`);
-        return;
+    // A free-tier key rate-limits after a handful of commits. Aborting there left
+    // most of a repo unread and made a full backfill effectively impossible;
+    // waiting out the window and retrying the same commit lets a long run finish
+    // unattended. Give up only when the limit persists across several waits.
+    let knowledge: Awaited<ReturnType<typeof extractKnowledge>> = null;
+    let extracted = false;
+    let waits = 0;
+
+    while (!extracted) {
+      try {
+        knowledge = await extractKnowledge(commit.diff, commit.message);
+        extracted = true;
+      } catch (err) {
+        if (err instanceof RateLimitError && waits < BACKFILL_MAX_WAITS) {
+          waits++;
+          const seconds = Math.max(err.retryAfter, 5) + 2;
+          process.stdout.write(`\r  ${label} ${DIM}rate limited, waiting ${seconds}s (${waits}/${BACKFILL_MAX_WAITS})${RESET}\x1b[K`);
+          await sleep(seconds * 1000);
+          continue;
+        }
+        if (err instanceof RateLimitError) {
+          process.stdout.write('\r\x1b[K');
+          console.log(`\n  ${YELLOW}Gemini rate limit is not clearing${RESET} — stopped after ${saved} saved.`);
+          console.log(`  ${DIM}Re-run ${RESET}${CYAN}devbrain backfill${RESET}${DIM} later to resume from here.${RESET}\n`);
+          return;
+        }
+        failed++;
+        console.log(`  ${label} ${RED}✗${RESET} ${short}  ${DIM}${explainError(err)}${RESET}`);
+        break;
       }
-      failed++;
-      console.log(`  ${label} ${RED}✗${RESET} ${short}  ${DIM}${explainError(err)}${RESET}`);
-      continue;
     }
+
+    if (waits > 0) process.stdout.write('\r\x1b[K');
+    if (!extracted) continue;   // a non-rate-limit failure, already reported
 
     if (!knowledge) {
       await markCommitProcessed(commit.hash, project.id);

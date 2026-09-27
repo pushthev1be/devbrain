@@ -1,6 +1,7 @@
 {
   "mcpServers": {
     "devbrain": {
+      "type": "http",
       "url": "https://devbrain-715714057208.us-central1.run.app/mcp"
     }
   }

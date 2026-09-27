@@ -779,7 +779,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     // â”€â”€â”€ DEVBRAIN DASHBOARD HTML â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // Dashboard markup lives in dashboard.ts so its script can be parsed by tests.
 const httpServer = createServer(async (req, res) => {
-      const url = req.url?.split('?')[0];
+      // Normalise the path before routing. Exact string matching meant
+      // "/mcp/" 404'd while "/mcp" worked, and an MCP client given a URL with a
+      // trailing slash reports only "No MCP endpoint was found at the URL
+      // provided" — which reads as a broken deployment rather than a typo.
+      // "/sse" is accepted as an alias because the transport was documented
+      // under that name.
+      const rawUrl = req.url?.split('?')[0] ?? '/';
+      const trimmed = rawUrl.length > 1 ? rawUrl.replace(/\/+$/, '') : rawUrl;
+      const url = trimmed === '/sse' ? '/mcp' : (trimmed || '/');
 
       if (req.method === 'OPTIONS') {
         res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' });
