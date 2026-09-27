@@ -602,7 +602,11 @@ async function handleBackfill(
         knowledge = await extractKnowledge(commit.diff, commit.message);
         extracted = true;
       } catch (err) {
-        if (err instanceof RateLimitError && waits < BACKFILL_MAX_WAITS) {
+        // Waiting out a rate-limit window is right for a backfill the user ran
+        // and is watching. It is wrong inside the post-commit hook, which git
+        // blocks on — that turned every commit into a multi-minute stall. An
+        // automatic sweep gives up immediately and lets the next one catch up.
+        if (err instanceof RateLimitError && !auto && waits < BACKFILL_MAX_WAITS) {
           waits++;
           const seconds = Math.max(err.retryAfter, 5) + 2;
           process.stdout.write(`\r  ${label} ${DIM}rate limited, waiting ${seconds}s (${waits}/${BACKFILL_MAX_WAITS})${RESET}\x1b[K`);
@@ -611,8 +615,19 @@ async function handleBackfill(
         }
         if (err instanceof RateLimitError) {
           process.stdout.write('\r\x1b[K');
-          console.log(`\n  ${YELLOW}Gemini rate limit is not clearing${RESET} — stopped after ${saved} saved.`);
-          console.log(`  ${DIM}Re-run ${RESET}${CYAN}devbrain backfill${RESET}${DIM} later to resume from here.${RESET}\n`);
+          if (auto) {
+            console.log(`  ${DIM}Gemini rate limited — leaving the rest for the next commit.${RESET}\n`);
+            return;
+          }
+          // A per-minute limit clears in a moment; a daily quota does not, and
+          // telling someone to "retry shortly" when the answer is "tomorrow"
+          // sends them round a loop that cannot succeed.
+          const daily = /PerDay|free_tier_requests|per day/i.test(err.message);
+          console.log(`\n  ${YELLOW}${daily ? 'Gemini daily quota exhausted' : 'Gemini rate limit is not clearing'}${RESET} — stopped after ${saved} saved.`);
+          console.log(daily
+            ? `  ${DIM}Free-tier requests reset every 24h. Re-run ${RESET}${CYAN}devbrain backfill${RESET}${DIM} then; it resumes from here.${RESET}`
+            : `  ${DIM}Re-run ${RESET}${CYAN}devbrain backfill${RESET}${DIM} shortly to resume from here.${RESET}`);
+          console.log(`  ${DIM}Higher limits: set GOOGLE_GENAI_USE_VERTEXAI=true with GOOGLE_CLOUD_PROJECT.${RESET}\n`);
           return;
         }
         failed++;
