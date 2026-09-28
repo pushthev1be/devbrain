@@ -506,6 +506,9 @@ const BACKFILL_MAX     = 500;
 const AUTO_SWEEP       = 8;
 // How many rate-limit windows a single commit will wait out before giving up.
 const BACKFILL_MAX_WAITS = 6;
+// Deadline for the post-failure lookup in `devbrain run`. It wraps a build, so a
+// slow lookup must be abandoned rather than delay a failure already on screen.
+const RUN_LOOKUP_TIMEOUT_MS = 8000;
 
 const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
@@ -771,6 +774,141 @@ async function handleCapture(): Promise<void> {
   // Sweep up anything the hook missed — commits made while offline, rate-limited,
   // or before DevBrain was installed here.
   await maybeAutoBackfill(AUTO_SWEEP);
+}
+
+// ─── run: look up past fixes at the moment something fails ────────────────────
+
+// Lines worth treating as the failure, most specific first. A stack trace is
+// mostly frames; the line naming the error is the one a past fix was filed under.
+const ERROR_SIGNALS: RegExp[] = [
+  /^[A-Za-z_.]*(Error|Exception)\b.*/,              // TypeError: x is not a function
+  /\berror\s+[A-Z]{1,4}\d{2,5}\b.*/,                // error TS2345, error CS1002
+  /\b(E[A-Z]{3,}|ENOENT|ECONNREFUSED|EADDRINUSE)\b.*/,
+  /\b(failed|failure|cannot|could not|unable to)\b.*/i,
+  /\b(assert|expected .* (to|but)|✕|✗|FAIL)\b.*/i,
+];
+
+/**
+ * Pick the line most likely to be the actual failure.
+ *
+ * Callers pass a whole build or test log. Embedding all of it buries the signal,
+ * and the first line is usually a banner rather than the error.
+ */
+export function extractFailure(output: string): string | null {
+  const lines = output
+    .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')          // strip colour
+    .split(/\r?\n/)
+    .map(l => l.trim())
+    .filter(Boolean)
+    .filter(l => !/^\s*at\s+/.test(l));             // drop stack frames
+  if (lines.length === 0) return null;
+
+  // Search the tail first: the failure is usually near the end of a log.
+  const tail = lines.slice(-80).reverse();
+  for (const re of ERROR_SIGNALS) {
+    const hit = tail.find(l => re.test(l));
+    if (hit) return hit.slice(0, 300);
+  }
+  return lines[lines.length - 1].slice(0, 300);
+}
+
+/**
+ * Run a command and, if it fails, say whether this went wrong here before.
+ *
+ * Every other lookup depends on someone choosing to ask. This one fires at the
+ * exact moment a past fix is worth most — when the error is on screen — and
+ * needs no agent cooperation. It is deliberately invisible otherwise: output
+ * streams through untouched, the child's exit code is preserved, and any
+ * internal failure is swallowed rather than breaking the wrapped command.
+ */
+async function handleRun(argv: string[]): Promise<void> {
+  if (argv.length === 0) {
+    console.log(`\n  ${BOLD}devbrain run${RESET} ${MAGENTA}<command>${RESET}`);
+    console.log(`  ${DIM}Runs the command. If it fails, searches your memory for the error.${RESET}\n`);
+    console.log(`  ${CYAN}devbrain run npm test${RESET}`);
+    console.log(`  ${CYAN}devbrain run npm run build${RESET}\n`);
+    process.exitCode = 1;
+    return;
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { spawn } = require('child_process') as typeof import('child_process');
+
+  const captured: string[] = [];
+  const MAX_CAPTURE = 64 * 1024;
+  let size = 0;
+  const tee = (chunk: Buffer, to: NodeJS.WriteStream) => {
+    to.write(chunk);
+    if (size < MAX_CAPTURE) { captured.push(chunk.toString()); size += chunk.length; }
+  };
+
+  const code: number = await new Promise(resolve => {
+    const child = spawn(argv.join(' '), {
+      shell: true,
+      stdio: ['inherit', 'pipe', 'pipe'],
+    });
+    child.stdout?.on('data', c => tee(c, process.stdout));
+    child.stderr?.on('data', c => tee(c, process.stderr));
+    child.on('error', () => resolve(127));
+    child.on('close', c => resolve(c ?? 0));
+  });
+
+  if (code === 0) { process.exitCode = 0; return; }
+
+  // Past this point nothing may change the outcome of the user's command.
+  process.exitCode = code;
+
+  try {
+    const failure = extractFailure(captured.join(''));
+    if (!failure) return;
+
+    // Match on the error text alone — no embedding, so no Gemini call.
+    //
+    // This started as an embedded search with a timeout, which was wrong twice
+    // over: an exhausted quota made it hang for minutes, and abandoning the
+    // in-flight request at exit tripped a libuv assertion on Windows that
+    // corrupted the exit code. It is also the wrong tool. preciseSearch scores
+    // literal overlap against errorPattern and title with no vector at all, and
+    // for an exact error string that beats semantic similarity. The result is
+    // instant, free, works offline, and needs no credentials.
+    const repoRoot = getRepoRoot(process.cwd()) ?? process.cwd();
+    const [allEntries, project] = await Promise.all([
+      getAllEntriesWithProjects(),
+      getProjectByPath(repoRoot),
+    ]);
+    const hits = preciseSearch(failure, [], allEntries, { topK: 3 });
+    if (hits.length === 0) return;
+
+    const W = Math.min(process.stdout.columns || 80, 80);
+    console.log(`\n${DIM}${'─'.repeat(W)}${RESET}`);
+    console.log(`  ${CYAN}${bold('DevBrain')}${RESET} — this looked familiar:`);
+    console.log(`  ${DIM}matched on: ${failure.slice(0, 68)}${RESET}\n`);
+
+    hits.forEach((r, i) => {
+      const type = normalizeType(r.entry.type);
+      console.log(`  ${BOLD}${i + 1}.${RESET} ${typeCode(type)}[${type}]${RESET} ${r.entry.title}`);
+      console.log(`     ${DIM}${r.project.name} · ${timeAgo(r.entry.createdAt)} · ${r.matchType === 'pattern' ? 'exact match' : similarityLabel(r.similarity)}${RESET}`);
+      if (r.entry.errorPattern) console.log(`     ${DIM}error:${RESET} ${r.entry.errorPattern.slice(0, 100)}`);
+      for (const line of wrap(r.entry.content.slice(0, 400), 70)) console.log(`     ${line}`);
+      console.log();
+    });
+
+    bumpRetrievalCounts(hits.map(r => r.entry.id), project?.id).catch(() => {});
+    console.log(`${DIM}${'─'.repeat(W)}${RESET}\n`);
+  } catch {
+    // A memory lookup must never add noise to a failing build.
+  } finally {
+    // Exit explicitly rather than waiting for the event loop to drain. An
+    // abandoned lookup leaves an in-flight HTTP request and an open database
+    // connection behind, and Node would sit on them long after the deadline —
+    // turning a "give up quietly" into the hang it was meant to prevent.
+    //
+    // Deliberately no closeDb() here: closing the driver while a request is
+    // still in flight trips a libuv assertion on Windows
+    // (!(handle->flags & UV_HANDLE_CLOSING) in win/async.c). Exiting releases
+    // the socket anyway, and this process is ending regardless.
+    process.exit(code);
+  }
 }
 
 async function handleSearch(query: string): Promise<void> {
@@ -2051,6 +2189,9 @@ async function main(): Promise<void> {
       case 'init':    await handleInit();                          break;
       case 'capture': await handleCapture();                       break;
       case 'backfill': await handleBackfill(args[1]);              break;
+      // Deliberately not in COMMAND_NEEDS: a missing credential must not stop
+      // the wrapped command from running.
+      case 'run':     await handleRun(args.slice(1));              break;
       case 'project': case 'projects': {
         const rest  = args.slice(1).filter(a => a !== '--write');
         const write = args.includes('--write');
@@ -2074,6 +2215,7 @@ async function main(): Promise<void> {
         console.log(`  ${CYAN}devbrain project${RESET} ${MAGENTA}[n]${RESET}  Everything saved about a project`);
         console.log(`  ${DIM}          ${RESET}${CYAN}--write${RESET}       ${DIM}… as one .md per section${RESET}`);
         console.log(`  ${CYAN}devbrain context${RESET} ${MAGENTA}[t]${RESET}   Ranked project history for an AI agent`);
+        console.log(`  ${CYAN}devbrain run${RESET} ${MAGENTA}<cmd>${RESET}    Run a command; on failure, show past fixes`);
         console.log(`  ${CYAN}devbrain search${RESET} ${MAGENTA}<q>${RESET}    Semantic search`);
         console.log(`  ${CYAN}devbrain note${RESET} ${MAGENTA}"<t>"${RESET}   Save  ${DIM}(bug: fix: stack: decision: image:...)${RESET}`);
         console.log(`  ${CYAN}devbrain summary${RESET}       Project name, stack and recent entries`);
@@ -2113,4 +2255,10 @@ async function main(): Promise<void> {
   await closeDb();
 }
 
-main();
+// Only run the CLI when this file is the process entry point. Calling main() at
+// import time meant the whole CLI executed — and could call process.exit — as a
+// side effect of importing any helper from this module, which made the file
+// impossible to unit test.
+if (require.main === module) {
+  main();
+}
