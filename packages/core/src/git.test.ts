@@ -6,7 +6,14 @@
  * execSync buffer limit that silently swallowed large diffs.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+
+// These tests drive real git subprocesses — roughly a hundred spawns across the
+// file. On Windows, under the parallel load of the full suite, that intermittently
+// exceeds the default 5s per-test timeout, which showed up as unrelated-looking
+// failures ("excludes merge commits") that passed when the file ran alone.
+// The work is genuinely slow rather than stuck, so give it room.
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 import { execSync } from 'child_process';
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'fs';
 import { tmpdir } from 'os';

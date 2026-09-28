@@ -156,6 +156,26 @@ export interface Entry {
   confidence?: 'observation' | 'corroborated' | 'confirmed';
   supersededBy?: string;
   supersededAt?: number;
+  /**
+   * Set when this entry was derived from a file rather than captured from work.
+   *
+   * A derived entry is owned by the indexer, not by DevBrain: re-indexing
+   * rewrites it from the current file, so correcting it here would be undone on
+   * the next run. Corrections belong in the source. See indexSource.ts.
+   */
+  source?: EntrySource;
+}
+
+export interface EntrySource {
+  /** Path relative to the project root, e.g. "CLAUDE.md". */
+  file: string;
+  /** Stable identity of the section within the file, e.g. "critical-bugs-fixed/9". */
+  anchor: string;
+  /** Hash of the section body, so an unchanged section is not rewritten. */
+  hash: string;
+  /** Human-readable location, e.g. "Critical Bugs Fixed > 9. settle-props: upsert". */
+  heading: string;
+  indexedAt: number;
 }
 
 export interface SearchResult {

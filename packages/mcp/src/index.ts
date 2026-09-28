@@ -547,6 +547,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return { content: [{ type: 'text', text: 'DevBrain: that entry was already superseded.' }] };
       }
 
+      // A derived entry is owned by the file it came from. Retracting it here
+      // would be undone by the next index, so send the correction where it will
+      // actually stick — and where a human reviews it.
+      if (target.source) {
+        return { content: [{ type: 'text', text:
+          `DevBrain: that entry is indexed from ${target.source.file}, which is the source of truth — ` +
+          `retracting it here would be reverted on the next index.\n` +
+          `Correct it at: ${target.source.heading}\n` +
+          `Then run \`devbrain index\` (or just commit) and the entry follows.\n\n` +
+          `If what you learned is new rather than a correction to that section, save it with save_entry instead.` }] };
+      }
+
       // Record what is true now as its own entry, then point the old one at it.
       // A bare retraction throws away the correction; this keeps the reasoning
       // that replaced it.

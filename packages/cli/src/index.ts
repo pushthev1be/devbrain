@@ -17,6 +17,7 @@ import {
   ENTRY_TYPES, normalizeType, getAllProjects,
   buildDossier, formatDossierMarkdown, dossierFiles,
   isDuplicateEntry, getAbandonedSession, describeAbandonedSession, clip,
+  parseMarkdownSource, planIndex, entryForSection,
 } from '@devbrain/core';
 import type { Entry, Project, EntryCategory } from '@devbrain/core';
 import { nanoid } from 'nanoid';
@@ -774,6 +775,85 @@ async function handleCapture(): Promise<void> {
   // Sweep up anything the hook missed — commits made while offline, rate-limited,
   // or before DevBrain was installed here.
   await maybeAutoBackfill(AUTO_SWEEP);
+}
+
+// ─── index: treat a Markdown file as a source of truth ────────────────────────
+
+const DEFAULT_SOURCE_FILES = ['CLAUDE.md', 'AGENTS.md', 'DEVBRAIN.md'];
+
+/**
+ * Index a Markdown file so its knowledge reaches agents, without copying it.
+ *
+ * The file stays authoritative. Each run reconciles against its current content:
+ * a changed section updates its entry, a removed section retracts one, a new
+ * section adds one. That is what keeps DevBrain and the file from drifting —
+ * the failure the whole feature exists to prevent.
+ */
+async function handleIndex(fileArg?: string): Promise<void> {
+  const cwd      = process.cwd();
+  const repoRoot = getRepoRoot(cwd) ?? cwd;
+
+  const candidates = fileArg ? [fileArg] : DEFAULT_SOURCE_FILES;
+  const file = candidates.find(f => existsSync(join(repoRoot, f)));
+  if (!file) {
+    console.log(`\n  ${YELLOW}No source file to index.${RESET}`);
+    console.log(`  ${DIM}Looked for: ${candidates.join(', ')} in ${repoRoot}${RESET}`);
+    console.log(`  ${DIM}Name one explicitly: ${RESET}${CYAN}devbrain index docs/ENGINEERING.md${RESET}\n`);
+    return;
+  }
+
+  let project = await getProjectByPath(repoRoot);
+  if (!project) {
+    project = { id: nanoid(), name: getProjectName(repoRoot), path: repoRoot, stack: detectStack(repoRoot), createdAt: Date.now(), lastSeen: Date.now() };
+    await upsertProject(project);
+  }
+
+  const text     = readFileSync(join(repoRoot, file), 'utf-8');
+  const sections = parseMarkdownSource(text);
+  const existing = (await getAllEntriesWithProjects()).filter(e => e.projectId === project!.id);
+  const plan     = planIndex(sections, existing, file);
+
+  console.log(`\n  ${bold(`Indexing ${file}`)}  ${dim(`${sections.length} sections`)}`);
+  console.log(`  ${DIM}${plan.added.length} new · ${plan.updated.length} changed · ${plan.unchanged} unchanged · ${plan.removed.length} gone${RESET}\n`);
+
+  if (!plan.added.length && !plan.updated.length && !plan.removed.length) {
+    console.log(`  ${GREEN}✓${RESET} Already up to date.\n`);
+    return;
+  }
+
+  const embedFor = async (s: { title: string; body: string }) => {
+    try { return await getEmbedding(`${s.title} ${s.body}`); } catch { return undefined; }
+  };
+
+  for (const section of plan.added) {
+    await insertEntry(entryForSection(section, project, file, { id: nanoid(), embedding: await embedFor(section) }));
+    console.log(`  ${GREEN}+${RESET} ${typeCode(section.type)}${section.type}${RESET}  ${clip(section.title, 62)}`);
+  }
+
+  for (const { section, entry } of plan.updated) {
+    // Replace in place: same id, so anything referencing it still resolves.
+    await deleteEntry(entry.id);
+    await insertEntry(entryForSection(section, project, file, {
+      id: entry.id, embedding: await embedFor(section), createdAt: entry.createdAt,
+    }));
+    console.log(`  ${YELLOW}~${RESET} ${typeCode(section.type)}${section.type}${RESET}  ${clip(section.title, 62)}  ${DIM}(source changed)${RESET}`);
+  }
+
+  for (const entry of plan.removed) {
+    // Retract rather than delete: the entry was true once, and something may
+    // have cited it. Superseded entries stop surfacing but stay readable.
+    const id = nanoid();
+    await insertEntry({
+      id, projectId: project.id, type: 'lesson',
+      title: clip(`No longer in ${file}: ${entry.title}`, 120),
+      content: `This was removed from ${file}, so it is no longer current guidance.`,
+      tags: ['claude-md', 'removed'], createdAt: Date.now(), confidence: 'observation',
+    });
+    await supersedeEntry(entry.id, id);
+    console.log(`  ${RED}-${RESET} ${clip(entry.title, 62)}  ${DIM}(removed from source)${RESET}`);
+  }
+
+  console.log(`\n  ${GREEN}${bold('Indexed.')}${RESET} ${DIM}${file} stays the source — edit it there and re-run to update.${RESET}\n`);
 }
 
 // ─── run: look up past fixes at the moment something fails ────────────────────
@@ -2192,6 +2272,7 @@ async function main(): Promise<void> {
       // Deliberately not in COMMAND_NEEDS: a missing credential must not stop
       // the wrapped command from running.
       case 'run':     await handleRun(args.slice(1));              break;
+      case 'index':   await handleIndex(args[1]);                  break;
       case 'project': case 'projects': {
         const rest  = args.slice(1).filter(a => a !== '--write');
         const write = args.includes('--write');
@@ -2212,6 +2293,7 @@ async function main(): Promise<void> {
         console.log(`  ${CYAN}devbrain setup${RESET}         Configure credentials (re-runnable)`);
         console.log(`  ${CYAN}devbrain init${RESET}          Register project + install git hook`);
         console.log(`  ${CYAN}devbrain backfill${RESET} ${MAGENTA}[n]${RESET}  Import past commits ${DIM}(default ${BACKFILL_DEFAULT})${RESET}`);
+        console.log(`  ${CYAN}devbrain index${RESET} ${MAGENTA}[file]${RESET}  Index CLAUDE.md as a source of truth`);
         console.log(`  ${CYAN}devbrain project${RESET} ${MAGENTA}[n]${RESET}  Everything saved about a project`);
         console.log(`  ${DIM}          ${RESET}${CYAN}--write${RESET}       ${DIM}… as one .md per section${RESET}`);
         console.log(`  ${CYAN}devbrain context${RESET} ${MAGENTA}[t]${RESET}   Ranked project history for an AI agent`);

@@ -7,3 +7,4 @@ export * from './search';
 export * from './dossier';
 export * from './dedupe';
 export * from './sessions';
+export * from './indexSource';
