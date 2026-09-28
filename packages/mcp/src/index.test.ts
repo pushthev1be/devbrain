@@ -56,6 +56,7 @@ vi.mock('@devbrain/core', async importOriginal => {
   ENTRY_TYPE_NAMES: real.ENTRY_TYPE_NAMES,
   normalizeType:    real.normalizeType,
   buildDossier:     real.buildDossier,
+  clip:             real.clip,
   describeStorage:  vi.fn().mockReturnValue({ kind: 'local', location: '/tmp/db.json' }),
 
   // Nothing is a duplicate in these tests, so saves take the normal path.
@@ -283,19 +284,44 @@ describe('MCP tool: query_entries', () => {
 });
 
 describe('MCP tools list', () => {
-  it('exposes all 8 expected tools', async () => {
+  it('exposes exactly the expected tools', async () => {
     const client = await buildTestClient();
     const { tools } = await client.listTools();
-    const names = tools.map(t => t.name);
-    expect(names).toContain('task_start');
-    expect(names).toContain('task_end');
-    expect(names).toContain('save_entry');
-    expect(names).toContain('search_knowledge');
-    expect(names).toContain('get_context');
-    expect(names).toContain('get_project_summary');
-    expect(names).toContain('query_entries');
-    expect(names).toContain('query_knowledge_db');
-    expect(names).toHaveLength(8);
+    // Compare the whole set rather than counting: adding a tool without listing
+    // it here should fail with the name, not with "expected 8, got 9".
+    expect(tools.map(t => t.name).sort()).toEqual([
+      'get_context',
+      'get_project_summary',
+      'query_entries',
+      'query_knowledge_db',
+      'save_entry',
+      'search_knowledge',
+      'supersede_entry',
+      'task_end',
+      'task_start',
+    ]);
+  });
+
+  it('lets an agent retract an entry it has found to be wrong', async () => {
+    // Retraction was implemented in core but reachable only from a button in the
+    // dashboard, so an agent that discovered a stored entry was false had no way
+    // to say so. A memory that can only append eventually recalls something
+    // untrue with full confidence.
+    const client = await buildTestClient();
+    const { tools } = await client.listTools();
+    const supersede = tools.find(t => t.name === 'supersede_entry')!;
+    expect(supersede.description).toMatch(/wrong or out of date/i);
+    expect(Object.keys(supersede.inputSchema.properties as object)).toEqual(
+      expect.arrayContaining(['id', 'reason']),
+    );
+  });
+
+  it('gives search results an id, so a wrong entry can be named', async () => {
+    const client = await buildTestClient();
+    const res = await client.callTool({
+      name: 'search_knowledge', arguments: { query: 'jwt expiry' },
+    }) as { content: { text: string }[] };
+    expect(res.content[0].text).toMatch(/id: /);
   });
 
   it('tool descriptions contain imperative CALL THIS language', async () => {

@@ -54,15 +54,17 @@ export interface PreciseSearchResult extends SearchResult {
   matchType: 'pattern' | 'semantic';
   patternScore: number;
   categoryMatch: boolean;
+  /** True when the hit is from the project the query was made in. */
+  sameProject: boolean;
 }
 
 export function preciseSearch(
   queryText: string,
   queryEmbedding: number[],
   entries: (Entry & { project: Project })[],
-  opts: { category?: EntryCategory; topK?: number; threshold?: number } = {}
+  opts: { category?: EntryCategory; topK?: number; threshold?: number; projectId?: string } = {}
 ): PreciseSearchResult[] {
-  const { category, topK = 8, threshold = 0.60 } = opts;
+  const { category, topK = 8, threshold = 0.60, projectId } = opts;
   const results: PreciseSearchResult[] = [];
 
   for (const e of entries) {
@@ -83,15 +85,21 @@ export function preciseSearch(
       patternScore: bestPattern,
       categoryMatch,
       matchType: bestPattern >= 0.5 ? 'pattern' : 'semantic',
+      sameProject: !!projectId && e.projectId === projectId,
     });
   }
 
-  // rank: pattern matches first, then by combined score
-  results.sort((a, b) => {
-    const scoreA = a.patternScore * 0.5 + a.similarity * 0.35 + (a.categoryMatch ? 0.15 : 0);
-    const scoreB = b.patternScore * 0.5 + b.similarity * 0.35 + (b.categoryMatch ? 0.15 : 0);
-    return scoreB - scoreA;
-  });
+  // Rank: pattern matches first, then combined score — with same-repo results
+  // ahead of equally-scoring ones from elsewhere.
+  //
+  // Without this term a Cloud Run entry from another repo came back level with a
+  // same-repo hit for a same-repo query. Knowledge does transfer across projects,
+  // but "this happened here" should outrank "this happened somewhere" at equal
+  // relevance. The boost is small enough that a markedly better cross-project
+  // match still wins.
+  const score = (r: PreciseSearchResult) =>
+    r.patternScore * 0.5 + r.similarity * 0.35 + (r.categoryMatch ? 0.15 : 0) + (r.sameProject ? 0.12 : 0);
+  results.sort((a, b) => score(b) - score(a));
 
   return results.slice(0, topK);
 }
@@ -228,7 +236,7 @@ export async function compressContext(ctx: DevBrainContext): Promise<DevBrainCon
 }
 
 /** Trim to a budget on a word boundary, so an agent never reads a half word. */
-function clip(text: string, max: number): string {
+export function clip(text: string, max: number): string {
   const t = text.replace(/\s+/g, ' ').trim();
   if (t.length <= max) return t;
   const cut = t.slice(0, max);

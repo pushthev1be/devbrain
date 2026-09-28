@@ -16,7 +16,7 @@ import {
   bumpRetrievalCounts, preciseSearch, vectorSearch,
   autoArchetype, recapSession, supersedeEntry,
   ENTRY_TYPES, ENTRY_TYPE_NAMES, normalizeType,
-  buildDossier, describeStorage, findDuplicate,
+  buildDossier, describeStorage, findDuplicate, clip,
   startSession, endSession, getAbandonedSession, describeAbandonedSession,
 } from '@devbrain/core';
 import type { EntryCategory } from '@devbrain/core';
@@ -44,7 +44,7 @@ function saveConfirmation(
   category?: string, causeArchetype?: string, errorPattern?: string
 ): string {
   const cat   = category && category !== 'other' ? ` ${category}` : '';
-  const short = title.slice(0, 65);
+  const short = clip(title, 65);
 
   if (type === 'fix') {
     if (causeArchetype) return `Stored recurring${cat} fix archetype: ${causeArchetype.slice(0, 70)}`;
@@ -184,12 +184,34 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
             type: 'string',
             description: 'The abstract root-cause pattern transferable across projects. Omit and DevBrain will generate it automatically.',
           },
+          supersedes: {
+            type: 'string',
+            description: 'id of an existing entry this corrects. Pass it whenever the new knowledge contradicts something DevBrain already holds — the old entry is retracted instead of left to be recalled alongside it.',
+          },
           project_path: {
             type: 'string',
             description: 'Absolute path to the project directory. Omit to use the current working directory.',
           },
         },
         required: ['type', 'title', 'content'],
+      },
+    },
+    {
+      name: 'supersede_entry',
+      description:
+        'CALL THIS the moment you find that something DevBrain told you is wrong or out of date. ' +
+        'Retracting matters as much as saving: an entry nobody corrects keeps being recalled as true, ' +
+        'and a memory that only appends eventually states something false with full confidence. ' +
+        'The superseded entry stops appearing in context and search, but is kept for history. ' +
+        'Get the id from search_knowledge results.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'id of the entry that is now wrong, from a search_knowledge result' },
+          reason: { type: 'string', description: 'What is actually true now, and how you established it.' },
+          project_path: { type: 'string', description: 'Absolute path to the project directory. Omit to use the current working directory.' },
+        },
+        required: ['id', 'reason'],
       },
     },
     {
@@ -412,13 +434,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
         await insertEntry({
           id: nanoid(), projectId: project.id,
-          type: e.type, title: e.title.slice(0, 120), content: e.content,
+          type: e.type, title: clip(e.title, 120), content: e.content,
           tags: e.tags, embedding, createdAt: Date.now(), confidence: 'observation',
           ...(e.category     ? { category: e.category }         : {}),
           ...(e.errorPattern ? { errorPattern: e.errorPattern }  : {}),
           ...(archetype      ? { causeArchetype: archetype }     : {}),
         });
-        saved.push(`  [${e.type}] ${e.title.slice(0, 80)}`);
+        saved.push(`  [${e.type}] ${clip(e.title, 80)}`);
       }
 
       // The session is recorded, so it no longer counts as abandoned.
@@ -437,9 +459,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     // ── save_entry ────────────────────────────────────────────────────────────────
     if (name === 'save_entry') {
-      const { type, title, content, tags = [], category, error_pattern, cause_archetype, project_path } = args as {
+      const { type, title, content, tags = [], category, error_pattern, cause_archetype, project_path, supersedes } = args as {
         type: Entry['type']; title: string; content: string;
-        tags?: string[]; category?: EntryCategory; error_pattern?: string; cause_archetype?: string; project_path?: string;
+        tags?: string[]; category?: EntryCategory; error_pattern?: string; cause_archetype?: string;
+        project_path?: string; supersedes?: string;
       };
 
       const cwd      = project_path ?? process.cwd();
@@ -477,22 +500,77 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
       }
 
+      const newId = nanoid();
       await insertEntry({
-        id: nanoid(), projectId: project.id,
-        type, title: title.slice(0, 120), content, tags,
+        id: newId, projectId: project.id,
+        // Clip on a word boundary: a title cut mid-token ("existing token ")
+        // is the first thing anyone reads about an entry.
+        type, title: clip(title, 120), content, tags,
         embedding, createdAt: Date.now(), confidence: 'observation',
         ...(category   ? { category }                    : {}),
         ...(error_pattern ? { errorPattern: error_pattern } : {}),
         ...(archetype  ? { causeArchetype: archetype }   : {}),
       });
 
+      // Retract in the same call that records the correction, so the wrong
+      // entry cannot go on being recalled next to the right one.
+      let retracted = '';
+      if (supersedes) {
+        const old = (await getAllEntriesWithProjects()).find(e => e.id === supersedes);
+        if (old && !old.supersededBy) {
+          await supersedeEntry(supersedes, newId);
+          retracted = `\nRetracted: "${clip(old.title, 70)}" — it will no longer surface.`;
+        } else if (!old) {
+          retracted = `\nNote: no entry with id ${supersedes}, so nothing was retracted.`;
+        }
+      }
+
       const confirmation = saveConfirmation(type, title, category, archetype, error_pattern);
       return {
-        content: [{ type: 'text', text: `DevBrain: ${confirmation}` }],
+        content: [{ type: 'text', text: `DevBrain: ${confirmation}${retracted}` }],
       };
     }
 
     // â”€â”€ search_knowledge â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── supersede_entry ─────────────────────────────────────────────────────
+    if (name === 'supersede_entry') {
+      const { id, reason, project_path } = args as { id: string; reason: string; project_path?: string };
+      const repoRoot = getRepoRoot(project_path ?? process.cwd()) ?? (project_path ?? process.cwd());
+      const project  = await getProjectByPath(repoRoot);
+
+      const target = (await getAllEntriesWithProjects()).find(e => e.id === id);
+      if (!target) {
+        return { content: [{ type: 'text', text:
+          `DevBrain: no entry with id ${id}. Run search_knowledge and use the id shown with the result.` }] };
+      }
+      if (target.supersededBy) {
+        return { content: [{ type: 'text', text: 'DevBrain: that entry was already superseded.' }] };
+      }
+
+      // Record what is true now as its own entry, then point the old one at it.
+      // A bare retraction throws away the correction; this keeps the reasoning
+      // that replaced it.
+      const correctionId = nanoid();
+      let embedding: number[] | undefined;
+      try { embedding = await getEmbedding(`${target.title} ${reason}`); } catch {}
+      await insertEntry({
+        id: correctionId,
+        projectId: project?.id ?? target.projectId,
+        type: 'lesson',
+        title: clip(`Corrected: ${target.title}`, 100),
+        content: reason,
+        tags: ['correction'],
+        embedding,
+        createdAt: Date.now(),
+        confidence: 'observation',
+      });
+      await supersedeEntry(id, correctionId);
+
+      return { content: [{ type: 'text', text:
+        `DevBrain: retracted "${clip(target.title, 80)}".\n` +
+        `It no longer appears in context or search. The correction is saved as ${correctionId}.` }] };
+    }
+
     if (name === 'search_knowledge') {
       const { query, category, error_pattern } = args as {
         query: string; category?: EntryCategory; error_pattern?: string;
@@ -503,30 +581,38 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       // Atlas Vector Search — fast ANN retrieval, then re-rank with preciseSearch.
       const candidates = await searchCandidates(queryEmbedding);
 
+      const callerProject = await getProjectByPath(getRepoRoot(process.cwd()) ?? process.cwd()).catch(() => null);
+
       const results = preciseSearch(searchText, queryEmbedding, candidates, {
-        category, topK: 6, threshold: 0.45,
+        category, topK: 6, threshold: 0.45, projectId: callerProject?.id,
       });
 
       if (results.length === 0) {
         return { content: [{ type: 'text', text: `No matches found in DevBrain for: "${query}"` }] };
       }
 
-      const callerProject = await getProjectByPath(getRepoRoot(process.cwd()) ?? process.cwd()).catch(() => null);
       await bumpRetrievalCounts(results.map(r => r.entry.id), callerProject?.id);
 
       const text = results.map((r, i) => {
         const matchLabel = r.matchType === 'pattern' ? 'pattern match' : similarityLabel(r.similarity);
         const catLabel   = r.entry.category ? ` [${r.entry.category}]` : '';
+        // Mark where the knowledge came from, and expose the id — without it an
+        // agent that spots a wrong entry has no way to name it for correction.
+        const origin = r.sameProject ? 'this project' : `other project: ${r.project.name}`;
         return (
           `${i + 1}. [${r.entry.type}]${catLabel} ${r.entry.title}\n` +
-          `   ${matchLabel} · ${r.project.name} · ${timeAgo(r.entry.createdAt)}\n` +
+          `   ${matchLabel} · ${origin} · ${timeAgo(r.entry.createdAt)}\n` +
+          `   id: ${r.entry.id}\n` +
           (r.entry.errorPattern ? `   pattern: ${r.entry.errorPattern}\n` : '') +
           `   ${r.entry.content}` +
           (r.entry.tags.length ? `\n   tags: ${r.entry.tags.join(', ')}` : '')
         );
       }).join('\n\n');
 
-      return { content: [{ type: 'text', text: `DevBrain results for "${query}":\n\n${text}` }] };
+      return { content: [{ type: 'text', text:
+        `DevBrain results for "${query}":\n\n${text}\n\n` +
+        `If any of these is now wrong, correct it with supersede_entry(id, reason) ` +
+        `or save_entry(..., supersedes: id) — an entry nobody retracts keeps being recalled as true.` }] };
     }
 
     // â”€â”€ get_project_summary â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -545,7 +631,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       for (const e of entries) { if (e.type in counts) counts[e.type as keyof typeof counts]++; }
 
       const recent = entries.slice(0, 6).map(e =>
-        `  [${e.type}] ${e.title.slice(0, 80)} (${timeAgo(e.createdAt)})`
+        `  [${e.type}] ${clip(e.title, 80)} (${timeAgo(e.createdAt)})`
       ).join('\n');
 
       const summary = [

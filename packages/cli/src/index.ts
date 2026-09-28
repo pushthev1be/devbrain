@@ -16,7 +16,7 @@ import {
   describeStorage, getLocalDbPath, closeDb,
   ENTRY_TYPES, normalizeType, getAllProjects,
   buildDossier, formatDossierMarkdown, dossierFiles,
-  isDuplicateEntry, getAbandonedSession, describeAbandonedSession,
+  isDuplicateEntry, getAbandonedSession, describeAbandonedSession, clip,
 } from '@devbrain/core';
 import type { Entry, Project, EntryCategory } from '@devbrain/core';
 import { nanoid } from 'nanoid';
@@ -666,7 +666,7 @@ async function handleBackfill(
     await insertEntry({
       id: nanoid(), projectId: project.id,
       type: knowledge.type,
-      title: knowledge.problem.slice(0, 120),
+      title: clip(knowledge.problem, 120),
       content: knowledge.solution,
       tags: knowledge.tags,
       embedding,
@@ -756,7 +756,7 @@ async function handleCapture(): Promise<void> {
   await insertEntry({
     id: nanoid(), projectId: project.id,
     type: knowledge.type,
-    title: knowledge.problem.slice(0, 120),
+    title: clip(knowledge.problem, 120),
     content: knowledge.solution,
     tags: knowledge.tags,
     embedding, createdAt: commit.timestamp,
@@ -1034,7 +1034,7 @@ async function handleNote(text: string, inq?: any): Promise<void> {
           return;
         }
         const newS = spin('Saving...');
-        await insertEntry({ id: nanoid(), projectId: project.id, type, title: content.slice(0, 120), content, tags: [], embedding, createdAt: Date.now(), confidence: 'observation' });
+        await insertEntry({ id: nanoid(), projectId: project.id, type, title: clip(content, 120), content, tags: [], embedding, createdAt: Date.now(), confidence: 'observation' });
         newS.succeed(`Saved  ${DIM}[${type}]${RESET}`);
         console.log();
         return;
@@ -1061,13 +1061,13 @@ async function handleNote(text: string, inq?: any): Promise<void> {
           }]);
           if (action === 'supersede') {
             const newId = nanoid();
-            await insertEntry({ id: newId, projectId: project.id, type, title: content.slice(0, 120), content, tags: [], embedding, createdAt: Date.now(), confidence: 'observation' });
+            await insertEntry({ id: newId, projectId: project.id, type, title: clip(content, 120), content, tags: [], embedding, createdAt: Date.now(), confidence: 'observation' });
             await supersedeEntry(top.entry.id, newId);
             console.log(`  ${GREEN}✓${RESET} Saved new decision  ${DIM}old marked superseded${RESET}\n`);
             return;
           }
           const newS = spin('Saving...');
-          await insertEntry({ id: nanoid(), projectId: project.id, type, title: content.slice(0, 120), content, tags: [], embedding, createdAt: Date.now(), confidence: 'observation' });
+          await insertEntry({ id: nanoid(), projectId: project.id, type, title: clip(content, 120), content, tags: [], embedding, createdAt: Date.now(), confidence: 'observation' });
           newS.succeed(`Saved  ${DIM}[${type}]${RESET}`);
           console.log();
           return;
@@ -1087,7 +1087,7 @@ async function handleNote(text: string, inq?: any): Promise<void> {
       return;
     }
 
-    await insertEntry({ id: nanoid(), projectId: project.id, type, title: content.slice(0, 120), content, tags: [], embedding, createdAt: Date.now(), confidence: 'observation' });
+    await insertEntry({ id: nanoid(), projectId: project.id, type, title: clip(content, 120), content, tags: [], embedding, createdAt: Date.now(), confidence: 'observation' });
     if (inq) {
       console.log(`  ${GREEN}✓${RESET} Saved  ${DIM}[${type}]${RESET}\n`);
     } else {
@@ -1713,7 +1713,7 @@ async function handleRecap(sessionText?: string): Promise<void> {
     try { embedding = await getEmbedding(`${e.title} ${e.content} ${e.tags.join(' ')}`); } catch {}
     await insertEntry({
       id: nanoid(), projectId: project.id,
-      type: e.type, title: e.title.slice(0, 120), content: e.content,
+      type: e.type, title: clip(e.title, 120), content: e.content,
       tags: e.tags, embedding, createdAt: Date.now(), confidence: 'observation',
       ...(e.category      ? { category: e.category as EntryCategory }   : {}),
       ...(e.errorPattern  ? { errorPattern: e.errorPattern }            : {}),
