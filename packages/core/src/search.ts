@@ -227,6 +227,33 @@ export async function compressContext(ctx: DevBrainContext): Promise<DevBrainCon
   };
 }
 
+/** Trim to a budget on a word boundary, so an agent never reads a half word. */
+function clip(text: string, max: number): string {
+  const t = text.replace(/\s+/g, ' ').trim();
+  if (t.length <= max) return t;
+  const cut = t.slice(0, max);
+  return cut.slice(0, Math.max(cut.lastIndexOf(' '), Math.floor(max * 0.6))).replace(/[\s,;:—-]+$/, '') + '…';
+}
+
+/**
+ * One entry, rendered for an agent that has to act on it.
+ *
+ * Context used to carry the title plus 120 characters of the solution, and left
+ * out errorPattern and causeArchetype entirely — even though errorPattern is
+ * what makes "I am seeing this exact error" match a past fix, and is the field
+ * the ranker already leans on. An agent could tell that something similar had
+ * happened before, but not what to do about it.
+ */
+function entryLines(r: ContextEntry, contentBudget: number, opts: { evidence?: boolean } = {}): string[] {
+  const out: string[] = [];
+  const e = r.entry;
+  if (e.content && e.content !== e.title) out.push(`   → ${clip(e.content, contentBudget)}`);
+  if (opts.evidence && e.errorPattern) out.push(`   error: ${clip(e.errorPattern, 200)}`);
+  if (opts.evidence && e.causeArchetype) out.push(`   root cause: ${clip(e.causeArchetype, 160)}`);
+  if (e.tags.length) out.push(`   tags: ${e.tags.slice(0, 6).join(', ')}`);
+  return out;
+}
+
 export function formatContext(ctx: DevBrainContext, query?: string): string {
   const projectName = ctx.currentProject?.name ?? 'DevBrain';
   const total = ctx.issues.length + ctx.decisions.length + ctx.architecture.length
@@ -248,7 +275,7 @@ export function formatContext(ctx: DevBrainContext, query?: string): string {
       lines.push(`- ${r.entry.title}${badge}`);
       if (r.entry.causeArchetype) lines.push(`  archetype: ${r.entry.causeArchetype}`);
       if (r.entry.content && r.entry.content !== r.entry.title) {
-        lines.push(`  → ${r.entry.content.slice(0, 120)}`);
+        lines.push(`  → ${clip(r.entry.content, 400)}`);
       }
     });
     lines.push('');
@@ -259,11 +286,12 @@ export function formatContext(ctx: DevBrainContext, query?: string): string {
     if (ctx.synthesis?.issues) {
       lines.push(ctx.synthesis.issues);
     } else {
+      // Issues carry the most actionable detail, so they get the largest budget
+      // and the evidence fields an agent needs to match and apply a past fix.
       ctx.issues.forEach((r, i) => {
         lines.push(`${i + 1}. [${normalizeType(r.entry.type)}] ${r.entry.title}`);
         lines.push(`   ${r.project.name} · ${timeAgo(r.entry.createdAt)}`);
-        if (r.entry.content) lines.push(`   → ${r.entry.content.slice(0, 160)}`);
-        if (r.entry.tags.length) lines.push(`   tags: ${r.entry.tags.join(', ')}`);
+        lines.push(...entryLines(r, 700, { evidence: true }));
       });
     }
     lines.push('');
@@ -277,7 +305,7 @@ export function formatContext(ctx: DevBrainContext, query?: string): string {
       ctx.decisions.forEach(r => {
         lines.push(`- ${r.entry.title}`);
         if (r.entry.content && r.entry.content !== r.entry.title) {
-          lines.push(`  → ${r.entry.content.slice(0, 120)}`);
+          lines.push(`  → ${clip(r.entry.content, 400)}`);
         }
       });
     }
@@ -289,7 +317,7 @@ export function formatContext(ctx: DevBrainContext, query?: string): string {
     ctx.architecture.forEach(r => {
       lines.push(`- ${r.entry.title}`);
       if (r.entry.content && r.entry.content !== r.entry.title) {
-        lines.push(`  → ${r.entry.content.slice(0, 120)}`);
+        lines.push(`  → ${clip(r.entry.content, 400)}`);
       }
     });
     lines.push('');
@@ -303,7 +331,7 @@ export function formatContext(ctx: DevBrainContext, query?: string): string {
       ctx.patterns.forEach(r => {
         lines.push(`- ${r.entry.title}`);
         if (r.entry.content && r.entry.content !== r.entry.title) {
-          lines.push(`  → ${r.entry.content.slice(0, 120)}`);
+          lines.push(`  → ${clip(r.entry.content, 400)}`);
         }
       });
     }
@@ -318,7 +346,7 @@ export function formatContext(ctx: DevBrainContext, query?: string): string {
       ctx.antiPatterns.forEach(r => {
         lines.push(`- ${r.entry.title}`);
         if (r.entry.content && r.entry.content !== r.entry.title) {
-          lines.push(`  → ${r.entry.content.slice(0, 120)}`);
+          lines.push(`  → ${clip(r.entry.content, 400)}`);
         }
       });
     }
@@ -338,7 +366,7 @@ export function formatContext(ctx: DevBrainContext, query?: string): string {
     ctx.notes.forEach(r => {
       lines.push(`- ${r.entry.title}`);
       if (r.entry.content && r.entry.content !== r.entry.title) {
-        lines.push(`  → ${r.entry.content.slice(0, 120)}`);
+        lines.push(`  → ${clip(r.entry.content, 400)}`);
       }
     });
     lines.push('');
@@ -349,7 +377,7 @@ export function formatContext(ctx: DevBrainContext, query?: string): string {
     ctx.supersededDecisions.forEach(r => {
       lines.push(`- [SUPERSEDED] ${r.entry.title}`);
       if (r.entry.content && r.entry.content !== r.entry.title) {
-        lines.push(`  → ${r.entry.content.slice(0, 120)}`);
+        lines.push(`  → ${clip(r.entry.content, 400)}`);
       }
     });
     lines.push('');
