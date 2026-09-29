@@ -23,7 +23,12 @@ import type { EntryCategory } from '@devbrain/core';
 import type { Entry } from '@devbrain/core';
 import { nanoid } from 'nanoid';
 import { mongoMcpFind } from './mongoMcp';
-import { runAgent } from './agent';
+// NOT imported at the top level. ./agent pulls in @google/adk, which takes ~2.2s
+// to load — 85% of this server's startup. Over stdio that delay ran before the
+// handshake could be answered, so MCP clients reported CONNECT_TIMEOUT and never
+// loaded any tools. runAgent is only used by the HTTP /agent route, so it is
+// required at the point of use instead.
+type RunAgent = typeof import('./agent').runAgent;
 import { HTML_DASHBOARD } from './dashboard';
 
 // Load config from ~/.devbrain/.env (GEMINI_API_KEY, Vertex AI vars, MONGODB_URI, …).
@@ -1160,6 +1165,8 @@ const httpServer = createServer(async (req, res) => {
           const { query } = await readBody(req) as { query: string };
           if (!query?.trim()) { json(res, 400, { error: 'query is required' }); return; }
           const mcpUrl = `http://localhost:${PORT}/mcp`;
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const runAgent: RunAgent = require('./agent').runAgent;
           const response = await runAgent(query, mcpUrl);
           json(res, 200, { response, powered_by: 'Google ADK + Gemini 2.5 Flash (Vertex AI) + DevBrain MCP' });
         } catch (err) {
