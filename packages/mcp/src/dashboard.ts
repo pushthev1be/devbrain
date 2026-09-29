@@ -69,7 +69,12 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
     .btn.ghost:hover { border-color: var(--accent); color: var(--text); }
     .btn:disabled { opacity: .5; cursor: default; }
 
-    .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px; }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 18px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
+    .tb-q { flex: 1 1 220px; min-width: 160px; padding: 6px 10px; font-size: 13px; }
+    .tb-sel { flex: 0 0 auto; width: auto; padding: 6px 8px; font-size: 12px; }
+    .tb-check { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text2); cursor: pointer; white-space: nowrap; }
+    .tb-count { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--text3); white-space: nowrap; }
     .chip { background: var(--surface2); border: 1px solid var(--border); color: var(--text2); padding: 4px 10px; border-radius: 12px; cursor: pointer; font-size: 12px; }
     .chip.active { border-color: var(--accent); color: var(--text); }
     .chip .n { font-family: var(--mono); color: var(--text3); margin-left: 5px; }
@@ -148,7 +153,12 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
   <div class="toast" id="toast"></div>
 
   <script>
-    var STATE = { projects: [], projectId: null, view: 'project', section: 'all', dossier: null };
+    var STATE = {
+      projects: [], projectId: null, view: 'project', section: 'all', dossier: null,
+      // Filters apply to the loaded project, client side — the whole record is
+      // already here, so narrowing it should not cost a round trip.
+      q: '', sort: 'newest', category: 'all', origin: 'all', showRetracted: false,
+    };
     var TYPES = ${JSON.stringify(ENTRY_TYPES.map(t => ({ type: t.type, hint: t.hint })))};
 
     function esc(s) {
@@ -234,7 +244,7 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
           ' &middot; ' + esc(p.path) + '</div></div>' +
           '<div class="actions">' +
           '<button class="btn" data-act="save-here">Save an entry here</button>' +
-          '<button class="btn ghost" data-act="context">Agent context</button>' +
+          '<button class="btn ghost" data-act="context">agent.md</button>' +
           '<button class="btn ghost" data-act="search-here">Search</button>' +
           '</div>';
 
@@ -253,17 +263,114 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
               '<span class="n">' + s.entries.length + '</span></button>';
           }).join('') + '</div>';
 
-        var shown = d.sections.filter(function (s) {
-          return STATE.section === 'all' || s.section === STATE.section;
-        });
+        var shown = d.sections
+          .filter(function (s) { return STATE.section === 'all' || s.section === STATE.section; })
+          .map(function (s) {
+            return { section: s, entries: sortEntries(s.entries.filter(keepEntry)) };
+          })
+          .filter(function (s) { return s.entries.length > 0; });
 
-        main.innerHTML = head + chips + shown.map(function (s) {
-          return '<div class="sec"><h2>' + esc(s.heading) + '</h2>' +
-            '<div class="blurb">' + esc(s.blurb) + '</div>' +
-            s.entries.map(renderCard).join('') + '</div>';
-        }).join('');
+        var kept = shown.reduce(function (a, s) { return a + s.entries.length; }, 0);
+        var body = shown.length
+          ? shown.map(function (s) {
+              return '<div class="sec"><h2>' + esc(s.section.heading) + '</h2>' +
+                '<div class="blurb">' + esc(s.section.blurb) + '</div>' +
+                s.entries.map(renderCard).join('') + '</div>';
+            }).join('')
+          : '<div class="empty">// nothing matches these filters &mdash; ' +
+            '<a href="#" data-act="clear-filters" style="color:var(--accent)">clear them</a></div>';
+
+        main.innerHTML = head + chips + toolbar(kept, total) + body;
+        restoreFilterFocus();
       } catch (e) {
         main.innerHTML = fail('could not load this project', e.message);
+      }
+    }
+
+    // ── filtering and sorting, over the project already loaded ──
+    var SORTS = [
+      ['newest',     'Newest first'],
+      ['oldest',     'Oldest first'],
+      ['used',       'Most used'],
+      ['confidence', 'Most confident'],
+      ['title',      'Title A-Z'],
+    ];
+
+    function keepEntry(e) {
+      // Retracted entries are kept for history but are not current guidance, so
+      // they stay hidden unless asked for.
+      if (e.supersededBy && !STATE.showRetracted) return false;
+      if (STATE.category !== 'all' && (e.category || 'other') !== STATE.category) return false;
+      if (STATE.origin === 'indexed' && !e.sourceFile) return false;
+      if (STATE.origin === 'captured' && e.sourceFile) return false;
+      if (STATE.q) {
+        var hay = (e.title + ' ' + e.content + ' ' + (e.tags || []).join(' ') + ' ' +
+                   (e.errorPattern || '') + ' ' + (e.causeArchetype || '')).toLowerCase();
+        if (hay.indexOf(STATE.q.toLowerCase()) === -1) return false;
+      }
+      return true;
+    }
+
+    function sortEntries(list) {
+      var rank = { confirmed: 2, corroborated: 1, observation: 0 };
+      var copy = list.slice();
+      if (STATE.sort === 'oldest')      copy.sort(function (a, b) { return a.createdAt - b.createdAt; });
+      else if (STATE.sort === 'used')   copy.sort(function (a, b) { return (b.retrievalCount || 0) - (a.retrievalCount || 0); });
+      else if (STATE.sort === 'title')  copy.sort(function (a, b) { return String(a.title).localeCompare(String(b.title)); });
+      else if (STATE.sort === 'confidence') {
+        copy.sort(function (a, b) {
+          return (rank[b.confidence] || 0) - (rank[a.confidence] || 0) || b.createdAt - a.createdAt;
+        });
+      } else copy.sort(function (a, b) { return b.createdAt - a.createdAt; });
+      return copy;
+    }
+
+    function categoriesInDossier() {
+      var seen = {};
+      (STATE.dossier ? STATE.dossier.sections : []).forEach(function (s) {
+        s.entries.forEach(function (e) { seen[e.category || 'other'] = true; });
+      });
+      return Object.keys(seen).sort();
+    }
+
+    function toolbar(kept, total) {
+      var opts = function (list, current) {
+        return list.map(function (o) {
+          var v = Array.isArray(o) ? o[0] : o, label = Array.isArray(o) ? o[1] : o;
+          return '<option value="' + esc(v) + '"' + (v === current ? ' selected' : '') + '>' + esc(label) + '</option>';
+        }).join('');
+      };
+      var retractedCount = 0;
+      (STATE.dossier ? STATE.dossier.sections : []).forEach(function (s) {
+        s.entries.forEach(function (e) { if (e.supersededBy) retractedCount++; });
+      });
+
+      return '<div class="toolbar">' +
+        '<input class="in tb-q" id="f-q" placeholder="Filter these entries&hellip;" value="' + esc(STATE.q) + '">' +
+        '<select class="in tb-sel" id="f-sort">' + opts(SORTS, STATE.sort) + '</select>' +
+        '<select class="in tb-sel" id="f-cat">' +
+          opts([['all', 'All categories']].concat(categoriesInDossier().map(function (c) { return [c, c]; })), STATE.category) +
+        '</select>' +
+        '<select class="in tb-sel" id="f-origin">' +
+          opts([['all', 'All sources'], ['captured', 'From my work'], ['indexed', 'From a file']], STATE.origin) +
+        '</select>' +
+        (retractedCount
+          ? '<label class="tb-check"><input type="checkbox" id="f-retracted"' + (STATE.showRetracted ? ' checked' : '') + '> ' +
+            'retracted (' + retractedCount + ')</label>'
+          : '') +
+        '<span class="tb-count">' + kept + ' of ' + total + '</span>' +
+        '</div>';
+    }
+
+    // Re-rendering replaces the input, so put the caret back where it was —
+    // otherwise typing a filter drops focus after the first character.
+    var FILTER_CARET = null;
+    function restoreFilterFocus() {
+      var q = el('f-q');
+      if (q && FILTER_CARET !== null) {
+        q.focus();
+        try { q.setSelectionRange(FILTER_CARET, FILTER_CARET); } catch (err) {}
+        FILTER_CARET = null;
       }
     }
 
@@ -335,10 +442,11 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
     async function renderContext() {
       var main = el('main');
       var name = currentProjectName();
-      main.innerHTML = '<div class="phead"><h1>Agent context</h1><div class="pmeta">' + esc(name) +
+      main.innerHTML = '<div class="phead"><h1>agent.md</h1><div class="pmeta">' + esc(name) +
         ' &mdash; ranked history, ready to paste into an agent prompt</div></div>' +
         '<div class="actions"><button class="btn ghost" data-act="back">Back to project</button>' +
-        '<button class="btn ghost" data-act="copy-ctx">Copy</button></div>' +
+        '<button class="btn ghost" data-act="copy-ctx">Copy</button>' +
+        '<button class="btn ghost" data-act="download-ctx">Download agent.md</button></div>' +
         '<pre class="ctx" id="ctx">generating&hellip;</pre>';
       try {
         var d = await getJSON('/api/context', {
@@ -430,6 +538,23 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
       }
     }
 
+    // Filter controls are recreated on every render, so listen at the document
+    // rather than binding to elements that will be replaced.
+    document.addEventListener('input', function (ev) {
+      var t = ev.target;
+      if (!t || !t.id) return;
+      if (t.id === 'f-q') { FILTER_CARET = t.selectionStart; STATE.q = t.value; renderProject(); }
+    });
+
+    document.addEventListener('change', function (ev) {
+      var t = ev.target;
+      if (!t || !t.id) return;
+      if (t.id === 'f-sort')           { STATE.sort = t.value; renderProject(); }
+      else if (t.id === 'f-cat')       { STATE.category = t.value; renderProject(); }
+      else if (t.id === 'f-origin')    { STATE.origin = t.value; renderProject(); }
+      else if (t.id === 'f-retracted') { STATE.showRetracted = t.checked; renderProject(); }
+    });
+
     // ── one delegated click handler; no inline handlers anywhere ──
     document.addEventListener('click', function (ev) {
       var t = ev.target;
@@ -456,7 +581,12 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
       var act = t.closest('[data-act]');
       if (!act) return;
       var a = act.getAttribute('data-act');
-      if (a === 'menu') el('sidebar').classList.toggle('open');
+      if (a === 'clear-filters') {
+        ev.preventDefault();
+        STATE.q = ''; STATE.category = 'all'; STATE.origin = 'all'; STATE.showRetracted = false;
+        renderProject();
+      }
+      else if (a === 'menu') el('sidebar').classList.toggle('open');
       else if (a === 'save-here' || a === 'do-save-nav') renderSave();
       else if (a === 'do-save') doSave();
       else if (a === 'search-here') renderSearch();
@@ -467,6 +597,15 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
         var txt = el('ctx').textContent;
         if (navigator.clipboard) navigator.clipboard.writeText(txt).then(function () { toast('copied'); });
         else toast('copy not available');
+      }
+      else if (a === 'download-ctx') {
+        var blob = new Blob([el('ctx').textContent], { type: 'text/markdown' });
+        var url = URL.createObjectURL(blob);
+        var link = document.createElement('a');
+        link.href = url; link.download = 'agent.md';
+        document.body.appendChild(link); link.click(); link.remove();
+        setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+        toast('agent.md downloaded');
       }
     });
 

@@ -961,6 +961,10 @@ const httpServer = createServer(async (req, res) => {
                 errorPattern: e.errorPattern, causeArchetype: e.causeArchetype,
                 supersededBy: e.supersededBy,
                 seenInProjects: e.seenInProjects?.length ?? 0,
+                // Needed by the dashboard filters: how often this has been used,
+                // and whether it was captured from work or indexed from a file.
+                retrievalCount: e.retrievalCount ?? 0,
+                sourceFile: e.source?.file,
               })),
             })),
           });
