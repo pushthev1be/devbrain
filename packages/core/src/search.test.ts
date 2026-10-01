@@ -485,3 +485,66 @@ describe('preciseSearch agreement gate', () => {
     expect(hits.map(h => h.entry.id)).not.toContain('e-silent');
   });
 });
+
+// ── pattern specificity floor ─────────────────────────────────────────────────
+
+describe('errorPattern specificity', () => {
+  const project = makeProject();
+  const unrelated = (errorPattern: string) => makeEntry({
+    id: 'e-unrelated',
+    type: 'fix',
+    title: 'unrelated styling cleanup',
+    content: 'simplified the stylesheet, nothing to do with networking',
+    errorPattern,
+    project,
+  });
+  const query = 'nginx upstream server error: connection timeout after 60s';
+
+  it('a short generic pattern does not full-score every query containing the word', () => {
+    for (const pattern of ['ERR', 'timeout', '429']) {
+      const hits = preciseSearch(query, [], [unrelated(pattern)]);
+      expect(hits.map(h => h.entry.id)).not.toContain('e-unrelated');
+    }
+  });
+
+  it('a long single-token error code still matches on containment', () => {
+    const e = makeEntry({
+      id: 'e-code',
+      type: 'fix',
+      title: 'port already bound on restart',
+      content: 'kill the stale listener first',
+      errorPattern: 'EADDRINUSE',
+      project,
+    });
+    const hits = preciseSearch('listen EADDRINUSE: address already in use :::3000', [], [e]);
+    expect(hits[0]?.entry.id).toBe('e-code');
+    expect(hits[0]?.patternScore).toBe(1);
+  });
+
+  it('a multi-word pattern still matches on containment even when each word is short', () => {
+    const e = makeEntry({
+      id: 'e-multi',
+      type: 'fix',
+      title: 'client reports no endpoint',
+      content: 'normalize the url before routing',
+      errorPattern: 'No MCP endpoint was found',
+      project,
+    });
+    const hits = preciseSearch('the client says No MCP endpoint was found at the URL provided', [], [e]);
+    expect(hits[0]?.entry.id).toBe('e-multi');
+    expect(hits[0]?.patternScore).toBe(1);
+  });
+
+  it('a short pattern can still be found by word overlap when the query is focused', () => {
+    const e = makeEntry({
+      id: 'e-sig',
+      type: 'fix',
+      title: 'piped command dies early',
+      content: 'the reader closed the pipe before the writer finished',
+      errorPattern: 'SIGPIPE',
+      project,
+    });
+    // Not a full pattern match, but enough overlap to clear the gate.
+    expect(preciseSearch('SIGPIPE killed process', [], [e]).map(h => h.entry.id)).toContain('e-sig');
+  });
+});

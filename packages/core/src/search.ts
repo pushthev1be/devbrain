@@ -36,12 +36,30 @@ function normalizeText(text: string): string {
   return text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
+/**
+ * Is this string specific enough that finding it inside another one is evidence?
+ *
+ * Several words always are. A single word has to be long to qualify: "eaddrinuse"
+ * or "crashloopbackoff" identify a failure, while "err", "429" and "timeout" occur
+ * in unrelated text constantly. Without this floor an entry whose errorPattern is
+ * "timeout" scores a full pattern match — the heaviest term in the ranking — for
+ * every query containing the word, and outranks the entries that actually answer
+ * it. Short patterns are still scored by word overlap below, which a focused query
+ * can clear; they just stop being treated as certainty.
+ */
+function specificEnough(normalized: string): boolean {
+  const words = normalized.split(' ').filter(Boolean);
+  return words.length >= 2 || (words[0]?.length ?? 0) >= 8;
+}
+
 function patternOverlap(query: string, pattern: string): number {
   const q = normalizeText(query);
   const p = normalizeText(pattern);
   if (!q || !p) return 0;
-  // exact substring match gets full score
-  if (q.includes(p) || p.includes(q)) return 1;
+  // Containment scores full marks, but only when the contained string carries
+  // enough to identify the failure on its own.
+  const [needle, haystack] = q.length <= p.length ? [q, p] : [p, q];
+  if (haystack.includes(needle) && specificEnough(needle)) return 1;
   // word overlap score
   const qWords = new Set(q.split(' ').filter(w => w.length > 2));
   const pWords = p.split(' ').filter(w => w.length > 2);
