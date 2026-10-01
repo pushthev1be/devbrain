@@ -278,7 +278,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const queryEmbedding = await getEmbedding(searchText).catch(() => [] as number[]);
       const candidates = (await searchCandidates(queryEmbedding)).filter(keep);
       const results = preciseSearch(searchText, queryEmbedding, candidates, {
-        category, topK: Math.min(limit ?? 6, 50), threshold: 0.45, projectId: callerProject?.id,
+        // No threshold override: SEMANTIC_THRESHOLD in search.ts is the one
+        // calibrated value. This used to pass 0.45, which is below the noise
+        // floor of cosine similarity and made every search answer something.
+        category, topK: Math.min(limit ?? 6, 50), projectId: callerProject?.id,
       });
       if (!results.length) {
         return { content: [{ type: 'text', text: `No matches in DevBrain for: "${searchText}"` }] };
@@ -676,7 +679,7 @@ const httpServer = createServer(async (req, res) => {
           const searchText = error_pattern ? `${query} ${error_pattern}` : query;
           const queryEmbedding = await getEmbedding(searchText).catch(() => [] as number[]);
           const candidates = await searchCandidates(queryEmbedding);
-          const results = preciseSearch(searchText, queryEmbedding, candidates, { category, topK: 6, threshold: 0.45 });
+          const results = preciseSearch(searchText, queryEmbedding, candidates, { category, topK: 6 });
           await bumpRetrievalCounts(results.map(r => r.entry.id));
           const mapped = results.map(r => ({
             type: r.entry.type, title: r.entry.title, content: r.entry.content,

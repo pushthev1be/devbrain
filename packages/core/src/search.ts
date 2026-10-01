@@ -91,12 +91,143 @@ export function keywordScore(query: string, e: Pick<Entry, 'title' | 'content' |
 /** Minimum keyword score for a search hit; see preciseSearch. */
 export const KEYWORD_THRESHOLD = 0.25;
 
+// ── BM25 ──────────────────────────────────────────────────────────────────────
+//
+// keywordScore above answers "does this entry mention these words", which is what
+// turnReview needs and needs no corpus. Search needs a different question —
+// "which entry is most relevant" — and for that an unweighted share of words is
+// not enough: every word counts the same, so a query matching only `returns` and
+// `query` scores as well as one matching `keepalive`. Measured live: "nginx
+// returns 502 when upstream keepalive is enabled" matched an entry about
+// unrelated queries on exactly those generic words.
+//
+// BM25 weights each term by how rare it is across the corpus (idf), saturates
+// repeated terms, and normalises for length. Generic words fall out on their own
+// rather than by a stopword list that would need maintaining.
+//
+// Scores are normalised to 0..1 against the best a perfect match could score for
+// the same query, so one threshold holds across queries of different lengths.
+
+const BM25_K1 = 1.2;   // term-frequency saturation (Lucene default)
+const BM25_B  = 0.75;  // length normalisation (Lucene default)
+
+/** Terms in the fields worth more, and the body, with the body discounted. */
+function weightedTerms(e: Pick<Entry, 'title' | 'content' | 'tags' | 'errorPattern'>): Map<string, number> {
+  const tf = new Map<string, number>();
+  const add = (text: string, weight: number) => {
+    for (const w of keywordTerms(text)) tf.set(w, (tf.get(w) ?? 0) + weight);
+  };
+  add(`${e.title} ${e.errorPattern ?? ''} ${e.tags.join(' ')}`, 1);
+  add(e.content ?? '', 0.6);
+  return tf;
+}
+
+export interface KeywordIndex {
+  docs: Map<string, { tf: Map<string, number>; len: number }>;
+  df: Map<string, number>;
+  n: number;
+  avgLen: number;
+}
+
+type Indexable = Pick<Entry, 'id' | 'title' | 'content' | 'tags' | 'errorPattern'>;
+
+/** Corpus statistics for BM25. Built once per search over the candidate set. */
+export function buildKeywordIndex(entries: Indexable[]): KeywordIndex {
+  const docs = new Map<string, { tf: Map<string, number>; len: number }>();
+  const df = new Map<string, number>();
+  let total = 0;
+
+  for (const e of entries) {
+    const tf = weightedTerms(e);
+    let len = 0;
+    for (const [, c] of tf) len += c;
+    docs.set(e.id, { tf, len });
+    total += len;
+    for (const w of tf.keys()) df.set(w, (df.get(w) ?? 0) + 1);
+  }
+
+  return { docs, df, n: entries.length, avgLen: entries.length ? total / entries.length : 0 };
+}
+
+/** BM25 relevance of one entry to a query, normalised to 0..1. */
+export function bm25Score(query: string, entryId: string, idx: KeywordIndex): number {
+  const doc = idx.docs.get(entryId);
+  if (!doc || !idx.n) return 0;
+  const terms = [...new Set(keywordTerms(query))];
+  if (!terms.length) return 0;
+
+  let score = 0, ideal = 0;
+  for (const term of terms) {
+    const df = idx.df.get(term) ?? 0;
+    // Standard BM25 idf, always positive so a term in every document scores ~0
+    // rather than going negative.
+    const idf = Math.log(1 + (idx.n - df + 0.5) / (df + 0.5));
+    ideal += idf * (BM25_K1 + 1);
+    const tf = doc.tf.get(term);
+    if (!tf) continue;
+    const norm = 1 - BM25_B + BM25_B * (idx.avgLen ? doc.len / idx.avgLen : 1);
+    score += idf * (tf * (BM25_K1 + 1)) / (tf + BM25_K1 * norm);
+  }
+  // Normalizing by the best score this query could get against any document puts
+  // the result in 0..1 — the share of the query's weight that was matched — so a
+  // fixed threshold does not drift as the corpus grows. The cost: idf is in both
+  // the sum and the divisor, so it reweights terms against each other but leaves
+  // the absolute level alone, and a one-word query of a very common word can
+  // still score high. An idf-preserving divisor was measured against this corpus
+  // and separated true hits from unrelated queries worse (8/30 vs 10/30 kept at
+  // zero false answers), so the coverage reading stays.
+  return ideal > 0 ? score / ideal : 0;
+}
+
+/**
+ * Agreement gate: a weaker signal from both retrievers is better evidence than a
+ * strong one from either alone.
+ *
+ * Fixed single thresholds force a choice between admitting noise and dropping
+ * real hits. Requiring two independent signals to agree lets each be set lower
+ * without readmitting the unrelated-query matches, since noise rarely scores on
+ * both wording and meaning at once.
+ *
+ * Measured by sweeping both against the 38-query set: 0.60/0.12 recovers every
+ * paraphrase the single threshold missed while still answering none of the eight
+ * problems that were never recorded. Lowering SEMANTIC_THRESHOLD to 0.60 instead
+ * admits one of them, so what holds the line is the pairing, not the lower floor.
+ */
+export const AGREEMENT_SEMANTIC = 0.60;
+export const AGREEMENT_KEYWORD  = 0.12;
+
+/**
+ * Minimum cosine similarity for an entry to count as relevant.
+ *
+ * Measured against the real store (30 queries plus 8 drawn from problems never
+ * recorded): unrelated queries peak at 0.619, true hits bottom out at 0.626.
+ * Any two technical texts sit around 0.55-0.62, so the previous 0.45 was below
+ * the noise — every one of the 8 unrelated queries came back with a confident
+ * irrelevant entry (kubernetes CrashLoopBackOff matched "Markdown files become
+ * stale"). An agent that searches an unfamiliar error then reasons from false
+ * prior experience, which is worse than an empty result.
+ *
+ * Raising it improves precision and recall together, because the low floor was
+ * letting noise outrank correct entries:
+ *
+ *   0.45   rank-1 70%   top-3 87%   answered 8/8 unrelated queries
+ *   0.60   rank-1 83%   top-3 97%   answered 1/8
+ *   0.62   rank-1 80%   top-3 93%   answered 0/8
+ *   0.70   rank-1 67%   top-3 67%   answered 0/8
+ *
+ * The separating gap is 0.007 wide on this sample — re-measure as the corpus
+ * grows rather than treating this as settled.
+ */
+export const SEMANTIC_THRESHOLD = 0.62;
+
 export interface PreciseSearchResult extends SearchResult {
   matchType: 'pattern' | 'semantic';
   patternScore: number;
   categoryMatch: boolean;
   /** True when the hit is from the project the query was made in. */
   sameProject: boolean;
+  /** BM25 relevance, 0..1. Scored even when a vector match drove the hit. */
+  lexical: number;
 }
 
 export function preciseSearch(
@@ -105,37 +236,54 @@ export function preciseSearch(
   entries: (Entry & { project: Project })[],
   opts: { category?: EntryCategory; topK?: number; threshold?: number; projectId?: string } = {}
 ): PreciseSearchResult[] {
-  const { category, topK = 8, threshold = 0.60, projectId } = opts;
+  const { category, topK = 8, threshold = SEMANTIC_THRESHOLD, projectId } = opts;
   const results: PreciseSearchResult[] = [];
+  const live = entries.filter(e => !e.supersededBy);
+  // Corpus statistics come from the candidate set, so idf reflects what is
+  // actually being searched.
+  const index = buildKeywordIndex(live);
 
-  for (const e of entries) {
-    if (e.supersededBy) continue;
-    // No query embedding (no AI configured, or it failed): rank by keywords.
-    // An entry saved without an embedding is also matched by keywords, rather
-    // than being unfindable by every embedded query.
+  for (const e of live) {
+    // Two independent signals. An entry with no embedding, or a query with none
+    // because no AI is configured, still scores lexically rather than being
+    // unfindable.
     const byVector      = queryEmbedding.length > 0 && !!e.embedding?.length;
-    const semantic      = byVector
-      ? cosineSimilarity(queryEmbedding, e.embedding!)
-      : keywordScore(queryText, e);
-    // The threshold is calibrated for cosine similarity. A keyword score is a
-    // share of query words found, and a quarter of them is already a real hit.
-    const minScore      = byVector ? threshold : Math.min(threshold, KEYWORD_THRESHOLD);
+    const semantic      = byVector ? cosineSimilarity(queryEmbedding, e.embedding!) : 0;
+    const lexical       = bm25Score(queryText, e.id, index);
+    // Containment, not relevance — see the note on the gate below.
+    const contains      = keywordScore(queryText, e);
     const patternScore  = e.errorPattern ? patternOverlap(queryText, e.errorPattern) : 0;
     const titleScore    = patternOverlap(queryText, e.title);
     const categoryMatch = !!category && e.category === category;
     const bestPattern   = Math.max(patternScore, titleScore * 0.6);
 
-    // skip entries with no signal
-    if (semantic < minScore && bestPattern < 0.25 && !categoryMatch) continue;
+    // Keep on any strong signal, or on two weaker ones agreeing. Noise rarely
+    // scores on both wording and meaning at once, so agreement admits real hits
+    // that neither threshold would pass alone without readmitting unrelated ones.
+    //
+    // BM25 ranks well but cannot gate at this corpus size: measured over 59
+    // entries its scores for correct hits (median 0.141) overlap the best score
+    // for a query about a problem never recorded (max 0.271), and four correct
+    // hits score 0 because the query shares no word with the entry. idf needs
+    // more documents than this to separate them. So the no-AI gate stays on
+    // containment — the share of query words present — which measured 52% top-3
+    // against BM25's 10%. Revisit once the corpus is into the hundreds.
+    const strongSemantic = byVector && semantic >= threshold;
+    const strongLexical  = !byVector && contains >= KEYWORD_THRESHOLD;
+    const agreement      = byVector && semantic >= AGREEMENT_SEMANTIC && lexical >= AGREEMENT_KEYWORD;
+    if (!strongSemantic && !strongLexical && !agreement && bestPattern < 0.25 && !categoryMatch) continue;
 
     results.push({
       entry: e,
       project: e.project,
-      similarity: semantic,
+      // Report whichever signal is driving the match, so callers that show a
+      // match percentage show the one that found it.
+      similarity: byVector ? semantic : lexical,
       patternScore: bestPattern,
       categoryMatch,
       matchType: bestPattern >= 0.5 ? 'pattern' : 'semantic',
       sameProject: !!projectId && e.projectId === projectId,
+      lexical,
     });
   }
 
@@ -147,8 +295,12 @@ export function preciseSearch(
   // but "this happened here" should outrank "this happened somewhere" at equal
   // relevance. The boost is small enough that a markedly better cross-project
   // match still wins.
+  // Lexical relevance is its own term rather than folded into `similarity`, so
+  // an entry that matches on both wording and meaning outranks one that matches
+  // on either — the same agreement idea that gates admission, applied to order.
   const score = (r: PreciseSearchResult) =>
-    r.patternScore * 0.5 + r.similarity * 0.35 + (r.categoryMatch ? 0.15 : 0) + (r.sameProject ? 0.12 : 0);
+    r.patternScore * 0.45 + r.similarity * 0.30 + r.lexical * 0.15
+    + (r.categoryMatch ? 0.12 : 0) + (r.sameProject ? 0.10 : 0);
   results.sort((a, b) => score(b) - score(a));
 
   return results.slice(0, topK);
@@ -215,7 +367,7 @@ export function buildContext(
   });
 
   const relevant = queryEmbedding
-    ? scored.filter(r => !r.entry.embedding || r.semantic >= 0.60)
+    ? scored.filter(r => !r.entry.embedding || r.semantic >= SEMANTIC_THRESHOLD)
     : scored;
 
   relevant.sort((a, b) => b.score - a.score);

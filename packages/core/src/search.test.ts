@@ -11,6 +11,10 @@ import type { Entry, Project } from './types';
 import {
   findSimilar,
   preciseSearch,
+  buildKeywordIndex,
+  bm25Score,
+  SEMANTIC_THRESHOLD,
+  AGREEMENT_SEMANTIC,
   buildContext,
   formatContext,
   similarityLabel,
@@ -375,5 +379,109 @@ describe('formatContext', () => {
     const ctx = buildContext(withStack, project);
     const text = formatContext(ctx);
     expect(text).toContain('## Tech Stack');
+  });
+});
+
+// ── BM25 ──────────────────────────────────────────────────────────────────────
+
+describe('bm25Score', () => {
+  // "timeout" is in every entry, "kafka" in one: idf should tell them apart.
+  const corpus = [
+    makeEntry({ id: 'a', title: 'kafka consumer timeout', content: 'raise session timeout' }),
+    makeEntry({ id: 'b', title: 'postgres statement timeout', content: 'raise statement timeout' }),
+    makeEntry({ id: 'c', title: 'redis command timeout', content: 'raise command timeout' }),
+  ];
+  const idx = buildKeywordIndex(corpus);
+
+  it('weights a rare term above a common one within the same query', () => {
+    // Both entries match exactly one of the two query terms, once each, so only
+    // idf can separate them. Note idf cannot change the score of a SINGLE-term
+    // query: it appears in both the sum and the normalizer and cancels.
+    const i2 = buildKeywordIndex([
+      makeEntry({ id: 'rare', title: 'kafka', content: '' }),
+      makeEntry({ id: 'common', title: 'timeout', content: '' }),
+      makeEntry({ id: 'f1', title: 'timeout', content: '' }),
+      makeEntry({ id: 'f2', title: 'timeout', content: '' }),
+      makeEntry({ id: 'f3', title: 'timeout', content: '' }),
+    ]);
+    expect(bm25Score('kafka timeout', 'rare', i2))
+      .toBeGreaterThan(bm25Score('kafka timeout', 'common', i2));
+  });
+
+  it('scores zero when the query shares no term with the entry', () => {
+    expect(bm25Score('swift collectionview flicker', 'a', idx)).toBe(0);
+  });
+
+  it('scores zero for an entry that is not in the index', () => {
+    expect(bm25Score('kafka', 'not-indexed', idx)).toBe(0);
+  });
+
+  it('stays within 0..1 so it can be compared against a fixed threshold', () => {
+    for (const q of ['kafka', 'kafka consumer timeout', 'timeout timeout timeout']) {
+      for (const id of ['a', 'b', 'c']) {
+        const s = bm25Score(q, id, idx);
+        expect(s).toBeGreaterThanOrEqual(0);
+        expect(s).toBeLessThanOrEqual(1);
+      }
+    }
+  });
+
+  it('saturates: a repeated term does not multiply the score', () => {
+    const once = bm25Score('kafka', 'a', idx);
+    const many = bm25Score('kafka kafka kafka kafka', 'a', idx);
+    // Terms are de-duplicated and tf saturates, so repetition cannot inflate.
+    expect(many).toBeCloseTo(once, 5);
+  });
+
+  it('prefers the shorter entry when both mention the term as often', () => {
+    const short = makeEntry({ id: 'short', title: 'kafka timeout', content: '' });
+    const long = makeEntry({
+      id: 'long',
+      title: 'kafka timeout',
+      content: 'a '.repeat(200) + 'lengthy discussion of unrelated matters',
+    });
+    const i2 = buildKeywordIndex([short, long]);
+    expect(bm25Score('kafka', 'short', i2)).toBeGreaterThan(bm25Score('kafka', 'long', i2));
+  });
+
+  it('empty index and empty query both score zero rather than throwing', () => {
+    expect(bm25Score('kafka', 'a', buildKeywordIndex([]))).toBe(0);
+    expect(bm25Score('', 'a', idx)).toBe(0);
+  });
+});
+
+describe('preciseSearch agreement gate', () => {
+  // Semantic alone is below SEMANTIC_THRESHOLD but above AGREEMENT_SEMANTIC;
+  // only the entry that also shares wording should survive.
+  const near = (SEMANTIC_THRESHOLD + AGREEMENT_SEMANTIC) / 2;
+  const project = makeProject();
+  const lexical = makeEntry({
+    id: 'e-lexical',
+    title: 'kafka consumer rebalance storm',
+    content: 'raise max.poll.interval.ms so the consumer is not evicted',
+    embedding: vec(near, Math.sqrt(1 - near * near), 0),
+    project,
+  });
+  const silent = makeEntry({
+    id: 'e-silent',
+    title: 'unrelated styling cleanup',
+    content: 'simplified the stylesheet',
+    embedding: vec(near, Math.sqrt(1 - near * near), 0),
+    project,
+  });
+
+  it('keeps an entry that agrees on wording and meaning without either being strong', () => {
+    const hits = preciseSearch('kafka consumer rebalance storm', vec(1, 0, 0), [lexical, silent]);
+    expect(hits.map(h => h.entry.id)).toContain('e-lexical');
+  });
+
+  it('still drops an equally-similar entry that shares no wording', () => {
+    const hits = preciseSearch('kafka consumer rebalance storm', vec(1, 0, 0), [lexical, silent]);
+    expect(hits.map(h => h.entry.id)).not.toContain('e-silent');
+  });
+
+  it('agreement does not fire without an embedding, so no-AI search is unaffected', () => {
+    const hits = preciseSearch('kafka consumer rebalance storm', [], [silent]);
+    expect(hits.map(h => h.entry.id)).not.toContain('e-silent');
   });
 });
