@@ -15,7 +15,7 @@ import { join } from 'path';
 import { homedir } from 'os';
 import { nanoid } from 'nanoid';
 import { insertEntry } from './db';
-import { findDuplicate } from './dedupe';
+import { findDuplicate, findTextDuplicate } from './dedupe';
 import { getEmbedding, extractSessionKnowledge, RateLimitError } from './gemini';
 import type { RecapEntry } from './gemini';
 import { clip } from './search';
@@ -38,7 +38,7 @@ export interface CaptureResult {
   cursor: number;
 }
 
-interface CursorState {
+export interface CursorState {
   line: number;
   updatedAt: number;
   saved: number;
@@ -67,7 +67,7 @@ export function readCursor(sessionId: string): CursorState {
   }
 }
 
-function writeCursor(sessionId: string, state: CursorState): void {
+export function writeCursor(sessionId: string, state: CursorState): void {
   mkdirSync(sessionsDir(), { recursive: true });
   writeFileSync(join(sessionsDir(), `${safeId(sessionId)}.json`), JSON.stringify(state), 'utf-8');
 }
@@ -105,7 +105,10 @@ export async function saveExtracted(
     try { embedding = await getEmbedding(`${e.title} ${e.content} ${e.tags.join(' ')}`); } catch (err) {
       if (err instanceof RateLimitError) throw err;
     }
-    if (embedding && await findDuplicate(embedding, projectId).catch(() => null)) {
+    const dupe = embedding
+      ? await findDuplicate(embedding, projectId).catch(() => null)
+      : await findTextDuplicate(e.title, projectId).catch(() => null);
+    if (dupe) {
       duplicates++;
       continue;
     }

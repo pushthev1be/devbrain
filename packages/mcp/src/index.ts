@@ -16,7 +16,7 @@ import {
   bumpRetrievalCounts, preciseSearch, vectorSearch,
   autoArchetype, recapSession, supersedeEntry,
   ENTRY_TYPES, ENTRY_TYPE_NAMES, normalizeType,
-  buildDossier, describeStorage, findDuplicate, clip,
+  buildDossier, describeStorage, findDuplicate, findTextDuplicate, clip,
   startSession, endSession, getAbandonedSession, describeAbandonedSession,
 } from '@devbrain/core';
 import type { EntryCategory } from '@devbrain/core';
@@ -87,6 +87,8 @@ function saveConfirmation(
  * case where a query genuinely matches nothing.
  */
 async function searchCandidates(queryEmbedding: number[]) {
+  // No embedding to search with: every entry is a candidate for keyword ranking.
+  if (!queryEmbedding.length) return getAllEntriesWithProjects();
   try {
     const hits = await vectorSearch(queryEmbedding, { topK: 20 });
     if (hits.length > 0) return hits;
@@ -493,8 +495,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       // Agents save the same insight repeatedly across a long task. The hook and
       // backfill have always deduplicated; this path — the one agents use most —
       // did not, so it was the largest remaining source of near-identical entries.
-      if (embedding) {
-        const dupe = await findDuplicate(embedding, project.id).catch(() => null);
+      {
+        // With no embedding (no AI configured), compare titles instead.
+        const dupe = embedding
+          ? await findDuplicate(embedding, project.id).catch(() => null)
+          : await findTextDuplicate(title, project.id).catch(() => null);
         if (dupe) {
           return {
             content: [{ type: 'text', text:
@@ -593,7 +598,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         query: string; category?: EntryCategory; error_pattern?: string;
       };
       const searchText     = error_pattern ? `${query} ${error_pattern}` : query;
-      const queryEmbedding = await getEmbedding(searchText);
+      // Empty without an AI service: preciseSearch then ranks by keywords.
+      const queryEmbedding = await getEmbedding(searchText).catch(() => [] as number[]);
 
       // Atlas Vector Search — fast ANN retrieval, then re-rank with preciseSearch.
       const candidates = await searchCandidates(queryEmbedding);
@@ -1080,7 +1086,7 @@ const httpServer = createServer(async (req, res) => {
           const { query, category, error_pattern } = await readBody(req) as { query: string; category?: EntryCategory; error_pattern?: string };
           if (!query) { json(res, 400, { error: 'query is required' }); return; }
           const searchText = error_pattern ? `${query} ${error_pattern}` : query;
-          const queryEmbedding = await getEmbedding(searchText);
+          const queryEmbedding = await getEmbedding(searchText).catch(() => [] as number[]);
           const candidates = await searchCandidates(queryEmbedding);
           const results = preciseSearch(searchText, queryEmbedding, candidates, { category, topK: 6, threshold: 0.45 });
           await bumpRetrievalCounts(results.map(r => r.entry.id));

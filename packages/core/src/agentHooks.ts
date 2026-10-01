@@ -7,23 +7,22 @@
 // forgotten:
 //
 //   SessionStart — inject this project's briefing into the agent's context
-//   Stop         — after each turn, capture from the new part of the transcript
-//   PreCompact   — capture everything before the transcript is summarised away
-//   SessionEnd   — capture whatever is left
+//   Stop         — after each turn, if the work established something and the
+//                  agent saved nothing, ask it to record it (see turnReview.ts)
+//
+// Neither needs a model: the agent does all the writing, DevBrain stores it.
 //
 // This file only edits the settings object; the CLI does the file I/O.
 
 import type { DevBrainContext } from './types';
 import { formatContext } from './search';
 
-export const HOOK_EVENTS = ['SessionStart', 'Stop', 'PreCompact', 'SessionEnd'] as const;
+export const HOOK_EVENTS = ['SessionStart', 'Stop'] as const;
 export type HookEvent = typeof HOOK_EVENTS[number];
 
 const HOOK_ARG: Record<HookEvent, string> = {
   SessionStart: 'session-start',
   Stop: 'stop',
-  PreCompact: 'pre-compact',
-  SessionEnd: 'session-end',
 };
 
 /** The CLI argument for a hook event, e.g. `devbrain hook stop`. */
@@ -42,7 +41,8 @@ function isOurs(h: HookCommand): boolean {
 }
 
 /**
- * Settings with DevBrain's hooks added, replacing any older DevBrain hooks and
+ * Settings with DevBrain's hooks added, replacing any older DevBrain hooks
+ * (including events an earlier version installed and this one no longer uses) and
  * leaving every other hook exactly as it was. Idempotent.
  */
 export function withDevbrainHooks(settings: Settings, binary = 'devbrain'): Settings {
@@ -53,9 +53,9 @@ export function withDevbrainHooks(settings: Settings, binary = 'devbrain'): Sett
       hooks: [{
         type: 'command',
         command: `${binary} hook ${HOOK_ARG[event]}`,
-        // SessionStart reads the store before the agent's first turn; the rest
-        // only spawn a detached worker and return.
-        timeout: event === 'SessionStart' ? 20 : 10,
+        // Both may read the store. Most Stop runs never do: the transcript check
+        // is local and decides first.
+        timeout: 20,
       }],
     };
     hooks[event] = [...(hooks[event] ?? []), group];
@@ -106,7 +106,7 @@ export function formatSessionBriefing(ctx: DevBrainContext): string | null {
     'and verify before relying on anything that the code contradicts.',
     'Before debugging an unfamiliar error, search it: the `search_knowledge` MCP tool with the exact error text,',
     'or `devbrain search "<error>"`. If an entry below turns out to be wrong, retract it with `supersede_entry`.',
-    'New fixes and decisions from this session are captured automatically in the background.',
+    'When a stretch of work fixes or decides something, DevBrain will ask you to record it with `save_entry` — you are welcome to do so earlier.',
     '',
     body,
   ].join('\n');

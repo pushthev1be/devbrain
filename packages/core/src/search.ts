@@ -50,6 +50,47 @@ function patternOverlap(query: string, pattern: string): number {
   return matches / Math.max(qWords.size, pWords.length);
 }
 
+// ── keyword relevance ─────────────────────────────────────────────────────────
+//
+// DevBrain works with no AI service configured: the coding agent writes every
+// entry, so the only thing a model was still needed for was embeddings. Without
+// them, relevance comes from the words themselves. Entries are short and written
+// to be searched — a symptom title, a verbatim error, a few tags — which is the
+// case keyword matching handles well.
+
+// Words that appear in almost every query or entry and so tell entries apart
+// not at all, including the ones every DevBrain query carries ("fix", "issue").
+const STOPWORDS = new Set((
+  'the and for with that this from into when what why how does did not are was were has have had ' +
+  'any all can could should would will just also than then there their them they you your our its ' +
+  'fix fixes fixed fixing issue issues problem problems bug bugs about after before past again'
+).split(' '));
+
+/** Content words of a text, lowercased and lightly stemmed. */
+export function keywordTerms(text: string): string[] {
+  return normalizeText(text)
+    .split(' ')
+    .filter(w => w.length > 2 && !STOPWORDS.has(w))
+    .map(w => (w.length > 4 ? w.replace(/(ing|ed|es|s)$/, '') : w));
+}
+
+/**
+ * Share of the query's content words found in an entry, 0..1. A word in the
+ * title, error pattern or tags counts fully; one only in the body counts less,
+ * since bodies mention many things in passing.
+ */
+export function keywordScore(query: string, e: Pick<Entry, 'title' | 'content' | 'tags' | 'errorPattern'>): number {
+  const q = [...new Set(keywordTerms(query))];
+  if (!q.length) return 0;
+  const strong = new Set(keywordTerms(`${e.title} ${e.errorPattern ?? ''} ${e.tags.join(' ')}`));
+  const weak = new Set(keywordTerms(e.content ?? ''));
+  const hit = q.reduce((sum, w) => sum + (strong.has(w) ? 1 : weak.has(w) ? 0.6 : 0), 0);
+  return hit / q.length;
+}
+
+/** Minimum keyword score for a search hit; see preciseSearch. */
+export const KEYWORD_THRESHOLD = 0.25;
+
 export interface PreciseSearchResult extends SearchResult {
   matchType: 'pattern' | 'semantic';
   patternScore: number;
@@ -69,14 +110,23 @@ export function preciseSearch(
 
   for (const e of entries) {
     if (e.supersededBy) continue;
-    const semantic      = e.embedding?.length ? cosineSimilarity(queryEmbedding, e.embedding) : 0;
+    // No query embedding (no AI configured, or it failed): rank by keywords.
+    // An entry saved without an embedding is also matched by keywords, rather
+    // than being unfindable by every embedded query.
+    const byVector      = queryEmbedding.length > 0 && !!e.embedding?.length;
+    const semantic      = byVector
+      ? cosineSimilarity(queryEmbedding, e.embedding!)
+      : keywordScore(queryText, e);
+    // The threshold is calibrated for cosine similarity. A keyword score is a
+    // share of query words found, and a quarter of them is already a real hit.
+    const minScore      = byVector ? threshold : Math.min(threshold, KEYWORD_THRESHOLD);
     const patternScore  = e.errorPattern ? patternOverlap(queryText, e.errorPattern) : 0;
     const titleScore    = patternOverlap(queryText, e.title);
     const categoryMatch = !!category && e.category === category;
     const bestPattern   = Math.max(patternScore, titleScore * 0.6);
 
     // skip entries with no signal
-    if (semantic < threshold && bestPattern < 0.25 && !categoryMatch) continue;
+    if (semantic < minScore && bestPattern < 0.25 && !categoryMatch) continue;
 
     results.push({
       entry: e,
@@ -146,6 +196,9 @@ export function buildContext(
     } else if (!queryEmbedding) {
       // no query: same-project entries rank higher by default
       semantic = e.projectId === currentProject?.id ? 0.8 : 0.35;
+      // A query with no embedding still says what the task is about. Blend in
+      // keyword relevance so the briefing leans toward it.
+      if (queryText?.trim()) semantic = semantic * 0.5 + keywordScore(queryText, e) * 0.5;
     }
     const recency         = Math.max(0, 1 - (now - e.createdAt) / maxAge);
     // with a query: only boost same-project entries that are semantically relevant

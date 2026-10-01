@@ -11,7 +11,8 @@
 // evidence, so it can be extracted without anyone being asked. It is pure: no
 // I/O, no model calls, so every rule here is unit-tested.
 
-export type DigestKind = 'prompt' | 'say' | 'edit' | 'command' | 'error';
+/** `save` — the agent itself recorded knowledge (save_entry, task_end, devbrain note). */
+export type DigestKind = 'prompt' | 'say' | 'edit' | 'command' | 'error' | 'save';
 
 export interface DigestEvent {
   kind: DigestKind;
@@ -32,6 +33,9 @@ export interface TranscriptSegment {
 
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 const SHELL_TOOLS = new Set(['Bash', 'PowerShell']);
+/** MCP tools through which an agent records knowledge, under any server prefix. */
+const SAVE_TOOL = /(?:^|__)(save_entry|task_end|supersede_entry)$/;
+const SAVE_COMMAND = /\bdevbrain\s+(?:note|recap)\b/;
 
 // Lines that are an error by their shape, not because the word "error" appears
 // somewhere in a grep result or a source file.
@@ -156,13 +160,16 @@ export function parseTranscript(jsonl: string, fromLine = 0): TranscriptSegment 
           const name = String(block.name ?? '');
           const input = (block.input ?? {}) as Record<string, unknown>;
           const id = String(block.id ?? '');
-          if (EDIT_TOOLS.has(name)) {
+          if (SAVE_TOOL.test(name)) {
+            events.push({ kind: 'save', text: String(input.title ?? input.summary ?? input.reason ?? name).slice(0, 200), line: i });
+            toolNames.set(id, { name });
+          } else if (EDIT_TOOLS.has(name)) {
             const file = String(input.file_path ?? input.notebook_path ?? '');
             if (file) events.push({ kind: 'edit', text: file, line: i });
             toolNames.set(id, { name });
           } else if (SHELL_TOOLS.has(name)) {
             const command = String(input.command ?? '').replace(/\s+/g, ' ').trim();
-            if (command) events.push({ kind: 'command', text: command.slice(0, 200), line: i });
+            if (command) events.push({ kind: SAVE_COMMAND.test(command) ? 'save' : 'command', text: command.slice(0, 200), line: i });
             toolNames.set(id, { name, command });
           } else {
             toolNames.set(id, { name });
@@ -213,9 +220,9 @@ export function assessSegment(events: DigestEvent[]): SegmentAssessment {
 }
 
 const LABEL: Record<DigestKind, string> = {
-  prompt: 'USER', say: 'AGENT', edit: 'EDITED', command: 'RAN', error: 'ERROR',
+  prompt: 'USER', say: 'AGENT', edit: 'EDITED', command: 'RAN', error: 'ERROR', save: 'SAVED',
 };
-const CAP: Record<DigestKind, number> = { prompt: 600, say: 900, edit: 200, command: 200, error: 700 };
+const CAP: Record<DigestKind, number> = { prompt: 600, say: 900, edit: 200, command: 200, error: 700, save: 200 };
 
 function line(e: DigestEvent): string {
   const t = e.text.length > CAP[e.kind] ? `${e.text.slice(0, CAP[e.kind])}…` : e.text;

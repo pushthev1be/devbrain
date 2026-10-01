@@ -2,7 +2,6 @@
 import 'dotenv/config';
 import { join, dirname, basename } from 'path';
 import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync, appendFileSync, readdirSync, statSync } from 'fs';
-import { spawn } from 'child_process';
 import {
   getProjectByPath, upsertProject, insertEntry,
   getEntriesByProject, getAllEntriesWithProjects,
@@ -17,9 +16,9 @@ import {
   describeStorage, getLocalDbPath, closeDb,
   ENTRY_TYPES, normalizeType, getAllProjects,
   buildDossier, formatDossierMarkdown, dossierFiles,
-  isDuplicateEntry, getAbandonedSession, describeAbandonedSession, clip,
+  isDuplicateEntry, findTextDuplicate, getAbandonedSession, describeAbandonedSession, clip,
   parseMarkdownSource, planIndex, entryForSection,
-  captureSession, saveExtracted, formatSessionBriefing,
+  captureSession, saveExtracted, formatSessionBriefing, readCursor, writeCursor, reviewTurn,
   withDevbrainHooks, withoutDevbrainHooks, installedDevbrainHooks,
 } from '@devbrain/core';
 import type { Entry, Project, EntryCategory } from '@devbrain/core';
@@ -356,13 +355,13 @@ async function handleInit(): Promise<void> {
       '- **Error pattern**: if there is an exact error message, always include it verbatim',
       '- **Cause archetype**: name the abstract pattern ("environment config divergence", "missing cleanup in teardown")',
       '',
-      '### Capture is automatic in Claude Code',
+      '### In Claude Code, DevBrain will prompt you',
       '',
-      'With DevBrain\'s Claude Code hooks installed (`devbrain hooks status`), this',
-      'session is read in the background: fixes, decisions and lessons are extracted',
-      'from what actually happened, and project memory is injected when a session',
-      'starts. Saving explicitly is still worth it when something is non-obvious and',
-      'you can state it better than the transcript shows.',
+      'With DevBrain\'s Claude Code hooks installed (`devbrain hooks status`), project',
+      'memory is injected when a session starts, and when a stretch of work fixes or',
+      'decides something without anything being saved, DevBrain asks you to record it',
+      'before you finish. You write the entry — DevBrain runs no model of its own.',
+      'Saving as soon as you know something is better still: then it never has to ask.',
       '',
       '### At the end of every session — write the recap yourself (other agents)',
       '',
@@ -864,17 +863,36 @@ async function handleHook(event: string): Promise<void> {
       return;
     }
 
-    const mode = event === 'stop' ? 'turn' : 'final';
-    if (!['stop', 'pre-compact', 'session-end'].includes(event)) return;
+    // pre-compact and session-end were installed by an earlier version that ran
+    // a model over the transcript. Capture is the agent's job now, and neither
+    // event leaves an agent turn to do it in, so they are accepted and ignored.
+    if (event !== 'stop') return;
+
+    // Set when the agent is continuing because a Stop hook — ours — held it.
+    // It has had its chance to record; asking again would loop.
+    if (input.stop_hook_active === true) return;
+
     const transcript = input.transcript_path;
     const sessionId = input.session_id;
-    if (typeof transcript !== 'string' || typeof sessionId !== 'string') return;
+    if (typeof transcript !== 'string' || typeof sessionId !== 'string' || !existsSync(transcript)) return;
 
-    const child = spawn(process.execPath, [
-      process.argv[1], 'learn', transcript,
-      '--session', sessionId, '--cwd', cwd, '--mode', mode, '--background',
-    ], { detached: true, stdio: 'ignore', windowsHide: true, env: process.env });
-    child.unref();
+    const cursor = readCursor(sessionId);
+    const review = reviewTurn(readFileSync(transcript, 'utf-8'), cursor.line);
+    const advance = () => writeCursor(sessionId, { ...cursor, line: review.cursor, updatedAt: Date.now() });
+
+    if (review.action !== 'ask') {
+      if (review.cursor !== cursor.line) advance();
+      return;
+    }
+
+    // Only registered projects are captured. Checked last: it is the one step
+    // that touches the database, and most turns never get this far.
+    const project = await getProjectByPath(getRepoRoot(cwd) ?? cwd);
+    if (!project) return;
+
+    advance();
+    captureLog(`${project.name} ${sessionId.slice(0, 8)}: asked the agent to record this stretch`);
+    process.stdout.write(JSON.stringify({ decision: 'block', reason: review.prompt }));
   } catch (err) {
     captureLog(`hook ${event} failed: ${explainError(err)}`);
   }
@@ -1220,7 +1238,8 @@ async function handleSearch(query: string): Promise<void> {
     const cwd      = process.cwd();
     const repoRoot = getRepoRoot(cwd) ?? cwd;
     const [queryEmbedding, classification, allEntries, currentProject] = await Promise.all([
-      getEmbedding(query),
+      // No AI service, or it failed: an empty vector makes preciseSearch rank by keywords.
+      getEmbedding(query).catch(() => [] as number[]),
       classifyQuery(query).catch(() => ({ category: 'other' as const, errorPattern: undefined })),
       getAllEntriesWithProjects(),
       getProjectByPath(repoRoot),
@@ -1383,13 +1402,22 @@ async function handleNote(text: string, inq?: any): Promise<void> {
     // The block above only runs in the REPL, where a human can be asked; with no
     // human there was no check at all, so an agent saving the same insight twice
     // stored it twice.
-    if (!inq && embedding && await isDuplicateEntry(embedding, project.id)) {
+    // "<title> — <cause and fix>" is the shape agents are asked to write: the
+    // title is the searchable statement, so keep it apart from the detail.
+    const dash = content.search(/\s[—–]\s|\s--\s/);
+    const title = clip(dash > 10 ? content.slice(0, dash) : content, 120);
+
+    // With no embedding (no AI configured), compare titles instead.
+    const known = !inq && (embedding
+      ? await isDuplicateEntry(embedding, project.id)
+      : !!(await findTextDuplicate(title, project.id).catch(() => null)));
+    if (known) {
       s.stop();
       console.log(`  ${DIM}Already known — near-duplicate of an existing entry, not saved.${RESET}\n`);
       return;
     }
 
-    await insertEntry({ id: nanoid(), projectId: project.id, type, title: clip(content, 120), content, tags: [], embedding, createdAt: Date.now(), confidence: 'observation' });
+    await insertEntry({ id: nanoid(), projectId: project.id, type, title, content, tags: [], embedding, createdAt: Date.now(), confidence: 'observation' });
     if (inq) {
       console.log(`  ${GREEN}✓${RESET} Saved  ${DIM}[${type}]${RESET}\n`);
     } else {
@@ -1584,17 +1612,9 @@ async function handleContext(query?: string): Promise<void> {
 
   let queryEmbedding: number[] | undefined;
   if (query?.trim()) {
-    try {
-      queryEmbedding = await getEmbedding(query);
-    } catch (err) {
-      s?.fail('Embedding failed');
-      if (err instanceof RateLimitError) {
-        console.log(`\n  ${YELLOW}Gemini rate limit — retry in ~${err.retryAfter}s${RESET}\n`);
-      } else {
-        reportError(err);
-      }
-      return;
-    }
+    // Without an embedding, buildContext ranks by keywords instead. A missing
+    // or rate-limited AI service must not cost the agent its context.
+    queryEmbedding = await getEmbedding(query).catch(() => undefined);
   }
 
   s?.stop();
@@ -2465,7 +2485,6 @@ async function handleInteractive(): Promise<void> {
 const COMMAND_NEEDS: Record<string, Requirement[]> = {
   capture:  ['ai'],
   learn:    ['ai'],
-  search:   ['ai'],
   recap:    ['ai'],
   backfill: ['ai'],
 };
