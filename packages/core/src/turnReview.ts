@@ -61,16 +61,24 @@ export function buildRecordPrompt(events: DigestEvent[]): string {
     '',
     'You did the work, so you write the record — DevBrain only stores it. For each distinct, non-obvious item',
     '(usually one, at most three), call the DevBrain `save_entry` tool',
-    '(or run `devbrain note "fix: <title> — <cause and fix>"` if the tool is not available):',
-    '- type: fix, bug, decision, lesson, anti-pattern, pattern or stack',
-    '- title: the symptom or the decision, searchable, under 90 characters. Not "Fixed X" or "Updated Y".',
-    '- content: the root cause, then the exact fix — or for a decision, what was chosen, what was rejected, and why',
-    '- error_pattern: the exact error text, copied verbatim, whenever there was one',
+    ...ENTRY_GUIDE,
     '',
     'If it was routine (a typo, an obvious change) or DevBrain already has it, save nothing.',
     'Either way, keep it brief: one short line to the user, then stop.',
   ].join('\n');
 }
+
+/**
+ * How to write an entry. Shared by every place DevBrain asks an agent to record
+ * something, so the Stop hook and backfill hold entries to the same bar.
+ */
+export const ENTRY_GUIDE: readonly string[] = [
+  '(or run `devbrain note "fix: <title> — <cause and fix>"` if the tool is not available):',
+  '- type: fix, bug, decision, lesson, anti-pattern, pattern or stack',
+  '- title: the symptom or the decision, searchable, under 90 characters. Not "Fixed X" or "Updated Y".',
+  '- content: the root cause, then the exact fix — or for a decision, what was chosen, what was rejected, and why',
+  '- error_pattern: the exact error text, copied verbatim, whenever there was one',
+];
 
 /**
  * Decide what to do after the agent's turn, given the transcript and the line

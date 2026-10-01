@@ -1,5 +1,5 @@
 import { execSync } from 'child_process';
-import { writeFileSync, chmodSync, existsSync, mkdirSync } from 'fs';
+import { writeFileSync, existsSync, readFileSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import type { CommitInfo } from './types';
 
@@ -80,6 +80,25 @@ export function getRecentCommits(repoPath: string, limit = 20): CommitInfo[] {
   }
 }
 
+/**
+ * Hashes of the most recent non-merge commits, newest first. Cheap — no diffs —
+ * so it can run at session start to count what has not been reviewed.
+ */
+export function listCommitHashes(repoPath: string, limit = 200): string[] {
+  if (limit <= 0) return [];
+  try {
+    return execSync(`git log --no-merges --format=%H -n ${limit}`, { cwd: repoPath, stdio: 'pipe' })
+      .toString().trim().split('\n').map(h => h.trim()).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+/** One commit with its stat and diff, or null if it cannot be read. */
+export function getCommit(repoPath: string, hash: string): CommitInfo | null {
+  return readCommit(repoPath, hash);
+}
+
 /** Total non-merge commits in the repo — used to size a backfill before running it. */
 export function countCommits(repoPath: string): number {
   try {
@@ -94,24 +113,30 @@ export function countCommits(repoPath: string): number {
   }
 }
 
-export function installGitHook(repoPath: string): void {
-  const hooksDir = join(repoPath, '.git', 'hooks');
-  mkdirSync(hooksDir, { recursive: true });
-
-  const hookPath = join(hooksDir, 'post-commit');
-  const hookContent = `#!/bin/sh\ndevbrain capture 2>/dev/null || true\n`;
-
-  writeFileSync(hookPath, hookContent, 'utf-8');
-
-  // chmod +x (no-op on Windows but correct on Mac/Linux)
-  try { chmodSync(hookPath, '755'); } catch {}
+/**
+ * Remove the post-commit hook earlier versions installed.
+ *
+ * It ran `devbrain capture`, which had a model read each commit's diff. Commits
+ * are now reviewed by the coding agent instead (`devbrain backfill`), so the
+ * hook has nothing left to do. Other lines in a shared hook file are kept; a
+ * file that held only DevBrain's line is deleted.
+ */
+export function removeGitHook(repoPath: string): boolean {
+  const hookPath = join(repoPath, '.git', 'hooks', 'post-commit');
+  if (!existsSync(hookPath)) return false;
+  const content = readFileSync(hookPath, 'utf-8');
+  if (!content.includes('devbrain capture')) return false;
+  const kept = content.split('\n').filter(l => !l.includes('devbrain capture'));
+  if (kept.every(l => !l.trim() || l.startsWith('#!'))) unlinkSync(hookPath);
+  else writeFileSync(hookPath, kept.join('\n'), 'utf-8');
+  return true;
 }
 
 export function isHookInstalled(repoPath: string): boolean {
   const hookPath = join(repoPath, '.git', 'hooks', 'post-commit');
   if (!existsSync(hookPath)) return false;
   try {
-    const content = require('fs').readFileSync(hookPath, 'utf-8');
+    const content = readFileSync(hookPath, 'utf-8');
     return content.includes('devbrain capture');
   } catch {
     return false;

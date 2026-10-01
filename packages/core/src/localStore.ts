@@ -127,6 +127,12 @@ export async function isCommitProcessed(hash: string): Promise<boolean> {
   return read().processedCommits.some(c => c.hash === hash);
 }
 
+/** The hashes, of those given, that have not been reviewed yet. One read. */
+export async function filterUnprocessedCommits(hashes: string[]): Promise<string[]> {
+  const done = new Set(read().processedCommits.map(c => c.hash));
+  return hashes.filter(h => !done.has(h));
+}
+
 export async function markCommitProcessed(hash: string, projectId: string): Promise<void> {
   mutate(data => {
     // $setOnInsert semantics — first write wins, later ones are no-ops.

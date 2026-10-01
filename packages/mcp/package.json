@@ -15,7 +15,6 @@
     "@devbrain/core": "*",
     "@google/adk": "^1.1.0",
     "@modelcontextprotocol/sdk": "^1.12.0",
-    "@mongodb-js/mongodb-mcp-server": "^0.0.3",
     "nanoid": "^3.3.7"
   },
   "devDependencies": {

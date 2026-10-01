@@ -9,74 +9,51 @@ Project: devbrain-workspace  |  Stack: Node.js, TypeScript
 
 ### Before every task
 ```
-# Load ranked engineering history before writing any code:
-devbrain context
+# Load what broke before, what was decided, what to avoid:
+devbrain context "<the task>"            # MCP: get_context
 
-# Before debugging — search with the EXACT error text or symptom:
-devbrain search "<paste exact error message>"
+# Before debugging — search with the EXACT error text:
+devbrain search "<exact error message>"  # MCP: search_knowledge
 ```
 
-### Save to DevBrain when you notice any of these signals
+### You write the record — DevBrain stores it
 
-Do not wait to be asked. Save immediately when you think any of these:
+DevBrain runs no model of its own: you did the work, so you write the entry.
+Do not wait to be asked. Save as soon as you think any of these:
 
 - "That was non-obvious — I would not have known that without digging"
 - "This fix took longer than it should have — future me should know this"
 - "This behavior is counterintuitive — it looks like X but actually does Y"
-- "This pattern would apply to other parts of the codebase too"
-- "If I had known this upfront I would have designed it differently"
-- "This is a gotcha specific to this stack/environment/version"
 - "We decided against the obvious approach — here is why"
 - "This error message is misleading — the real cause is something else"
 - "This works in dev but will break in production for this exact reason"
 
 ```
-# Save anything matching the above signals:
-devbrain note "fix: <non-obvious fix + what the root cause actually was>"
-devbrain note "lesson: <what looked right but was wrong, and why>"
-devbrain note "decision: <what was chosen, what was rejected, and why>"
-devbrain note "pattern: <reusable approach that applies beyond this file>"
-devbrain note "anti-pattern: <what to never do here and the consequence>"
-devbrain note "bug: <the symptom, the misleading surface error, the real cause>"
+# MCP: save_entry (type, title, content, error_pattern). Or from the shell:
+devbrain note "fix: <symptom> — <root cause, then the exact fix>"
+devbrain note "decision: <what was chosen> — <what was rejected, and why>"
+devbrain note "lesson: <what looked right> — <why it was wrong>"
+devbrain note "anti-pattern: <what never to do> — <the consequence>"
 ```
 
-### What makes a good DevBrain entry
-- **Title**: specific and searchable, not generic ("JWT expiry fails in prod" not "auth bug")
-- **Body**: include the symptom, the root cause, and the exact fix — not just the fix
-- **Error pattern**: if there is an exact error message, always include it verbatim
-- **Cause archetype**: name the abstract pattern ("environment config divergence", "missing cleanup in teardown")
+### What makes a good entry
+- **Title**: the symptom or the decision, specific and searchable ("JWT expiry fails in prod", not "auth bug")
+- **Content**: the root cause, then the exact fix — not just the fix
+- **Error pattern**: the exact error message, verbatim, whenever there is one
+- **Wrong entry?** Save what is true with `save_entry` and pass the wrong entry's id as `supersedes`
 
-### At the end of every session — write the recap yourself
+### What DevBrain does for you (Claude Code, with `devbrain hooks install`)
 
-Do not ask the user to paste a transcript. You have the session context; you
-write the summary and pipe it to DevBrain. Before you finish a session in which
-you fixed, decided, or learned anything, run:
-
-```bash
-devbrain recap "<your summary of this session>"
-```
-
-Or pipe a longer write-up on stdin:
-
-```bash
-cat <<'EOF' | devbrain recap
-Fixed: <symptom> — root cause was <cause>, fixed by <fix>.
-Decided: <choice> over <alternative> because <reason>.
-Learned: <non-obvious behaviour and why it matters>.
-Avoid: <what not to do here and the consequence>.
-EOF
-```
-
-Gemini splits that into individual bugs, fixes, decisions and patterns and
-saves each one. Write it in those four lines above — concrete, with root causes,
-not a narrative of what you did.
+- At session start, this project's memory is put in your context.
+- When a stretch of work fixes or decides something and you saved nothing,
+  DevBrain asks you to record it before you finish. Saving earlier means it never has to ask.
+- If it mentions unreviewed commits, run `devbrain backfill` when there is a pause,
+  save what matters from it, and repeat until it says history is fully reviewed.
 
 ### Rules
-- Run `devbrain context` before starting any non-trivial task — no exceptions.
-- Run `devbrain search` before debugging any error you have not seen before.
-- Save proactively — if you had to think to solve it, save it.
-- End every substantive session with `devbrain recap "<summary>"` — unprompted.
-- Past commits are imported automatically; you never need to run `devbrain backfill`.
+- Run `devbrain context` before any non-trivial task.
+- Run `devbrain search` before debugging an error you have not seen before.
+- If you had to think to solve it, save it.
 - **Never reimplement devbrain** — run `devbrain --help` to confirm it is installed.
 
 <!-- devbrain:end -->

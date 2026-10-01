@@ -5,7 +5,7 @@
 
 process.env.DEVBRAIN_MOCK = 'true';
 
-const { getEmbedding, extractKnowledge } = require('./packages/core/dist/gemini');
+const { getEmbedding } = require('./packages/core/dist/gemini');
 const { findSimilar, preciseSearch, buildContext, formatContext, similarityLabel, timeAgo } = require('./packages/core/dist/search');
 
 const CYAN  = '\x1b[36m';
@@ -87,15 +87,6 @@ async function main() {
   const lines = formatted.split('\n');
   pass(`formatContext output: ${lines.length} lines`);
   info('preview', lines[0]);
-
-  // ── 5. extractKnowledge mock ──────────────────────────────────────────────
-  console.log(`\n${YELLOW}[5] extractKnowledge mock (git hook simulation)${RESET}`);
-  const knowledge = await extractKnowledge('diff --git ...', 'fix: resolve memory leak in event emitter cleanup');
-  pass(`Extracted type="${knowledge.type}" category="${knowledge.category}"`);
-  info('problem',  knowledge.problem.slice(0, 80));
-  info('solution', knowledge.solution.slice(0, 80));
-  if (knowledge.errorPattern) info('errorPattern', knowledge.errorPattern);
-  if (knowledge.causeArchetype) info('causeArchetype', knowledge.causeArchetype);
 
   console.log(`\n${GREEN}━━━  All checks passed  ━━━${RESET}\n`);
 }

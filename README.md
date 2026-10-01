@@ -1,6 +1,6 @@
 # DevBrain
 
-Persistent developer memory for you and your AI agents. Captures technical knowledge from git commits, lets you save typed notes instantly, and injects ranked context into Gemini and other MCP-compliant agents before they start work — so they already know what broke before, what was decided, and why.
+Persistent developer memory for you and your AI agents. Your coding agent writes down what it fixes and decides as it works, and reads it back before the next task — so it already knows what broke before, what was decided, and why. DevBrain notices when something worth keeping happened, stores it, and ranks it back; it needs no AI service of its own.
 
 **🚀 Live demo:** **https://devbrain-oujuoveyvq-uc.a.run.app** — dashboard + team feed, with the agent at `POST /agent` and the MCP server at `/mcp`. Runs on **Gemini 2.5 Flash (Vertex AI)** + **MongoDB Atlas Vector Search** on **Google Cloud Run**.
 
@@ -17,9 +17,15 @@ curl -X POST https://devbrain-oujuoveyvq-uc.a.run.app/agent \
 
 ## How it works
 
-Every project you register gets two things: a git hook that captures knowledge from commits automatically, and an MCP/HTTP server that Google Cloud Agent Builder, Gemini Code Assist, and other MCP clients connect to. When your agent starts a task, it calls `get_context` to load your ranked engineering history. When it fixes a bug, it calls `save_entry`. When you hit a known error pattern, it finds the exact past fix — not just something semantically similar.
+**The agent writes; DevBrain stores.** The coding agent that did the work already holds the whole story in its context — the error, the dead ends, why the fix works. It states that better than any second model reading a transcript afterwards, so it writes every entry, through the `save_entry` MCP tool or `devbrain note`. What agents lacked was a trigger they could not forget, so DevBrain supplies the triggers, mechanically and without a model:
 
-The memory compounds. An entry retrieved across multiple projects gets flagged as a cross-project pattern and surfaces in every future context load. An entry retrieved 3+ times gets promoted from `observation` to `confirmed` confidence.
+- **Session start** — the project's memory is put into the agent's context (a Claude Code hook).
+- **After each turn** — DevBrain checks the session locally. If the turn resolved an error or made a stated decision and nothing was saved, it asks the agent once, showing it the error text and files involved. The agent writes the entry; routine turns cost nothing.
+- **Past work** — commits and sessions from before DevBrain was installed are handed to the agent with `devbrain backfill`, in batches it reads and saves from.
+
+When you hit a known error pattern, `search_knowledge` finds the exact past fix — not just something semantically similar.
+
+The memory compounds. An entry retrieved across multiple projects gets flagged as a cross-project pattern and surfaces in every future context load. Confidence rises only on independent evidence — the same knowledge recurring in a second project, or a person confirming it — never just because DevBrain read it back.
 
 ### Shared Knowledge Across Codebases
 Every registered project writes to one knowledge base — local by default, or a shared MongoDB Atlas cluster when `MONGODB_URI` is set. Across your own projects this works either way; a *team* sharing collective memory is what pointing several machines at the same Atlas database gives you:
@@ -49,11 +55,11 @@ Then run the setup wizard:
 devbrain setup
 ```
 
-It asks two things — where to keep your memory, and your Gemini credentials — and writes them to `~/.devbrain/.env`. You can re-run it anytime.
+It asks where to keep your memory, offers optional semantic search, and sets up the current project (the same as `devbrain init`). Settings go to `~/.devbrain/.env`; re-run it anytime.
 
 ### Storage: local by default
 
-**No database required.** With `MONGODB_URI` unset, DevBrain stores everything in `~/.devbrain/db.json` and ranks embeddings in memory. Saving, searching, context and git auto-capture all work with nothing provisioned.
+**No database required.** With `MONGODB_URI` unset, DevBrain stores everything in `~/.devbrain/db.json` and ranks embeddings in memory. Saving, searching, context and the agent hooks all work with nothing provisioned.
 
 Set `MONGODB_URI` when you want to:
 - share one knowledge base across a team or several machines
@@ -61,9 +67,9 @@ Set `MONGODB_URI` when you want to:
 
 Switching is just the env var — the two backends are interchangeable at runtime.
 
-### Gemini credentials
+### Gemini credentials (optional)
 
-Semantic search and auto-capture need Gemini; saving and recalling notes don't. DevBrain runs Gemini on one of two backends: **Vertex AI** (Google Cloud) for hosted/production, or the **Gemini Developer API** (AI Studio) for local dev.
+Nothing in DevBrain needs a model: the agent writes every entry, and search, context and duplicate detection match keywords. Gemini is an upgrade — embeddings make search match by meaning, and it adds root-cause archetypes and summarised context sections. The hosted agent at `/agent` does need it. DevBrain runs Gemini on one of two backends: **Vertex AI** (Google Cloud) for hosted/production, or the **Gemini Developer API** (AI Studio) for local dev.
 
 For local dev, get a free key at [aistudio.google.com](https://aistudio.google.com):
 
@@ -144,41 +150,35 @@ When `GOOGLE_GENAI_USE_VERTEXAI` is unset or `false`, DevBrain falls back to the
 ```bash
 cd my-project
 devbrain init
-devbrain backfill        # import knowledge from commits you already made
 ```
 
-`init` registers the project, detects the tech stack, installs the post-commit git hook, and creates `DEV_CONTEXT.md`.
+`init` registers the project, detects the tech stack, installs the Claude Code hooks into `.claude/settings.local.json` (local, so teammates without DevBrain are unaffected), and writes `DEV_CONTEXT.md` — instructions for any agent on reading and writing memory. Run `devbrain hooks install --global` to cover every project instead.
 
 ### Don't start from empty
 
-The git hook only sees commits made from now on, so a freshly initialised project has nothing to recall. `devbrain backfill` reads commits that already happened — one Gemini extraction each — so `devbrain context` is useful on day one instead of in three weeks.
+Ask your coding agent: **"run devbrain backfill and save what matters."** It prints a batch of commits — and stretches of earlier agent sessions where something was fixed — that nobody has reviewed yet, with instructions. The agent reads it, saves what is worth keeping, and runs it again for the next batch until history is fully reviewed. Each batch is marked reviewed as it is handed over, so nothing is shown twice. The session-start briefing mentions unreviewed history, so the agent is reminded too.
 
 ```bash
-devbrain backfill        # last 20 commits (default)
-devbrain backfill 100    # go further back
+devbrain backfill          # next batch (8 commits by default), for the agent
+devbrain backfill 20       # a bigger batch
+devbrain backfill --print  # read a batch yourself; nothing is marked reviewed
 ```
 
-Entries are dated by their original commit, so history reads in the right order. Processed commits are recorded, so the command is safe to re-run: it resumes where it stopped and skips what it already imported. If Gemini rate-limits mid-run, it stops cleanly and tells you to re-run.
-
-`DEV_CONTEXT.md` provides prompt-level guidelines directing your AI agents (Gemini, Agent Builder, or terminal assistants) to automatically fetch technical history using `get_context` and log new learnings using `save_entry`. From that point on, your agent updates your project memory autonomously as you code.
-
-Run `devbrain /recap` after any coding session to extract and save anything your agent missed.
+Run at a terminal, `backfill` explains itself instead of printing the batch — a batch scrolling past a person would otherwise be marked reviewed and never reach the agent.
 
 ---
 
 ## AI Agent Integration & MCP Tools
 
-Five MCP tools your agent calls automatically:
+Three MCP tools — one per thing an agent does with memory:
 
 | Tool | When your agent uses it |
 |------|----------------------|
-| `get_context` | Start of any non-trivial task — loads ranked engineering history |
-| `search_knowledge` | Before debugging — searches by error text + semantic similarity |
-| `save_entry` | After fixing bugs, making decisions, finding patterns |
-| `query_entries` | Browse by type/category/recency — "show me all auth decisions" |
-| `get_project_summary` | Quick count of what's stored for a project |
+| `get_context` | Start of any non-trivial task — ranked history for the task, plus how much is stored and what is unreviewed |
+| `search_knowledge` | Before debugging — exact error text first, then meaning (or keywords). With no query, lists by type, category or recency |
+| `save_entry` | After fixing, deciding or learning something. Pass `supersedes: <id>` to correct an entry that turned out wrong — it is retracted in the same call |
 
-`DEV_CONTEXT.md` instructs the agent to invoke these tools automatically — you never need to prompt manually.
+`DEV_CONTEXT.md` tells the agent when to use them, and in Claude Code the hooks make sure the important moments are not missed.
 
 ---
 
@@ -192,17 +192,14 @@ devbrain
 ────────────────────────────────────────────────────────────────────────────────
 devbrain  ❯ /
 ────────────────────────────────────────────────────────────────────────────────
-❯ /search       Semantic search across all projects
-  /context      Inject ranked context for AI agents
+❯ /search       Search memory — exact error text works best
+  /context      Ranked project history, as an agent sees it
+  /project      Everything saved about this project
   /browse       Scroll through all saved entries
-  /save         Save entry  (bug: fix: stack: decision: anti-pattern: ...)
-  /recap        AI-extract + save knowledge from a session
-  /backfill     Import knowledge from past commits
-  /prompt       Regenerate agent DEV_CONTEXT.md setup block
-  /summary      Project name, stack and recent entries
-  /export       Export knowledge to zip file
-  /open         Open ~/.devbrain in file explorer
-  /init         Register project + install git hook
+  /save         Save entry  (fix: decision: lesson: bug: stack: ...)
+  /delete       Delete an entry
+  /backfill     Unreviewed commits and sessions, for your agent
+  /init         Register this project + Claude Code hooks
 ```
 
 ---
@@ -256,7 +253,7 @@ React · TypeScript · Node.js · Express · MongoDB
     → Resolved layout overlap and modal blocking issues on mobile viewports by moving fixed-overlay modals...
 ```
 
-Sections with 2+ entries are synthesized by Gemini into bullet-point insights. The MCP `get_context` tool returns this format directly.
+With Gemini configured, sections with 2+ entries are summarised into bullet-point insights; without it, entries are listed as stored. The MCP `get_context` tool returns this format directly.
 
 ---
 
@@ -285,25 +282,33 @@ Every entry stores:
 | `category` | `auth` `database` `deployment` `build` `config` `network` `performance` `ui` `data` `testing` `security` `other` |
 | `errorPattern` | Exact error text — enables direct pattern matching, bypasses semantic threshold |
 | `causeArchetype` | Abstract root cause transferable across projects — e.g. "missing guard middleware causes silent runtime failure" |
-| `confidence` | `observation` → `corroborated` (retrieved 2×) → `confirmed` (retrieved 3×) |
+| `confidence` | `observation` → `corroborated` (seen in a 2nd project, or confirmed once by a person) → `confirmed` (confirmed twice) |
 | `seenInProjects` | Project IDs that have retrieved this entry — 2+ triggers cross-project promotion |
 | `supersededBy` | ID of replacement entry — superseded decisions shown separately, not in main context |
 
 ---
 
-## Auto-capture from git
+## Commands
 
-After `devbrain /init`, a post-commit hook runs after every commit. Gemini extracts the problem, solution, tags, category, error pattern, and cause archetype from the diff and commit message. If rate-limited, the commit is left unprocessed and retried next time — no knowledge is lost.
+```
+Set up    devbrain setup · init · hooks [install|status|uninstall] [--global]
+Write     devbrain note "<type>: <title> — <detail>" · backfill [n] [--print] · index [file]
+Read      devbrain context [task] · search <q> · project [name] [--write] · run <cmd>
+```
+
+`devbrain hooks status` also shows the last few times DevBrain asked an agent to record something (`~/.devbrain/capture.log`).
 
 ---
 
 ## Engineering & Architectural Decisions
 
+**The coding agent writes the knowledge; DevBrain only triggers and stores it** — Earlier versions ran Gemini over commit diffs and session transcripts to write entries. A diff records what changed but rarely why, a second model reading a transcript afterwards knows less than the agent that did the work, and every extraction cost a model call (the free tier allows 20 a day). So the agent writes, and DevBrain's job is a trigger it cannot forget: a Stop hook that checks the transcript locally and asks once when a turn resolved an error or made a decision and nothing was saved, and `backfill` for history from before. Capture and recall need no AI service at all.
+
 **MongoDB Atlas for Cloud Scaling & Stored Vectors** — Employs a robust hosted MongoDB Atlas database for technical vector searches. High-dimensional technical embeddings (3072 dimensions) are matched against `$vectorSearch` cosine-similarity indexes directly in the cloud. For offline development, testing, and demo recording, `DEVBRAIN_MOCK=true` intercepts all Gemini calls with deterministic mock vectors and extractions — no API key or network required.
 
-**Gemini on Vertex AI & High-Dimensional Embeddings** — Both reasoning and embeddings run on **Vertex AI**, Google Cloud's managed AI platform, via the unified `@google/genai` SDK and Application Default Credentials (no API keys in production). `gemini-embedding-001` produces 3072-dimension embeddings — higher dimensionality improves retrieval precision for technical content where subtle semantic differences matter — and `gemini-2.5-flash` handles knowledge extraction and context synthesis in real time. A single env switch (`GOOGLE_GENAI_USE_VERTEXAI`) falls back to the Gemini Developer API for offline/local dev without changing model IDs or the embedding schema.
+**Gemini on Vertex AI & High-Dimensional Embeddings** — Both reasoning and embeddings run on **Vertex AI**, Google Cloud's managed AI platform, via the unified `@google/genai` SDK and Application Default Credentials (no API keys in production). `gemini-embedding-001` produces 3072-dimension embeddings — higher dimensionality improves retrieval precision for technical content where subtle semantic differences matter — and `gemini-2.5-flash` powers the hosted `/agent` and optional context synthesis. A single env switch (`GOOGLE_GENAI_USE_VERTEXAI`) falls back to the Gemini Developer API for offline/local dev without changing model IDs or the embedding schema.
 
-**High-Fidelity Offline Mock Mode (`DEVBRAIN_MOCK=true`)** — Integrates a comprehensive simulation engine that intercepts all Gemini LLM and embedding API calls. When enabled, it dynamically serves realistic mock extractions, classifications, and project recaps. This enables offline development, CI/CD testing, and rate-limit-free video demonstrations without requiring active API keys.
+**High-Fidelity Offline Mock Mode (`DEVBRAIN_MOCK=true`)** — Integrates a comprehensive simulation engine that intercepts all Gemini LLM and embedding API calls. When enabled, it serves deterministic embeddings, classifications and summaries. This enables offline development, CI/CD testing, and rate-limit-free video demonstrations without requiring active API keys.
 
 **Stateless SSE HTTP Request Isolation** — Re-architected the MCP SSE server endpoint to dynamically spin up an isolated, fresh MCP `Server` and `StreamableHTTPServerTransport` instance per incoming connection. This eliminates session cross-talk, memory leaks, and state pollution typical of stateless standard HTTP servers handling concurrent agent requests.
 
@@ -324,8 +329,8 @@ After `devbrain /init`, a post-commit hook runs after every commit. Gemini extra
 
 - **Runtime**: Node.js
 - **Language**: TypeScript
-- **AI Backend**: Gemini on **Vertex AI** (Google Cloud) — `gemini-2.5-flash` (extraction, synthesis) · `gemini-embedding-001` (semantic search, 3072-dim). Falls back to the Gemini Developer API for local dev.
-- **Agent**: Google ADK (`@google/adk`) `LlmAgent` consuming the DevBrain + MongoDB MCP servers
+- **AI Backend (optional)**: Gemini on **Vertex AI** (Google Cloud) — `gemini-2.5-flash` (hosted agent, synthesis) · `gemini-embedding-001` (semantic search, 3072-dim). Falls back to the Gemini Developer API for local dev; without either, DevBrain uses keyword search.
+- **Agent**: Google ADK (`@google/adk`) `LlmAgent` consuming the DevBrain MCP server
 - **Database**: MongoDB Atlas (Vector Search indices)
 - **Deployment**: Google Cloud Run (SSE HTTP server transport, ADC auth to Vertex AI)
 - **CLI**: inquirer · inquirer-autocomplete-prompt

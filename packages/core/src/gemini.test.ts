@@ -6,7 +6,6 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import type { ExtractedKnowledge } from './types';
 
 // Set mock mode before importing so module-level checks see it
 beforeEach(() => {
@@ -59,72 +58,6 @@ describe('getEmbedding (mock)', () => {
   });
 });
 
-// ── extractKnowledge ──────────────────────────────────────────────────────────
-
-describe('extractKnowledge (mock)', () => {
-  it('returns null for empty/trivial diff', async () => {
-    const { extractKnowledge } = await getGemini();
-    // mock checks message content; empty message hits the default "note" path
-    const result = await extractKnowledge('', 'chore: update readme');
-    // can be null (skip) or a note — just must not throw
-    if (result !== null) {
-      expect(['bug', 'fix', 'note']).toContain(result.type);
-    }
-  });
-
-  it('extracts a fix for a memory leak commit', async () => {
-    const { extractKnowledge } = await getGemini();
-    const result = await extractKnowledge(
-      'diff --git a/src/status.tsx ...',
-      'fix: resolve memory leak in event emitter cleanup'
-    );
-    expect(result).not.toBeNull();
-    expect(result!.type).toBe('fix');
-    expect(result!.problem).toBeTruthy();
-    expect(result!.solution).toBeTruthy();
-  });
-
-  it('extracted fix includes errorPattern', async () => {
-    const { extractKnowledge } = await getGemini();
-    const result = await extractKnowledge('', 'fix: resolve memory leak in event emitter');
-    expect(result?.errorPattern).toBeTruthy();
-  });
-
-  it('extracted fix includes causeArchetype', async () => {
-    const { extractKnowledge } = await getGemini();
-    const result = await extractKnowledge('', 'fix: resolve memory leak in event emitter');
-    expect(result?.causeArchetype).toBeTruthy();
-  });
-
-  it('extracts a bug for a race condition commit', async () => {
-    const { extractKnowledge } = await getGemini();
-    const result = await extractKnowledge('diff ...', 'bug: race condition in fetcher causes stale data');
-    expect(result).not.toBeNull();
-    expect(result!.type).toBe('bug');
-  });
-
-  it('returns valid category', async () => {
-    const { extractKnowledge } = await getGemini();
-    const validCategories = ['auth','database','deployment','build','config','network','performance','ui','data','testing','security','other'];
-    const result = await extractKnowledge('', 'fix: resolve memory leak');
-    if (result?.category) {
-      expect(validCategories).toContain(result.category);
-    }
-  });
-
-  it('includes required fields in returned object', async () => {
-    const { extractKnowledge } = await getGemini();
-    const result = await extractKnowledge('diff ...', 'fix: cleanup event listener');
-    if (result) {
-      expect(result).toHaveProperty('problem');
-      expect(result).toHaveProperty('solution');
-      expect(result).toHaveProperty('tags');
-      expect(result).toHaveProperty('type');
-      expect(Array.isArray(result.tags)).toBe(true);
-    }
-  });
-});
-
 // ── autoArchetype ─────────────────────────────────────────────────────────────
 
 describe('autoArchetype (mock)', () => {
@@ -158,52 +91,6 @@ describe('autoArchetype (mock)', () => {
     const result = await autoArchetype('Never log secrets', 'Logging secrets exposes credentials', 'anti-pattern');
     expect(result).not.toBeNull();
     expect(typeof result).toBe('string');
-  });
-});
-
-// ── recapSession ──────────────────────────────────────────────────────────────
-
-describe('recapSession (mock)', () => {
-  it('works in mock mode without credentials, like every other Gemini call', async () => {
-    // recapSession used to check hasGeminiCreds() before DEVBRAIN_MOCK, so mock
-    // mode threw here while working everywhere else — which also made the CLI's
-    // preflight pass and then fail. Mock mode now covers recap too.
-    const { recapSession } = await getGemini();
-    const result = await recapSession('Fixed: leak in useEffect — missing cleanup.');
-    expect(result.length).toBeGreaterThan(0);
-  });
-
-  it('still throws without credentials when not in mock mode', async () => {
-    delete process.env.DEVBRAIN_MOCK;
-    const { recapSession } = await getGemini();
-    await expect(recapSession('We fixed a memory leak.')).rejects.toThrow('Gemini credentials');
-  });
-
-  it('returns entries with required fields', async () => {
-    const { recapSession } = await getGemini();
-    const result = await recapSession('Fixed a bug in the auth module');
-    expect(result.length).toBeGreaterThan(0);
-    expect(result[0]).toHaveProperty('type');
-    expect(result[0]).toHaveProperty('title');
-    expect(result[0]).toHaveProperty('content');
-    expect(result[0]).toHaveProperty('tags');
-  });
-
-  it('types each line by its leading verb, so a recap splits into categories', async () => {
-    const { recapSession } = await getGemini();
-    const result = await recapSession(
-      ['Fixed: stale fetch overwrote state.',
-       'Decided: AbortController over an isMounted flag.',
-       'Learned: responses can resolve out of order.',
-       'Avoid: guarding async setState with a boolean.'].join('\n')
-    );
-    expect(result.map(r => r.type)).toEqual(['fix', 'decision', 'lesson', 'anti-pattern']);
-  });
-
-  it('strips the leading label from the title', async () => {
-    const { recapSession } = await getGemini();
-    const [entry] = await recapSession('Fixed: stale fetch overwrote state.');
-    expect(entry.title).toBe('stale fetch overwrote state.');
   });
 });
 

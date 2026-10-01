@@ -14,15 +14,14 @@ import {
   getEmbedding, similarityLabel, timeAgo,
   buildContext, compressContext, formatContext,
   bumpRetrievalCounts, preciseSearch, vectorSearch,
-  autoArchetype, recapSession, supersedeEntry,
+  autoArchetype, supersedeEntry,
   ENTRY_TYPES, ENTRY_TYPE_NAMES, normalizeType,
   buildDossier, describeStorage, findDuplicate, findTextDuplicate, clip,
-  startSession, endSession, getAbandonedSession, describeAbandonedSession,
+  filterUnprocessedCommits, listCommitHashes,
 } from '@devbrain/core';
 import type { EntryCategory } from '@devbrain/core';
 import type { Entry } from '@devbrain/core';
 import { nanoid } from 'nanoid';
-import { mongoMcpFind } from './mongoMcp';
 // NOT imported at the top level. ./agent pulls in @google/adk, which takes ~2.2s
 // to load — 85% of this server's startup. Over stdio that delay ran before the
 // handshake could be answered, so MCP clients reported CONNECT_TIMEOUT and never
@@ -105,366 +104,198 @@ const server = new Server(
   { capabilities: { tools: {} } }
 );
 
+// Three tools, one per thing an agent does with memory: read the briefing,
+// look something up, write something down. They used to be nine, several of
+// which did the same job by another name (task_start/get_context,
+// query_entries/query_knowledge_db/search_knowledge, task_end/supersede_entry/
+// save_entry), and an agent choosing among nine near-synonyms often chose none.
+const CATEGORY_ENUM = ['auth','database','deployment','build','config','network','performance','ui','data','testing','security','other'];
+
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [
     {
-      name: 'task_start',
-      description:
-        'CALL THIS FIRST at the beginning of every coding task, before reading files or writing code. ' +
-        'Loads ranked project memory — past bugs, decisions, patterns, and anti-patterns — scoped to your task. ' +
-        'Returns what broke before, what was decided, and what to avoid. This is your briefing.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          description: {
-            type: 'string',
-            description: 'One-line description of the task you are about to start (e.g. "fix auth token expiry bug", "add dark mode to settings page")',
-          },
-          project_path: {
-            type: 'string',
-            description: 'Absolute path to the project directory. Omit to use the current working directory.',
-          },
-        },
-        required: ['description'],
-      },
-    },
-    {
-      name: 'task_end',
-      description:
-        'CALL THIS when you finish a task — after the fix is applied, the feature is done, or the decision is made. ' +
-        'Pass a plain-text summary of what you did: what the problem was, what you changed, and why. ' +
-        'DevBrain extracts and stores all knowledge automatically — you do not need to classify anything. ' +
-        'Even a short summary ("fixed JWT expiry by setting TOKEN_EXPIRY=86400 in prod .env") is enough.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          summary: {
-            type: 'string',
-            description: 'Plain-text account of what you did this session: problem encountered, changes made, decisions taken, things to avoid next time.',
-          },
-          project_path: {
-            type: 'string',
-            description: 'Absolute path to the project directory. Omit to use the current working directory.',
-          },
-        },
-        required: ['summary'],
-      },
-    },
-    {
-      name: 'save_entry',
-      description:
-        'CALL THIS after fixing a bug, making an architectural decision, or discovering a pattern worth keeping. ' +
-        'Do not wait until end of session — save immediately while context is fresh. ' +
-        'For bugs and fixes, include error_pattern (exact error text) so future searches find this instantly. ' +
-        'DevBrain will auto-generate the cause_archetype if you omit it.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          type: {
-            type: 'string',
-            enum: [...ENTRY_TYPE_NAMES],
-            description: 'bug=problem found · fix=solution applied · decision=architectural choice · pattern=reusable approach · lesson=learned the hard way · stack=technologies used',
-          },
-          title: {
-            type: 'string',
-            description: 'One-line description of the problem or thing to remember (max 120 chars)',
-          },
-          content: {
-            type: 'string',
-            description: 'The full solution, explanation, or detail',
-          },
-          tags: {
-            type: 'array',
-            items: { type: 'string' },
-            description: 'Relevant tags: language, framework, error type, concept',
-          },
-          category: {
-            type: 'string',
-            enum: ['auth','database','deployment','build','config','network','performance','ui','data','testing','security','other'],
-            description: 'Problem category — pick the best fit for precise future retrieval',
-          },
-          error_pattern: {
-            type: 'string',
-            description: 'The exact error message, exception text, or specific symptom. Used for direct pattern matching — include whenever an error text exists.',
-          },
-          cause_archetype: {
-            type: 'string',
-            description: 'The abstract root-cause pattern transferable across projects. Omit and DevBrain will generate it automatically.',
-          },
-          supersedes: {
-            type: 'string',
-            description: 'id of an existing entry this corrects. Pass it whenever the new knowledge contradicts something DevBrain already holds — the old entry is retracted instead of left to be recalled alongside it.',
-          },
-          project_path: {
-            type: 'string',
-            description: 'Absolute path to the project directory. Omit to use the current working directory.',
-          },
-        },
-        required: ['type', 'title', 'content'],
-      },
-    },
-    {
-      name: 'supersede_entry',
-      description:
-        'CALL THIS the moment you find that something DevBrain told you is wrong or out of date. ' +
-        'Retracting matters as much as saving: an entry nobody corrects keeps being recalled as true, ' +
-        'and a memory that only appends eventually states something false with full confidence. ' +
-        'The superseded entry stops appearing in context and search, but is kept for history. ' +
-        'Get the id from search_knowledge results.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          id: { type: 'string', description: 'id of the entry that is now wrong, from a search_knowledge result' },
-          reason: { type: 'string', description: 'What is actually true now, and how you established it.' },
-          project_path: { type: 'string', description: 'Absolute path to the project directory. Omit to use the current working directory.' },
-        },
-        required: ['id', 'reason'],
-      },
-    },
-    {
-      name: 'search_knowledge',
-      description:
-        'CALL THIS before debugging any error you have not seen before. ' +
-        'Paste the exact error message into error_pattern — this bypasses semantic search and finds the exact past fix. ' +
-        'Also call this when starting work on any feature area (auth, payments, database) to surface relevant past decisions.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          query: { type: 'string', description: 'Natural language description of the problem or what you are looking for' },
-          category: {
-            type: 'string',
-            enum: ['auth','database','deployment','build','config','network','performance','ui','data','testing','security','other'],
-            description: 'Problem category if known — boosts relevant results',
-          },
-          error_pattern: {
-            type: 'string',
-            description: 'Exact error message or symptom text — enables direct pattern matching, higher precision than semantic search',
-          },
-        },
-        required: ['query'],
-      },
-    },
-    {
-      name: 'get_project_summary',
-      description: 'Get a count of stored knowledge for a project — useful for confirming DevBrain is tracking this codebase and seeing what categories have been captured.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          project_path: {
-            type: 'string',
-            description: 'Absolute path to the project. Omit to use the current working directory.',
-          },
-        },
-      },
-    },
-    {
       name: 'get_context',
       description:
-        'CALL THIS FIRST before writing any code or making any decisions. ' +
-        'Returns what broke before, what was decided, and what to avoid — ranked by relevance to your current task. ' +
-        'Pass a query to focus it (e.g. "auth", "database migrations"). Omit for a full project briefing. ' +
-        'Prefer task_start for new tasks — use get_context for mid-task lookups on a specific topic.',
+        'CALL THIS at the start of any non-trivial task, before reading files or writing code. ' +
+        'Returns this project\'s memory — what broke before and why, what was decided, what to avoid — ' +
+        'ranked by relevance to the task you describe, plus how much is stored and what has not been reviewed yet.',
       inputSchema: {
         type: 'object',
         properties: {
           query: {
             type: 'string',
-            description: 'Topic to focus the context (e.g. "auth", "database migrations", "deployment"). Omit for general project context.',
+            description: 'The task or topic, e.g. "fix auth token expiry" or "database migrations". Omit for a general briefing.',
           },
-          project_path: {
-            type: 'string',
-            description: 'Absolute path to the project. Omit to use the current working directory.',
-          },
+          project_path: { type: 'string', description: 'Absolute path to the project. Omit to use the current working directory.' },
         },
       },
     },
     {
-      name: 'query_entries',
+      name: 'search_knowledge',
       description:
-        'Browse DevBrain entries by type, category, project, or recency — no search query needed. ' +
-        'Use when you want a specific slice: all anti-patterns, all auth decisions, all bugs from the last 30 days. ' +
-        'Complements search_knowledge (semantic) and get_context (ranked blend).',
+        'CALL THIS before debugging any error you have not seen before — put the exact error text in error_pattern ' +
+        'to find the past fix for it. Also use it to look up past decisions in an area. ' +
+        'With no query, it lists entries by filter instead: "all anti-patterns", "auth decisions from the last 30 days". ' +
+        'Every result carries an id — pass it to save_entry as `supersedes` if the entry turns out to be wrong.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'What you are looking for, in plain words. Omit to list by filters only.' },
+          error_pattern: { type: 'string', description: 'Exact error message or symptom text — matched directly, more precise than the query.' },
+          type: { type: 'string', enum: [...ENTRY_TYPE_NAMES], description: 'Only entries of this type.' },
+          category: { type: 'string', enum: CATEGORY_ENUM, description: 'Only (or, with a query, prefer) entries in this category.' },
+          since_days: { type: 'number', description: 'Only entries created within this many days.' },
+          project_path: { type: 'string', description: 'Only entries from this project. Omit to search every project.' },
+          limit: { type: 'number', description: 'Max results (default 6 for a search, 20 for a listing; max 50).' },
+        },
+      },
+    },
+    {
+      name: 'save_entry',
+      description:
+        'CALL THIS when you fix a bug, make a decision, or learn something non-obvious — you did the work, so you write the record; ' +
+        'DevBrain stores it. Save each distinct item as its own entry, as soon as you know it. ' +
+        'For a bug or fix, include error_pattern with the exact error text so the next search finds it. ' +
+        'If something DevBrain told you is wrong, save what is actually true and pass the wrong entry\'s id as `supersedes`: ' +
+        'it is retracted in the same call, so it stops being recalled as true.',
       inputSchema: {
         type: 'object',
         properties: {
           type: {
             type: 'string',
             enum: [...ENTRY_TYPE_NAMES],
-            description: 'Filter by entry type. Omit to include all types.',
+            description: 'fix=what broke and how it was fixed · bug=symptom and cause · decision=choice and what was rejected · lesson=looked right, was wrong · anti-pattern=never do this · pattern=reusable approach · stack=version/tool/env fact',
           },
-          category: {
-            type: 'string',
-            enum: ['auth','database','deployment','build','config','network','performance','ui','data','testing','security','other'],
-            description: 'Filter by problem category.',
-          },
-          project_path: {
-            type: 'string',
-            description: 'Limit to a specific project. Omit to search across all projects.',
-          },
-          since_days: {
-            type: 'number',
-            description: 'Only return entries created within this many days. Omit for all time.',
-          },
-          limit: {
-            type: 'number',
-            description: 'Max entries to return (default 20, max 50).',
-          },
+          title: { type: 'string', description: 'The symptom or the decision, searchable, under 90 characters. Not "Fixed X".' },
+          content: { type: 'string', description: 'The root cause, then the exact fix — or for a decision, what was chosen, what was rejected, and why.' },
+          tags: { type: 'array', items: { type: 'string' }, description: 'A few lowercase words a searcher would type.' },
+          category: { type: 'string', enum: CATEGORY_ENUM, description: 'Best-fit problem area.' },
+          error_pattern: { type: 'string', description: 'The exact error text, copied verbatim. Include whenever there was one.' },
+          cause_archetype: { type: 'string', description: 'The transferable class of mistake, as a short phrase, e.g. "environment config divergence between local and deploy".' },
+          supersedes: { type: 'string', description: 'id of an entry this corrects (from search_knowledge). It is retracted in the same call.' },
+          project_path: { type: 'string', description: 'Absolute path to the project. Omit to use the current working directory.' },
         },
-      },
-    },
-    {
-      name: 'query_knowledge_db',
-      description:
-        'Query the DevBrain MongoDB knowledge base directly. ' +
-        'Use for analytics, audits, or when you need exact document-level access rather than semantic search.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          collection: {
-            type: 'string',
-            enum: ['entries', 'projects'],
-            description: 'Collection to query (default: entries)',
-          },
-          type: {
-            type: 'string',
-            enum: [...ENTRY_TYPE_NAMES],
-            description: 'Filter by entry type.',
-          },
-          category: {
-            type: 'string',
-            enum: ['auth','database','deployment','build','config','network','performance','ui','data','testing','security','other'],
-            description: 'Filter by problem category.',
-          },
-          since_days: {
-            type: 'number',
-            description: 'Only return entries created within this many days.',
-          },
-          limit: {
-            type: 'number',
-            description: 'Max documents to return (default 10, max 25).',
-          },
-        },
+        required: ['type', 'title', 'content'],
       },
     },
   ],
 }));
 
+/** The project at a path (or the working directory), if registered. */
+async function projectAt(path?: string) {
+  const cwd = path ?? process.cwd();
+  return getProjectByPath(getRepoRoot(cwd) ?? cwd).catch(() => null);
+}
 
+/** One entry as an agent should read it, id included so it can be corrected. */
+function renderEntry(e: Entry & { project: { name: string } }, i: number, lead: string): string {
+  const catLabel = e.category ? ` [${e.category}]` : '';
+  return (
+    `${i + 1}. [${normalizeType(e.type)}]${catLabel} ${e.title}\n` +
+    `   ${lead}\n` +
+    `   id: ${e.id}\n` +
+    (e.errorPattern ? `   error: ${e.errorPattern}\n` : '') +
+    (e.causeArchetype ? `   root cause: ${e.causeArchetype}\n` : '') +
+    `   ${e.content}` +
+    (e.tags.length ? `\n   tags: ${e.tags.join(', ')}` : '')
+  );
+}
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
 
   try {
-    // ── task_start ────────────────────────────────────────────────────────────────
-    if (name === 'task_start') {
-      const { description, project_path } = args as { description: string; project_path?: string };
-      const cwd      = project_path ?? process.cwd();
-      const repoRoot = getRepoRoot(cwd) ?? cwd;
-      const project  = await getProjectByPath(repoRoot);
-      const all      = await getAllEntriesWithProjects();
+    // ── get_context ───────────────────────────────────────────────────────────
+    if (name === 'get_context') {
+      const { query, project_path } = ((args ?? {}) as { query?: string; project_path?: string });
+      const project = await projectAt(project_path);
+      const all     = await getAllEntriesWithProjects();
 
-      let queryEmbedding: number[] | undefined;
-      try { queryEmbedding = await getEmbedding(description); } catch {}
+      // Optional: with an AI service, rank semantically; without, by keywords.
+      const queryEmbedding = query?.trim() ? await getEmbedding(query).catch(() => undefined) : undefined;
 
-      const raw  = buildContext(all, project ?? null, queryEmbedding, description);
+      const raw  = buildContext(all, project ?? null, queryEmbedding, query);
       const ctx  = await compressContext(raw);
-      const text = formatContext(ctx, description);
+      const body = formatContext(ctx, query);
 
-      const retrievedIds = [
+      await bumpRetrievalCounts([
         ...raw.issues, ...raw.decisions, ...raw.patterns, ...raw.antiPatterns, ...raw.stacks,
         ...(raw.crossProjectPatterns ?? []),
-      ].map(r => r.entry.id);
-      await bumpRetrievalCounts(retrievedIds, project?.id);
+      ].map(r => r.entry.id), project?.id);
 
-      const projectLine = project
-        ? `Project: ${project.name} · stack: ${project.stack.join(', ') || 'unknown'}\n\n`
-        : '';
-
-      // If the previous session was never closed by task_end, whatever was learned
-      // in it went unrecorded. Nothing used to notice. Say so here, where an agent
-      // is already reading, and ask for the recap before the new work buries it.
-      let unrecapped = '';
+      // What get_project_summary used to answer separately: is this project
+      // tracked, how much is known, and is there history nobody has reviewed.
+      let header = 'This project is not registered with DevBrain — run `devbrain init` in it. Showing knowledge from other projects.\n\n';
       if (project) {
-        const abandoned = await getAbandonedSession(project.id).catch(() => null);
-        const note = describeAbandonedSession(abandoned);
-        if (note) {
-          unrecapped =
-            `UNRECORDED WORK: ${note}\n` +
-            `Before starting, call task_end with a summary of that earlier work if you know what it was. ` +
-            `If you do not, say so to the user and continue.\n\n`;
-        }
-        await startSession(project.id, description).catch(() => {});
+        const mine = all.filter(e => e.projectId === project.id && !e.supersededBy);
+        const counts = ENTRY_TYPES
+          .map(t => [t.type, mine.filter(e => normalizeType(e.type) === t.type).length] as const)
+          .filter(([, n]) => n > 0)
+          .map(([t, n]) => `${n} ${t}`)
+          .join(' · ');
+        const unreviewed = (await filterUnprocessedCommits(listCommitHashes(project.path)).catch(() => [])).length;
+        header =
+          `Project: ${project.name} · stack: ${project.stack.join(', ') || 'unknown'} · ${mine.length} entries${counts ? ` (${counts})` : ''}\n` +
+          (unreviewed ? `${unreviewed} past commits not reviewed yet — run \`devbrain backfill\` when there is a pause, and save what matters.\n` : '') +
+          '\n';
       }
-
-      return {
-        content: [{ type: 'text', text: `${unrecapped}${projectLine}${text}` }],
-      };
+      return { content: [{ type: 'text', text: header + body }] };
     }
 
-    // ── task_end ──────────────────────────────────────────────────────────────────
-    if (name === 'task_end') {
-      const { summary, project_path } = args as { summary: string; project_path?: string };
-      const cwd      = project_path ?? process.cwd();
-      const repoRoot = getRepoRoot(cwd) ?? cwd;
-      let project    = await getProjectByPath(repoRoot);
-
-      if (!project) {
-        project = {
-          id: nanoid(), name: getProjectName(repoRoot), path: repoRoot,
-          stack: detectStack(repoRoot), createdAt: Date.now(), lastSeen: Date.now(),
-        };
-        await upsertProject(project);
-      }
-
-      // Extract structured knowledge entries from the session summary
-      let extracted: Awaited<ReturnType<typeof recapSession>> = [];
-      try { extracted = await recapSession(summary); } catch {}
-
-      if (extracted.length === 0) {
-        return { content: [{ type: 'text', text: 'DevBrain: session summary recorded. No distinct knowledge entries extracted.' }] };
-      }
-
-      const saved: string[] = [];
-      let duplicates = 0;
-      for (const e of extracted) {
-        // Auto-generate archetype if missing
-        const archetype = e.causeArchetype ?? (await autoArchetype(e.title, e.content, e.type).catch(() => null)) ?? undefined;
-        let embedding: number[] | undefined;
-        try { embedding = await getEmbedding(`${e.title} ${e.content} ${e.tags.join(' ')}`); } catch {}
-
-        // A recap restates things already saved during the session. Without this
-        // every session ended by duplicating its own mid-session saves.
-        if (embedding && await findDuplicate(embedding, project.id).catch(() => null)) {
-          duplicates++;
-          continue;
-        }
-
-        await insertEntry({
-          id: nanoid(), projectId: project.id,
-          type: e.type, title: clip(e.title, 120), content: e.content,
-          tags: e.tags, embedding, createdAt: Date.now(), confidence: 'observation',
-          ...(e.category     ? { category: e.category }         : {}),
-          ...(e.errorPattern ? { errorPattern: e.errorPattern }  : {}),
-          ...(archetype      ? { causeArchetype: archetype }     : {}),
-        });
-        saved.push(`  [${e.type}] ${clip(e.title, 80)}`);
-      }
-
-      // The session is recorded, so it no longer counts as abandoned.
-      await endSession(project.id).catch(() => {});
-
-      const dupeNote = duplicates ? `\n(${duplicates} already known, not duplicated)` : '';
-      return {
-        content: [{
-          type: 'text',
-          text: saved.length
-            ? `DevBrain: saved ${saved.length} knowledge entr${saved.length === 1 ? 'y' : 'ies'} from this session:\n${saved.join('\n')}${dupeNote}`
-            : `DevBrain: session recorded. Everything in it was already saved.${dupeNote}`,
-        }],
+    // ── search_knowledge ──────────────────────────────────────────────────────
+    if (name === 'search_knowledge') {
+      const { query, error_pattern, type, category, since_days, project_path, limit } = (args ?? {}) as {
+        query?: string; error_pattern?: string; type?: string; category?: EntryCategory;
+        since_days?: number; project_path?: string; limit?: number;
       };
+      const callerProject = await projectAt();
+      const scope = project_path ? await projectAt(project_path) : null;
+      const cutoff = since_days ? Date.now() - since_days * 86_400_000 : 0;
+      const keep = (e: Entry) =>
+        !e.supersededBy &&
+        (!type || normalizeType(e.type) === normalizeType(type)) &&
+        (!cutoff || e.createdAt >= cutoff) &&
+        (!scope || e.projectId === scope.id);
+
+      const searchText = [query, error_pattern].filter(s => s?.trim()).join(' ');
+
+      // No query: a filtered listing, newest first (what query_entries did).
+      if (!searchText) {
+        const listed = (await getAllEntriesWithProjects())
+          .filter(e => keep(e) && (!category || e.category === category))
+          .sort((a, b) => b.createdAt - a.createdAt)
+          .slice(0, Math.min(limit ?? 20, 50));
+        if (!listed.length) {
+          const filters = [type, category, since_days ? `last ${since_days}d` : null, scope?.name].filter(Boolean).join(', ');
+          return { content: [{ type: 'text', text: `No entries${filters ? ` matching: ${filters}` : ''}.` }] };
+        }
+        await bumpRetrievalCounts(listed.map(e => e.id), callerProject?.id);
+        const text = listed.map((e, i) => renderEntry(e, i, `${e.project.name} · ${timeAgo(e.createdAt)}`)).join('\n\n');
+        return { content: [{ type: 'text', text: `DevBrain entries (${listed.length}):\n\n${text}` }] };
+      }
+
+      // A search. Empty embedding without an AI service: keywords rank instead.
+      const queryEmbedding = await getEmbedding(searchText).catch(() => [] as number[]);
+      const candidates = (await searchCandidates(queryEmbedding)).filter(keep);
+      const results = preciseSearch(searchText, queryEmbedding, candidates, {
+        category, topK: Math.min(limit ?? 6, 50), threshold: 0.45, projectId: callerProject?.id,
+      });
+      if (!results.length) {
+        return { content: [{ type: 'text', text: `No matches in DevBrain for: "${searchText}"` }] };
+      }
+      await bumpRetrievalCounts(results.map(r => r.entry.id), callerProject?.id);
+
+      const text = results.map((r, i) => {
+        const match  = r.matchType === 'pattern' ? 'pattern match' : similarityLabel(r.similarity);
+        const origin = r.sameProject ? 'this project' : `other project: ${r.project.name}`;
+        return renderEntry(r.entry as Entry & { project: { name: string } }, i, `${match} · ${origin} · ${timeAgo(r.entry.createdAt)}`);
+      }).join('\n\n');
+      return { content: [{ type: 'text', text:
+        `DevBrain results for "${searchText}":\n\n${text}\n\n` +
+        `If any of these is now wrong, save what is true with save_entry and pass its id as supersedes.` }] };
     }
 
-    // ── save_entry ────────────────────────────────────────────────────────────────
+    // ── save_entry ────────────────────────────────────────────────────────────
     if (name === 'save_entry') {
       const { type, title, content, tags = [], category, error_pattern, cause_archetype, project_path, supersedes } = args as {
         type: Entry['type']; title: string; content: string;
@@ -475,7 +306,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const cwd      = project_path ?? process.cwd();
       const repoRoot = getRepoRoot(cwd) ?? cwd;
       let project    = await getProjectByPath(repoRoot);
-
       if (!project) {
         project = {
           id: nanoid(), name: getProjectName(repoRoot), path: repoRoot,
@@ -484,7 +314,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         await upsertProject(project);
       }
 
-      // Auto-generate archetype when the agent doesn't supply one
+      // A correction: check the target first, so nothing is saved if it cannot apply.
+      const target = supersedes ? (await getAllEntriesWithProjects()).find(e => e.id === supersedes) : undefined;
+      if (target?.source) {
+        // Derived from a file, which stays the source of truth: retracting it
+        // here would be undone by the next `devbrain index`.
+        return { content: [{ type: 'text', text:
+          `DevBrain: that entry is indexed from ${target.source.file}, which is the source of truth — ` +
+          `a correction here would be reverted on the next index.\n` +
+          `Correct it at: ${target.source.heading}, then run \`devbrain index\`.` }] };
+      }
+
+      // Optional: an AI-written archetype when the agent gave none.
       const archetype = cause_archetype
         ?? (await autoArchetype(title, content, type).catch(() => null))
         ?? undefined;
@@ -492,302 +333,48 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       let embedding: number[] | undefined;
       try { embedding = await getEmbedding(`${title} ${content} ${tags.join(' ')}`); } catch {}
 
-      // Agents save the same insight repeatedly across a long task. The hook and
-      // backfill have always deduplicated; this path — the one agents use most —
-      // did not, so it was the largest remaining source of near-identical entries.
-      {
-        // With no embedding (no AI configured), compare titles instead.
-        const dupe = embedding
-          ? await findDuplicate(embedding, project.id).catch(() => null)
-          : await findTextDuplicate(title, project.id).catch(() => null);
-        if (dupe) {
-          return {
-            content: [{ type: 'text', text:
-              `DevBrain: already known — this matches an existing entry, so nothing was added.\n` +
-              `Existing: [${normalizeType(dupe.entry.type)}] ${dupe.entry.title}\n` +
-              `If your version adds something the existing entry lacks, save it with a title that states the new detail.` }],
-          };
-        }
+      // Agents restate the same insight across a long task. Embeddings when there
+      // are any, titles otherwise. The entry being corrected is naturally similar
+      // to its correction, so it never counts as the duplicate.
+      const dupe = embedding
+        ? await findDuplicate(embedding, project.id).catch(() => null)
+        : await findTextDuplicate(title, project.id).catch(() => null);
+      if (dupe && dupe.entry.id !== supersedes) {
+        return { content: [{ type: 'text', text:
+          `DevBrain: already known — this matches an existing entry, so nothing was added.\n` +
+          `Existing: [${normalizeType(dupe.entry.type)}] ${dupe.entry.title} (id: ${dupe.entry.id})\n` +
+          `If yours adds something it lacks, save it with a title that states the new detail. ` +
+          `If the existing one is wrong, pass its id as supersedes.` }] };
       }
 
       const newId = nanoid();
       await insertEntry({
         id: newId, projectId: project.id,
-        // Clip on a word boundary: a title cut mid-token ("existing token ")
-        // is the first thing anyone reads about an entry.
+        // Clip on a word boundary: a title cut mid-token is the first thing anyone reads.
         type, title: clip(title, 120), content, tags,
         embedding, createdAt: Date.now(), confidence: 'observation',
-        ...(category   ? { category }                    : {}),
-        ...(error_pattern ? { errorPattern: error_pattern } : {}),
-        ...(archetype  ? { causeArchetype: archetype }   : {}),
+        ...(category      ? { category }                      : {}),
+        ...(error_pattern ? { errorPattern: error_pattern }   : {}),
+        ...(archetype     ? { causeArchetype: archetype }     : {}),
       });
 
       // Retract in the same call that records the correction, so the wrong
       // entry cannot go on being recalled next to the right one.
       let retracted = '';
       if (supersedes) {
-        const old = (await getAllEntriesWithProjects()).find(e => e.id === supersedes);
-        if (old && !old.supersededBy) {
+        if (target && !target.supersededBy) {
           await supersedeEntry(supersedes, newId);
-          retracted = `\nRetracted: "${clip(old.title, 70)}" — it will no longer surface.`;
-        } else if (!old) {
+          retracted = `\nRetracted: "${clip(target.title, 70)}" — it will no longer surface.`;
+        } else if (!target) {
           retracted = `\nNote: no entry with id ${supersedes}, so nothing was retracted.`;
         }
       }
 
       const confirmation = saveConfirmation(type, title, category, archetype, error_pattern);
-      return {
-        content: [{ type: 'text', text: `DevBrain: ${confirmation}${retracted}` }],
-      };
+      return { content: [{ type: 'text', text: `DevBrain: ${confirmation}${retracted}` }] };
     }
 
-    // â”€â”€ search_knowledge â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    // ── supersede_entry ─────────────────────────────────────────────────────
-    if (name === 'supersede_entry') {
-      const { id, reason, project_path } = args as { id: string; reason: string; project_path?: string };
-      const repoRoot = getRepoRoot(project_path ?? process.cwd()) ?? (project_path ?? process.cwd());
-      const project  = await getProjectByPath(repoRoot);
-
-      const target = (await getAllEntriesWithProjects()).find(e => e.id === id);
-      if (!target) {
-        return { content: [{ type: 'text', text:
-          `DevBrain: no entry with id ${id}. Run search_knowledge and use the id shown with the result.` }] };
-      }
-      if (target.supersededBy) {
-        return { content: [{ type: 'text', text: 'DevBrain: that entry was already superseded.' }] };
-      }
-
-      // A derived entry is owned by the file it came from. Retracting it here
-      // would be undone by the next index, so send the correction where it will
-      // actually stick — and where a human reviews it.
-      if (target.source) {
-        return { content: [{ type: 'text', text:
-          `DevBrain: that entry is indexed from ${target.source.file}, which is the source of truth — ` +
-          `retracting it here would be reverted on the next index.\n` +
-          `Correct it at: ${target.source.heading}\n` +
-          `Then run \`devbrain index\` (or just commit) and the entry follows.\n\n` +
-          `If what you learned is new rather than a correction to that section, save it with save_entry instead.` }] };
-      }
-
-      // Record what is true now as its own entry, then point the old one at it.
-      // A bare retraction throws away the correction; this keeps the reasoning
-      // that replaced it.
-      const correctionId = nanoid();
-      let embedding: number[] | undefined;
-      try { embedding = await getEmbedding(`${target.title} ${reason}`); } catch {}
-      await insertEntry({
-        id: correctionId,
-        projectId: project?.id ?? target.projectId,
-        type: 'lesson',
-        title: clip(`Corrected: ${target.title}`, 100),
-        content: reason,
-        tags: ['correction'],
-        embedding,
-        createdAt: Date.now(),
-        confidence: 'observation',
-      });
-      await supersedeEntry(id, correctionId);
-
-      return { content: [{ type: 'text', text:
-        `DevBrain: retracted "${clip(target.title, 80)}".\n` +
-        `It no longer appears in context or search. The correction is saved as ${correctionId}.` }] };
-    }
-
-    if (name === 'search_knowledge') {
-      const { query, category, error_pattern } = args as {
-        query: string; category?: EntryCategory; error_pattern?: string;
-      };
-      const searchText     = error_pattern ? `${query} ${error_pattern}` : query;
-      // Empty without an AI service: preciseSearch then ranks by keywords.
-      const queryEmbedding = await getEmbedding(searchText).catch(() => [] as number[]);
-
-      // Atlas Vector Search — fast ANN retrieval, then re-rank with preciseSearch.
-      const candidates = await searchCandidates(queryEmbedding);
-
-      const callerProject = await getProjectByPath(getRepoRoot(process.cwd()) ?? process.cwd()).catch(() => null);
-
-      const results = preciseSearch(searchText, queryEmbedding, candidates, {
-        category, topK: 6, threshold: 0.45, projectId: callerProject?.id,
-      });
-
-      if (results.length === 0) {
-        return { content: [{ type: 'text', text: `No matches found in DevBrain for: "${query}"` }] };
-      }
-
-      await bumpRetrievalCounts(results.map(r => r.entry.id), callerProject?.id);
-
-      const text = results.map((r, i) => {
-        const matchLabel = r.matchType === 'pattern' ? 'pattern match' : similarityLabel(r.similarity);
-        const catLabel   = r.entry.category ? ` [${r.entry.category}]` : '';
-        // Mark where the knowledge came from, and expose the id — without it an
-        // agent that spots a wrong entry has no way to name it for correction.
-        const origin = r.sameProject ? 'this project' : `other project: ${r.project.name}`;
-        return (
-          `${i + 1}. [${r.entry.type}]${catLabel} ${r.entry.title}\n` +
-          `   ${matchLabel} · ${origin} · ${timeAgo(r.entry.createdAt)}\n` +
-          `   id: ${r.entry.id}\n` +
-          (r.entry.errorPattern ? `   pattern: ${r.entry.errorPattern}\n` : '') +
-          `   ${r.entry.content}` +
-          (r.entry.tags.length ? `\n   tags: ${r.entry.tags.join(', ')}` : '')
-        );
-      }).join('\n\n');
-
-      return { content: [{ type: 'text', text:
-        `DevBrain results for "${query}":\n\n${text}\n\n` +
-        `If any of these is now wrong, correct it with supersede_entry(id, reason) ` +
-        `or save_entry(..., supersedes: id) — an entry nobody retracts keeps being recalled as true.` }] };
-    }
-
-    // â”€â”€ get_project_summary â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    if (name === 'get_project_summary') {
-      const { project_path } = ((args ?? {}) as { project_path?: string });
-      const cwd      = project_path ?? process.cwd();
-      const repoRoot = getRepoRoot(cwd) ?? cwd;
-      const project  = await getProjectByPath(repoRoot);
-
-      if (!project) {
-        return { content: [{ type: 'text', text: 'Project not tracked in DevBrain. Run: devbrain init' }] };
-      }
-
-      const entries = await getEntriesByProject(project.id);
-      const counts  = { bug: 0, fix: 0, note: 0, decision: 0, pattern: 0, lesson: 0, stack: 0, solution: 0 };
-      for (const e of entries) { if (e.type in counts) counts[e.type as keyof typeof counts]++; }
-
-      const recent = entries.slice(0, 6).map(e =>
-        `  [${e.type}] ${clip(e.title, 80)} (${timeAgo(e.createdAt)})`
-      ).join('\n');
-
-      const summary = [
-        `Project: ${project.name}`,
-        `Stack:   ${project.stack.join(', ') || 'Unknown'}`,
-        `Entries: ${entries.length} total`,
-        `         ${Object.entries(counts).filter(([, n]) => n > 0).map(([t, n]) => `${n} ${t}s`).join(' · ')}`,
-        entries.length ? `\nRecent:\n${recent}` : '',
-      ].filter(Boolean).join('\n');
-
-      return { content: [{ type: 'text', text: summary }] };
-    }
-
-    // â”€â”€ get_context â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    if (name === 'get_context') {
-      const { query, project_path } = ((args ?? {}) as { query?: string; project_path?: string });
-      const cwd      = project_path ?? process.cwd();
-      const repoRoot = getRepoRoot(cwd) ?? cwd;
-      const project  = await getProjectByPath(repoRoot);
-      const all      = await getAllEntriesWithProjects();
-
-      let queryEmbedding: number[] | undefined;
-      if (query?.trim()) {
-        try { queryEmbedding = await getEmbedding(query); } catch {}
-      }
-
-      const raw  = buildContext(all, project ?? null, queryEmbedding, query);
-      const ctx  = await compressContext(raw);
-      const text = formatContext(ctx, query);
-
-      const retrievedIds = [
-        ...raw.issues, ...raw.decisions, ...raw.patterns, ...raw.antiPatterns, ...raw.stacks,
-        ...(raw.crossProjectPatterns ?? []),
-      ].map(r => r.entry.id);
-      await bumpRetrievalCounts(retrievedIds, project?.id);
-
-      return { content: [{ type: 'text', text }] };
-    }
-
-    // â”€â”€ query_entries â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    if (name === 'query_entries') {
-      const { type, category, project_path, since_days, limit = 20 } = (args ?? {}) as {
-        type?: string; category?: EntryCategory; project_path?: string;
-        since_days?: number; limit?: number;
-      };
-
-      const all = await getAllEntriesWithProjects();
-      const cutoff = since_days ? Date.now() - since_days * 86_400_000 : 0;
-
-      let filtered = all.filter(e => {
-        if (e.supersededBy) return false;
-        if (type && e.type !== type) return false;
-        if (category && e.category !== category) return false;
-        if (cutoff && e.createdAt < cutoff) return false;
-        if (project_path) {
-          const root = getRepoRoot(project_path) ?? project_path;
-          const proj = all.find(x => x.project.path === root);
-          if (proj && e.projectId !== proj.project.id) return false;
-        }
-        return true;
-      });
-
-      filtered.sort((a, b) => b.createdAt - a.createdAt);
-      filtered = filtered.slice(0, Math.min(limit, 50));
-
-      if (filtered.length === 0) {
-        const filters = [type, category, since_days ? `last ${since_days}d` : null].filter(Boolean).join(', ');
-        return { content: [{ type: 'text', text: `No entries found${filters ? ` matching: ${filters}` : ''}.` }] };
-      }
-
-      const callerProject = await getProjectByPath(getRepoRoot(process.cwd()) ?? process.cwd()).catch(() => null);
-      await bumpRetrievalCounts(filtered.map(e => e.id), callerProject?.id);
-
-      const text = filtered.map((e, i) => {
-        const catLabel  = e.category ? ` [${e.category}]` : '';
-        const conf      = e.confidence && e.confidence !== 'observation' ? ` · ${e.confidence}` : '';
-        const crossBadge = (e.seenInProjects?.length ?? 0) >= 2 ? ` · ×${e.seenInProjects!.length} projects` : '';
-        return (
-          `${i + 1}. [${e.type}]${catLabel} ${e.title}\n` +
-          `   ${e.project.name} · ${timeAgo(e.createdAt)}${conf}${crossBadge}\n` +
-          (e.errorPattern   ? `   pattern: ${e.errorPattern}\n`      : '') +
-          (e.causeArchetype ? `   archetype: ${e.causeArchetype}\n`   : '') +
-          `   ${e.content.slice(0, 200)}` +
-          (e.tags.length    ? `\n   tags: ${e.tags.join(', ')}`       : '')
-        );
-      }).join('\n\n');
-
-      const header = `DevBrain entries${type ? ` · type:${type}` : ''}${category ? ` · category:${category}` : ''}${since_days ? ` · last ${since_days}d` : ''} (${filtered.length} results)`;
-      return { content: [{ type: 'text', text: `${header}\n\n${text}` }] };
-    }
-
-    // ── query_knowledge_db ──────────────────────────────────────────────────────
-    if (name === 'query_knowledge_db') {
-      const { collection = 'entries', type, category, since_days, limit = 10 } = (args ?? {}) as {
-        collection?: string; type?: string; category?: string;
-        since_days?: number; limit?: number;
-      };
-
-      const filter: Record<string, unknown> = {};
-      if (type)       filter['type']     = type;
-      if (category)   filter['category'] = category;
-      if (since_days) filter['createdAt'] = { $gte: Date.now() - since_days * 86_400_000 };
-
-      const { documents, summary } = await mongoMcpFind(collection, {
-        filter: Object.keys(filter).length ? filter : undefined,
-        projection: { embedding: 0 },
-        limit: Math.min(limit, 25),
-        sort: { createdAt: -1 },
-      });
-
-      if (documents.length === 0) {
-        return { content: [{ type: 'text', text: `MongoDB MCP: no documents found in ${collection}` }] };
-      }
-
-      const rows = documents.map((d, i) => {
-        const doc = d as Record<string, unknown>;
-        const title    = String(doc.title    ?? '');
-        const entryType = String(doc.type    ?? '');
-        const cat      = String(doc.category ?? '');
-        const content  = String(doc.content  ?? '').slice(0, 150);
-        const ts       = typeof doc.createdAt === 'number' ? timeAgo(doc.createdAt) : '';
-        return `${i + 1}. [${entryType}]${cat ? ' [' + cat + ']' : ''} ${title}\n   ${ts}\n   ${content}`;
-      }).join('\n\n');
-
-      return {
-        content: [{
-          type: 'text',
-          text: `MongoDB MCP • ${summary}\n\n${rows}`,
-        }],
-      };
-    }
-
-    return { content: [{ type: 'text', text: `Unknown tool: ${name}` }], isError: true };
+    return { content: [{ type: 'text', text: `Unknown tool: ${name}. DevBrain has get_context, search_knowledge and save_entry.` }], isError: true };
 
   } catch (err) {
     return {
@@ -796,6 +383,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     };
   }
 });
+
 
   return server;
 }

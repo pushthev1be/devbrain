@@ -5,11 +5,6 @@ export interface Project {
   stack: string[];
   createdAt: number;
   lastSeen: number;
-  /**
-   * Work that task_start opened and task_end never closed. Left set, it is the
-   * evidence that a session happened and was never written down. See sessions.ts.
-   */
-  openSession?: { projectId: string; description: string; startedAt: number } | null;
 }
 
 export const ENTRY_CATEGORIES = [
@@ -182,18 +177,6 @@ export interface SearchResult {
   entry: Entry;
   similarity: number;
   project: Project;
-}
-
-export interface ExtractedKnowledge {
-  problem: string;
-  solution: string;
-  tags: string[];
-  // Any type a diff can justify — previously capped at bug|fix|note, which meant a
-  // commit could never record a decision, pattern or anti-pattern.
-  type: EntryType;
-  category?: EntryCategory;
-  errorPattern?: string;
-  causeArchetype?: string;
 }
 
 export interface CommitInfo {

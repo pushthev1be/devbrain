@@ -140,6 +140,17 @@ export async function isCommitProcessed(hash: string): Promise<boolean> {
   return !!(await db.collection('processedCommits').findOne({ hash }));
 }
 
+/** The hashes, of those given, that have not been reviewed yet. One query. */
+export async function filterUnprocessedCommits(hashes: string[]): Promise<string[]> {
+  if (!hashes.length) return [];
+  if (useLocal()) return local.filterUnprocessedCommits(hashes);
+  const db = await getDb();
+  const done = await db.collection('processedCommits')
+    .find({ hash: { $in: hashes } }, { projection: { hash: 1 } }).toArray();
+  const seen = new Set(done.map(d => d.hash as string));
+  return hashes.filter(h => !seen.has(h));
+}
+
 export async function markCommitProcessed(hash: string, projectId: string): Promise<void> {
   if (useLocal()) return local.markCommitProcessed(hash, projectId);
   const db = await getDb();

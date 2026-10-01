@@ -15,12 +15,12 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 // The work is genuinely slow rather than stuck, so give it room.
 vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 import { execSync } from 'child_process';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'fs';
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync, readFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import {
   isGitRepo, getRepoRoot, getLastCommit, getRecentCommits, countCommits,
-  installGitHook, isHookInstalled,
+  removeGitHook, isHookInstalled,
 } from './git';
 
 let repo: string;
@@ -183,19 +183,26 @@ describe('countCommits', () => {
 
 // ── hook ──────────────────────────────────────────────────────────────────────
 
-describe('git hook', () => {
-  it('reports not installed before install', () => {
+describe('git hook (legacy)', () => {
+  const hook = () => join(repo, '.git', 'hooks', 'post-commit');
+
+  it('reports not installed when there is none', () => {
     expect(isHookInstalled(repo)).toBe(false);
+    expect(removeGitHook(repo)).toBe(false);
   });
 
-  it('installs a post-commit hook that calls devbrain capture', () => {
-    installGitHook(repo);
+  it('removes the hook an earlier version installed', () => {
+    mkdirSync(join(repo, '.git', 'hooks'), { recursive: true });
+    writeFileSync(hook(), '#!/bin/sh\ndevbrain capture 2>/dev/null || true\n');
     expect(isHookInstalled(repo)).toBe(true);
+    expect(removeGitHook(repo)).toBe(true);
+    expect(existsSync(hook())).toBe(false);
   });
 
-  it('is idempotent', () => {
-    installGitHook(repo);
-    installGitHook(repo);
-    expect(isHookInstalled(repo)).toBe(true);
+  it('keeps other commands in a shared hook file', () => {
+    mkdirSync(join(repo, '.git', 'hooks'), { recursive: true });
+    writeFileSync(hook(), '#!/bin/sh\nnpm run lint\ndevbrain capture 2>/dev/null || true\n');
+    removeGitHook(repo);
+    expect(readFileSync(hook(), 'utf-8')).toBe('#!/bin/sh\nnpm run lint\n');
   });
 });

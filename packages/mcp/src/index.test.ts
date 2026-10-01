@@ -63,11 +63,11 @@ vi.mock('@devbrain/core', async importOriginal => {
   findDuplicate:    vi.fn().mockResolvedValue(null),
   isDuplicateEntry: vi.fn().mockResolvedValue(false),
 
-  // Session tracking is exercised in sessions.test.ts against the real store.
-  startSession:            vi.fn().mockResolvedValue(undefined),
-  endSession:              vi.fn().mockResolvedValue(undefined),
-  getAbandonedSession:     vi.fn().mockResolvedValue(null),
-  describeAbandonedSession: real.describeAbandonedSession,
+  findTextDuplicate: vi.fn().mockResolvedValue(null),
+
+  // Two of the last three commits are unreviewed.
+  listCommitHashes:          vi.fn().mockReturnValue(['a', 'b', 'c']),
+  filterUnprocessedCommits:  vi.fn().mockResolvedValue(['a', 'b']),
   getProjectByPath:          vi.fn().mockResolvedValue(mockProject),
   upsertProject:             vi.fn().mockResolvedValue(undefined),
   insertEntry:               vi.fn().mockResolvedValue(undefined),
@@ -101,23 +101,12 @@ vi.mock('@devbrain/core', async importOriginal => {
   }]),
   vectorSearch:              vi.fn().mockRejectedValue(new Error('no index in test')),
   autoArchetype:             vi.fn().mockResolvedValue('missing cleanup in async lifecycle'),
-  recapSession:              vi.fn().mockResolvedValue([{
-    type: 'fix', title: 'Fixed memory leak in useEffect',
-    content: 'Added cleanup callback to remove event listener on unmount',
-    tags: ['react', 'hooks'], category: 'performance',
-    errorPattern: 'MaxListenersExceededWarning',
-    causeArchetype: 'missing cleanup callback in lifecycle subscription',
-  }]),
   supersedeEntry:            vi.fn().mockResolvedValue(undefined),
   reinforceEntry:            vi.fn().mockResolvedValue(undefined),
   deleteEntry:               vi.fn().mockResolvedValue(undefined),
   RateLimitError:            class RateLimitError extends Error { retryAfter = 60; },
   };
 });
-
-vi.mock('./mongoMcp', () => ({
-  mongoMcpFind: vi.fn().mockResolvedValue({ documents: [], summary: '0 documents' }),
-}));
 
 vi.mock('./agent', () => ({
   runAgent: vi.fn().mockResolvedValue('Agent response'),
@@ -153,44 +142,26 @@ async function callTool(
 // ── tests ─────────────────────────────────────────────────────────────────────
 
 describe('MCP tool: get_context', () => {
-  it('returns a formatted context string', async () => {
+  it('heads the briefing with what get_project_summary used to report', async () => {
     const client = await buildTestClient();
-    const result = await callTool(client, 'get_context', { query: 'auth' });
-    expect(result.isError).toBeFalsy();
-    expect(result.content[0].type).toBe('text');
-    expect(result.content[0].text.length).toBeGreaterThan(10);
-  });
-});
-
-describe('MCP tool: task_start', () => {
-  it('returns a project briefing scoped to the task', async () => {
-    const client = await buildTestClient();
-    const result = await callTool(client, 'task_start', {
-      description: 'fix auth token expiry bug',
-    });
-    expect(result.isError).toBeFalsy();
-    expect(result.content[0].text).toContain('test-project');
-  });
-});
-
-describe('MCP tool: task_end', () => {
-  it('extracts and saves entries from a session summary', async () => {
-    const client = await buildTestClient();
-    const result = await callTool(client, 'task_end', {
-      summary: 'Fixed a memory leak by adding cleanup to the useEffect hook. MaxListenersExceededWarning is gone.',
-    });
-    expect(result.isError).toBeFalsy();
-    expect(result.content[0].text).toContain('DevBrain:');
-    expect(result.content[0].text).toContain('saved');
+    const text = (await callTool(client, 'get_context', {})).content[0].text;
+    expect(text).toContain('Project: test-project');
+    expect(text).toContain('2 entries (1 fix · 1 decision)');
   });
 
-  it('confirms how many entries were extracted', async () => {
+  it('points at backfill when commits have not been reviewed', async () => {
     const client = await buildTestClient();
-    const result = await callTool(client, 'task_end', {
-      summary: 'Fixed memory leak. Added cleanup to useEffect.',
-    });
-    // recapSession mock returns 1 entry
-    expect(result.content[0].text).toContain('1 knowledge entry');
+    const text = (await callTool(client, 'get_context', {})).content[0].text;
+    expect(text).toContain('2 past commits not reviewed yet');
+    expect(text).toContain('devbrain backfill');
+  });
+
+  it('says so when the project is not registered', async () => {
+    const { getProjectByPath } = await import('@devbrain/core');
+    vi.mocked(getProjectByPath).mockResolvedValueOnce(null);
+    const client = await buildTestClient();
+    const text = (await callTool(client, 'get_context', {})).content[0].text;
+    expect(text).toContain('devbrain init');
   });
 });
 
@@ -199,7 +170,7 @@ describe('MCP tool: save_entry', () => {
     const client = await buildTestClient();
     const result = await callTool(client, 'save_entry', {
       type: 'fix',
-      title: 'Fixed JWT expiry in prod',
+      title: 'JWT expiry differs in prod',
       content: 'Set TOKEN_EXPIRY=86400 in .env',
       tags: ['jwt', 'auth'],
       category: 'auth',
@@ -220,26 +191,51 @@ describe('MCP tool: save_entry', () => {
     expect(result.content[0].text).toContain('DevBrain:');
   });
 
-  it('auto-generates cause_archetype when not provided', async () => {
-    const { autoArchetype } = await import('@devbrain/core');
+  it('retracts the entry it corrects, in the same call', async () => {
+    const { supersedeEntry } = await import('@devbrain/core');
     const client = await buildTestClient();
-    await callTool(client, 'save_entry', {
-      type: 'bug',
-      title: 'Memory leak in event emitter',
-      content: 'Listener not removed on component unmount',
-    });
-    expect(autoArchetype).toHaveBeenCalled();
+    const text = (await callTool(client, 'save_entry', {
+      type: 'fix', title: 'JWT expiry is set by the identity provider, not .env',
+      content: 'TOKEN_EXPIRY is ignored; the IdP issues the exp claim.', supersedes: 'e1',
+    })).content[0].text;
+    expect(supersedeEntry).toHaveBeenCalledWith('e1', expect.any(String));
+    expect(text).toContain('Retracted');
+  });
+
+  it('does not let the entry being corrected block its correction as a duplicate', async () => {
+    // A correction is naturally similar to what it corrects. Counting that as
+    // "already known" meant the wrong entry could never be retracted.
+    const core = await import('@devbrain/core');
+    vi.mocked(core.findDuplicate).mockResolvedValueOnce({ entry: mockFix as never, similarity: 0.95 });
+    const client = await buildTestClient();
+    const text = (await callTool(client, 'save_entry', {
+      type: 'fix', title: 'JWT token expires in production — the real cause',
+      content: 'The IdP sets exp.', supersedes: 'e1',
+    })).content[0].text;
+    expect(text).not.toContain('already known');
+    expect(text).toContain('Retracted');
+  });
+
+  it('refuses to retract an entry indexed from a file, and points at the file', async () => {
+    const core = await import('@devbrain/core');
+    vi.mocked(core.getAllEntriesWithProjects).mockResolvedValueOnce([
+      { ...mockFix, source: { file: 'CLAUDE.md', anchor: 'a', hash: 'h', heading: 'Auth > JWT', indexedAt: 1 } },
+    ] as never);
+    const client = await buildTestClient();
+    const text = (await callTool(client, 'save_entry', {
+      type: 'fix', title: 'x is wrong', content: 'y', supersedes: 'e1',
+    })).content[0].text;
+    expect(text).toContain('CLAUDE.md');
+    expect(core.insertEntry).not.toHaveBeenCalledWith(expect.objectContaining({ title: 'x is wrong' }));
   });
 });
 
 describe('MCP tool: search_knowledge', () => {
-  it('returns results for a query', async () => {
+  it('returns results for a query, each with an id', async () => {
     const client = await buildTestClient();
-    const result = await callTool(client, 'search_knowledge', {
-      query: 'JWT token expiry',
-    });
-    expect(result.isError).toBeFalsy();
-    expect(result.content[0].text).toContain('DevBrain results');
+    const text = (await callTool(client, 'search_knowledge', { query: 'JWT token expiry' })).content[0].text;
+    expect(text).toContain('DevBrain results');
+    expect(text).toMatch(/id: e1/);
   });
 
   it('passes error_pattern through to preciseSearch', async () => {
@@ -256,80 +252,51 @@ describe('MCP tool: search_knowledge', () => {
       expect.objectContaining({ topK: 6 })
     );
   });
-});
 
-describe('MCP tool: get_project_summary', () => {
-  it('returns project name and entry counts', async () => {
+  it('with no query, lists entries by filter (what query_entries did)', async () => {
     const client = await buildTestClient();
-    const result = await callTool(client, 'get_project_summary', {});
-    expect(result.isError).toBeFalsy();
-    expect(result.content[0].text).toContain('test-project');
-  });
-});
-
-describe('MCP tool: query_entries', () => {
-  it('returns entries with header', async () => {
-    const client = await buildTestClient();
-    const result = await callTool(client, 'query_entries', { type: 'fix' });
-    expect(result.isError).toBeFalsy();
-    expect(result.content[0].text).toContain('DevBrain entries');
+    const text = (await callTool(client, 'search_knowledge', { type: 'decision' })).content[0].text;
+    expect(text).toContain('DevBrain entries (1)');
+    expect(text).toContain('Use JWT over sessions');
+    expect(text).not.toContain('JWT token expires');
   });
 
-  it('filters by category', async () => {
+  it('applies type filters to a search too', async () => {
+    const { preciseSearch } = await import('@devbrain/core');
     const client = await buildTestClient();
-    const result = await callTool(client, 'query_entries', { category: 'auth' });
-    expect(result.isError).toBeFalsy();
-    expect(result.content[0].text).toContain('category:auth');
+    await callTool(client, 'search_knowledge', { query: 'jwt', type: 'decision' });
+    const candidates = vi.mocked(preciseSearch).mock.calls.at(-1)![2] as { id: string }[];
+    expect(candidates.map(c => c.id)).toEqual(['e2']);
   });
 });
 
 describe('MCP tools list', () => {
-  it('exposes exactly the expected tools', async () => {
+  it('exposes exactly the three tools', async () => {
     const client = await buildTestClient();
     const { tools } = await client.listTools();
-    // Compare the whole set rather than counting: adding a tool without listing
-    // it here should fail with the name, not with "expected 8, got 9".
-    expect(tools.map(t => t.name).sort()).toEqual([
-      'get_context',
-      'get_project_summary',
-      'query_entries',
-      'query_knowledge_db',
-      'save_entry',
-      'search_knowledge',
-      'supersede_entry',
-      'task_end',
-      'task_start',
-    ]);
+    // Compare the whole set: adding a tool without listing it here should fail
+    // with its name.
+    expect(tools.map(t => t.name).sort()).toEqual(['get_context', 'save_entry', 'search_knowledge']);
   });
 
-  it('lets an agent retract an entry it has found to be wrong', async () => {
-    // Retraction was implemented in core but reachable only from a button in the
-    // dashboard, so an agent that discovered a stored entry was false had no way
-    // to say so. A memory that can only append eventually recalls something
-    // untrue with full confidence.
+  it('tells the agent how to correct a wrong entry', async () => {
     const client = await buildTestClient();
     const { tools } = await client.listTools();
-    const supersede = tools.find(t => t.name === 'supersede_entry')!;
-    expect(supersede.description).toMatch(/wrong or out of date/i);
-    expect(Object.keys(supersede.inputSchema.properties as object)).toEqual(
-      expect.arrayContaining(['id', 'reason']),
-    );
+    const save = tools.find(t => t.name === 'save_entry')!;
+    expect(save.description).toMatch(/supersedes/);
+    expect(Object.keys(save.inputSchema.properties as object)).toContain('supersedes');
   });
 
-  it('gives search results an id, so a wrong entry can be named', async () => {
+  it('answers an old tool name with the current ones', async () => {
     const client = await buildTestClient();
-    const res = await client.callTool({
-      name: 'search_knowledge', arguments: { query: 'jwt expiry' },
-    }) as { content: { text: string }[] };
-    expect(res.content[0].text).toMatch(/id: /);
+    const result = await callTool(client, 'task_start', { description: 'x' });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('get_context, search_knowledge and save_entry');
   });
 
   it('tool descriptions contain imperative CALL THIS language', async () => {
     const client = await buildTestClient();
     const { tools } = await client.listTools();
-    const task_start = tools.find(t => t.name === 'task_start')!;
-    const save_entry = tools.find(t => t.name === 'save_entry')!;
-    expect(task_start.description).toMatch(/CALL THIS FIRST/);
-    expect(save_entry.description).toMatch(/CALL THIS/);
+    for (const t of tools) expect(t.description).toMatch(/CALL THIS/);
   });
 });
