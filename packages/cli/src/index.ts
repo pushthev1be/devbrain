@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import 'dotenv/config';
-import { join } from 'path';
-import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync } from 'fs';
+import { join, dirname, basename } from 'path';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync, appendFileSync, readdirSync, statSync } from 'fs';
+import { spawn } from 'child_process';
 import {
   getProjectByPath, upsertProject, insertEntry,
   getEntriesByProject, getAllEntriesWithProjects,
@@ -18,6 +19,8 @@ import {
   buildDossier, formatDossierMarkdown, dossierFiles,
   isDuplicateEntry, getAbandonedSession, describeAbandonedSession, clip,
   parseMarkdownSource, planIndex, entryForSection,
+  captureSession, saveExtracted, formatSessionBriefing,
+  withDevbrainHooks, withoutDevbrainHooks, installedDevbrainHooks,
 } from '@devbrain/core';
 import type { Entry, Project, EntryCategory } from '@devbrain/core';
 import { nanoid } from 'nanoid';
@@ -292,6 +295,16 @@ async function handleInit(): Promise<void> {
       console.log(`  ${YELLOW}⚠${RESET}  Not a git repo — add notes manually`);
     }
 
+    // Commits are only half of it: the reasoning lives in the agent session.
+    // Local settings, so teammates without DevBrain installed are unaffected.
+    try {
+      const path = agentSettingsPath(repoRoot, false);
+      writeAgentSettings(path, withDevbrainHooks(readAgentSettings(path)));
+      console.log(`  ${GREEN}✓${RESET} Claude Code hooks installed — sessions captured and briefed automatically`);
+    } catch (err) {
+      console.log(`  ${YELLOW}⚠${RESET}  Could not install Claude Code hooks: ${explainError(err)}`);
+    }
+
     // Write DEV_CONTEXT.md so AI agents call DevBrain tools automatically
     const devContextMdPath = join(repoRoot, 'DEV_CONTEXT.md');
     const devbrainBlock = [
@@ -343,9 +356,18 @@ async function handleInit(): Promise<void> {
       '- **Error pattern**: if there is an exact error message, always include it verbatim',
       '- **Cause archetype**: name the abstract pattern ("environment config divergence", "missing cleanup in teardown")',
       '',
-      '### At the end of every session — write the recap yourself',
+      '### Capture is automatic in Claude Code',
       '',
-      'Do not ask the user to paste a transcript. You have the session context; you',
+      'With DevBrain\'s Claude Code hooks installed (`devbrain hooks status`), this',
+      'session is read in the background: fixes, decisions and lessons are extracted',
+      'from what actually happened, and project memory is injected when a session',
+      'starts. Saving explicitly is still worth it when something is non-obvious and',
+      'you can state it better than the transcript shows.',
+      '',
+      '### At the end of every session — write the recap yourself (other agents)',
+      '',
+      'Without the hooks (any agent other than Claude Code), nothing reads the session,',
+      'so do not ask the user to paste a transcript. You have the session context; you',
       'write the summary and pipe it to DevBrain. Before you finish a session in which',
       'you fixed, decided, or learned anything, run:',
       '',
@@ -372,7 +394,7 @@ async function handleInit(): Promise<void> {
       '- Run `devbrain context` before starting any non-trivial task — no exceptions.',
       '- Run `devbrain search` before debugging any error you have not seen before.',
       '- Save proactively — if you had to think to solve it, save it.',
-      '- End every substantive session with `devbrain recap "<summary>"` — unprompted.',
+      '- Without the Claude Code hooks, end every substantive session with `devbrain recap "<summary>"` — unprompted.',
       '- Past commits are imported automatically; you never need to run `devbrain backfill`.',
       '- **Never reimplement devbrain** — run `devbrain --help` to confirm it is installed.',
       '',
@@ -775,6 +797,206 @@ async function handleCapture(): Promise<void> {
   // Sweep up anything the hook missed — commits made while offline, rate-limited,
   // or before DevBrain was installed here.
   await maybeAutoBackfill(AUTO_SWEEP);
+}
+
+// ─── agent sessions: background capture and recall ───────────────────────────
+
+const captureLogPath = join(devbrainDir, 'capture.log');
+
+function captureLog(message: string): void {
+  try {
+    mkdirSync(devbrainDir, { recursive: true });
+    appendFileSync(captureLogPath, `[${new Date().toISOString()}] ${message}\n`, 'utf-8');
+  } catch { /* logging must never break capture */ }
+}
+
+function agentSettingsPath(repoRoot: string, global: boolean): string {
+  return global
+    ? join(homedir(), '.claude', 'settings.json')
+    : join(repoRoot, '.claude', 'settings.local.json');
+}
+
+function readAgentSettings(path: string): Record<string, unknown> {
+  if (!existsSync(path)) return {};
+  const raw = readFileSync(path, 'utf-8').replace(/^﻿/, '').trim();
+  // Refuse to overwrite a file we cannot parse — it is the user's config.
+  return raw ? JSON.parse(raw) : {};
+}
+
+function writeAgentSettings(path: string, settings: Record<string, unknown>): void {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
+}
+
+/** Hook input on stdin. Bounded wait: a hook must never hang the agent. */
+function readHookInput(): Promise<Record<string, unknown>> {
+  if (process.stdin.isTTY) return Promise.resolve({});
+  return Promise.race([
+    readStdin(),
+    // unref: once stdin has ended, a pending safety timer must not keep the
+    // process — and so the agent — waiting out its full two seconds.
+    new Promise<string>(resolve => setTimeout(() => resolve(''), 2000).unref()),
+  ]).then(text => { try { return JSON.parse(text) as Record<string, unknown>; } catch { return {}; } });
+}
+
+/**
+ * Entry point for the agent harness (`devbrain hook <event>`).
+ *
+ * Exits 0 whatever happens: a failure here must never block or disturb the
+ * agent. Capture events hand off to a detached worker and return at once, so
+ * the agent does not wait on Gemini or the database after every turn.
+ */
+async function handleHook(event: string): Promise<void> {
+  try {
+    const input = await readHookInput();
+    const cwd = typeof input.cwd === 'string' ? input.cwd : process.cwd();
+
+    if (event === 'session-start') {
+      const repoRoot = getRepoRoot(cwd) ?? cwd;
+      const project = await getProjectByPath(repoRoot);
+      if (!project) return;
+      const all = await getAllEntriesWithProjects();
+      const briefing = formatSessionBriefing(buildContext(all, project));
+      if (!briefing) return;
+      process.stdout.write(JSON.stringify({
+        hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: briefing },
+      }));
+      return;
+    }
+
+    const mode = event === 'stop' ? 'turn' : 'final';
+    if (!['stop', 'pre-compact', 'session-end'].includes(event)) return;
+    const transcript = input.transcript_path;
+    const sessionId = input.session_id;
+    if (typeof transcript !== 'string' || typeof sessionId !== 'string') return;
+
+    const child = spawn(process.execPath, [
+      process.argv[1], 'learn', transcript,
+      '--session', sessionId, '--cwd', cwd, '--mode', mode, '--background',
+    ], { detached: true, stdio: 'ignore', windowsHide: true, env: process.env });
+    child.unref();
+  } catch (err) {
+    captureLog(`hook ${event} failed: ${explainError(err)}`);
+  }
+}
+
+function flag(args: string[], name: string): string | undefined {
+  const i = args.indexOf(name);
+  return i >= 0 ? args[i + 1] : undefined;
+}
+
+/** Claude Code keeps a project's transcripts in a folder named after its path. */
+function transcriptsFor(repoRoot: string): string[] {
+  const dir = join(homedir(), '.claude', 'projects', repoRoot.replace(/[^A-Za-z0-9]/g, '-'));
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir)
+    .filter(f => f.endsWith('.jsonl'))
+    .map(f => join(dir, f))
+    .sort((a, b) => statSync(a).mtimeMs - statSync(b).mtimeMs);
+}
+
+/**
+ * `devbrain learn [transcript]` — extract knowledge from agent sessions.
+ *
+ * With a transcript path it processes that session (this is what the hook's
+ * detached worker runs). With none, it works through every past Claude Code
+ * session for this project, so session memory does not start empty either.
+ */
+async function handleLearn(args: string[]): Promise<void> {
+  const background = args.includes('--background');
+  const positional = args.filter((a, i) => !a.startsWith('--') && !args[i - 1]?.match(/^--(session|cwd|mode)$/));
+  const cwd = flag(args, '--cwd') ?? process.cwd();
+  const repoRoot = getRepoRoot(cwd) ?? cwd;
+  const mode = flag(args, '--mode') === 'turn' ? 'turn' : 'final';
+
+  const project = await getProjectByPath(repoRoot);
+  if (!project) {
+    if (!background) {
+      console.log(`\n  ${YELLOW}Not a DevBrain project:${RESET} ${repoRoot}`);
+      console.log(`  ${DIM}Run ${RESET}${CYAN}devbrain init${RESET}${DIM} here first. Only registered projects are captured.${RESET}\n`);
+    }
+    return;
+  }
+
+  const files = positional[0] ? [positional[0]] : transcriptsFor(repoRoot);
+  if (!files.length) {
+    if (!background) console.log(`\n  ${DIM}No Claude Code sessions found for ${project.name}.${RESET}\n`);
+    return;
+  }
+  if (!background) console.log(`\n  ${BOLD}Learning from ${files.length} session${files.length === 1 ? '' : 's'}${RESET} ${DIM}— ${project.name}${RESET}\n`);
+
+  let total = 0;
+  for (const file of files) {
+    const sessionId = flag(args, '--session') ?? basename(file, '.jsonl');
+    let result;
+    try {
+      result = await captureSession({ transcriptPath: file, sessionId, projectId: project.id, mode });
+    } catch (err) {
+      // Detached workers have no terminal; the log is the only place this shows.
+      captureLog(`${project.name} ${sessionId.slice(0, 8)} ${mode}: failed — ${explainError(err)}`);
+      if (!background) console.log(`  ${RED}✗${RESET} ${basename(file)}: ${explainError(err)}`);
+      continue;
+    }
+    total += result.saved.length;
+
+    const tag = sessionId.slice(0, 8);
+    if (result.saved.length || result.status === 'rate-limited') {
+      captureLog(`${project.name} ${tag} ${mode}: ${result.status}, saved ${result.saved.length}, ${result.duplicates} already known` +
+        result.saved.map(e => `\n    [${e.type}] ${e.title}`).join(''));
+    }
+    if (!background) {
+      for (const e of result.saved) console.log(`  ${GREEN}✓${RESET} ${typeDot(e.type)} ${e.title}`);
+    }
+    if (result.status === 'rate-limited') {
+      if (!background) console.log(`\n  ${YELLOW}Gemini rate limit reached.${RESET} ${DIM}Re-run later — it resumes where it stopped.${RESET}`);
+      break;
+    }
+  }
+
+  if (!background) {
+    console.log(total
+      ? `\n  ${GREEN}✓${RESET} Saved ${BOLD}${total}${RESET} entr${total === 1 ? 'y' : 'ies'} from agent sessions\n`
+      : `  ${DIM}Nothing new worth keeping — already captured, or routine work.${RESET}\n`);
+  }
+}
+
+/** `devbrain hooks [install|uninstall|status] [--global]` */
+async function handleHooks(args: string[]): Promise<void> {
+  const action = args.find(a => !a.startsWith('--')) ?? 'status';
+  const global = args.includes('--global');
+  const repoRoot = getRepoRoot(process.cwd()) ?? process.cwd();
+  const path = agentSettingsPath(repoRoot, global);
+  const scope = global ? 'all projects (user settings)' : 'this project (.claude/settings.local.json)';
+
+  if (action === 'install') {
+    writeAgentSettings(path, withDevbrainHooks(readAgentSettings(path)));
+    console.log(`\n  ${GREEN}✓${RESET} Claude Code hooks installed for ${scope}`);
+    console.log(`  ${DIM}${path}${RESET}`);
+    console.log(`  ${DIM}Sessions start briefed with project memory, and fixes and decisions are captured`);
+    console.log(`  in the background as you work. Only projects registered with devbrain init are captured.${RESET}`);
+    console.log(`  ${DIM}Restart Claude Code (or run /hooks) for it to pick them up.${RESET}\n`);
+    return;
+  }
+  if (action === 'uninstall') {
+    writeAgentSettings(path, withoutDevbrainHooks(readAgentSettings(path)));
+    console.log(`\n  ${GREEN}✓${RESET} DevBrain hooks removed from ${scope}\n`);
+    return;
+  }
+
+  console.log(`\n  ${BOLD}Agent hooks${RESET}`);
+  for (const [label, p] of [['project', agentSettingsPath(repoRoot, false)], ['global ', agentSettingsPath(repoRoot, true)]] as const) {
+    let events: string[] = [];
+    try { events = installedDevbrainHooks(readAgentSettings(p)); } catch { events = ['(unreadable settings file)']; }
+    console.log(`  ${label}  ${events.length ? `${GREEN}${events.join(', ')}${RESET}` : `${DIM}not installed${RESET}`}`);
+  }
+  if (existsSync(captureLogPath)) {
+    const recent = readFileSync(captureLogPath, 'utf-8').trimEnd().split('\n').slice(-12);
+    console.log(`\n  ${BOLD}Recent background capture${RESET} ${DIM}(${captureLogPath})${RESET}`);
+    for (const l of recent) console.log(`  ${DIM}${l}${RESET}`);
+  } else {
+    console.log(`\n  ${DIM}No background capture yet.${RESET}`);
+  }
+  console.log();
 }
 
 // ─── index: treat a Markdown file as a source of truth ────────────────────────
@@ -1787,23 +2009,14 @@ async function handleRecap(sessionText?: string): Promise<void> {
     await upsertProject(project);
   }
 
-  let saved = 0;
-  for (const e of extracted) {
-    let embedding: number[] | undefined;
-    try { embedding = await getEmbedding(`${e.title} ${e.content} ${e.tags.join(' ')}`); } catch {}
-    await insertEntry({
-      id: nanoid(), projectId: project.id,
-      type: e.type, title: clip(e.title, 120), content: e.content,
-      tags: e.tags, embedding, createdAt: Date.now(), confidence: 'observation',
-      ...(e.category      ? { category: e.category as EntryCategory }   : {}),
-      ...(e.errorPattern  ? { errorPattern: e.errorPattern }            : {}),
-      ...(e.causeArchetype ? { causeArchetype: e.causeArchetype }       : {}),
-    });
-    saved++;
-  }
+  // Shared with background capture: a recap restates things that were already
+  // saved mid-session, so near-duplicates are skipped rather than stored again.
+  const { saved: savedEntries, duplicates } = await saveExtracted(project.id, extracted);
+  const saved = savedEntries.length;
+  if (duplicates) console.log(`  ${DIM}${duplicates} already known — not duplicated.${RESET}`);
 
   console.log(bar);
-  console.log(`  ${GREEN}✓${RESET} Saved ${BOLD}${saved}${RESET} entr${saved > 1 ? 'ies' : 'y'} to DevBrain\n`);
+  console.log(`  ${GREEN}✓${RESET} Saved ${BOLD}${saved}${RESET} entr${saved === 1 ? 'y' : 'ies'} to DevBrain\n`);
 }
 
 // ─── first-run onboarding ─────────────────────────────────────────────────────
@@ -2251,6 +2464,7 @@ async function handleInteractive(): Promise<void> {
 // a missing credential prints setup guidance instead of a driver stack trace.
 const COMMAND_NEEDS: Record<string, Requirement[]> = {
   capture:  ['ai'],
+  learn:    ['ai'],
   search:   ['ai'],
   recap:    ['ai'],
   backfill: ['ai'],
@@ -2273,6 +2487,10 @@ async function main(): Promise<void> {
       // the wrapped command from running.
       case 'run':     await handleRun(args.slice(1));              break;
       case 'index':   await handleIndex(args[1]);                  break;
+      // Called by Claude Code, not by people. Never fails, never preflights.
+      case 'hook':    await handleHook(args[1] ?? '');             break;
+      case 'hooks':   await handleHooks(args.slice(1));            break;
+      case 'learn':   await handleLearn(args.slice(1));            break;
       case 'project': case 'projects': {
         const rest  = args.slice(1).filter(a => a !== '--write');
         const write = args.includes('--write');
@@ -2305,6 +2523,8 @@ async function main(): Promise<void> {
         console.log(`  ${CYAN}devbrain prompt${RESET}        Generate DEV_CONTEXT.md block + ingestion prompt`);
         console.log(`  ${CYAN}devbrain recap${RESET}         AI-extract + save knowledge from a session`);
         console.log(`  ${CYAN}devbrain capture${RESET}       Extract knowledge from the last commit ${DIM}(git hook)${RESET}`);
+        console.log(`  ${CYAN}devbrain learn${RESET} ${MAGENTA}[file]${RESET}  Extract knowledge from past agent sessions`);
+        console.log(`  ${CYAN}devbrain hooks${RESET} ${MAGENTA}[install]${RESET} Capture + brief Claude Code sessions automatically ${DIM}(--global)${RESET}`);
         console.log(`  ${CYAN}devbrain open${RESET}          Open ~/.devbrain in file explorer\n`);
         console.log(`  ${DIM}Set DEVBRAIN_DEBUG=1 to see full stack traces on error.${RESET}\n`);
         break;

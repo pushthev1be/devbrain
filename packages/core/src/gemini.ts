@@ -33,6 +33,12 @@ function rethrowIfRateLimit(err: unknown): never {
   if (msg.includes('429') || msg.includes('RESOURCE_EXHAUSTED')) {
     throw new RateLimitError(parseRetryDelay(msg));
   }
+  // "This model is currently experiencing high demand" — transient capacity, not
+  // a bad request. Callers already know how to stop and resume on a rate limit,
+  // which is exactly the right response to this too.
+  if (/\b503\b|UNAVAILABLE|overloaded/i.test(msg)) {
+    throw new RateLimitError(30);
+  }
   throw err;
 }
 
@@ -469,6 +475,138 @@ export async function recapSession(sessionText: string): Promise<RecapEntry[]> {
     return Array.isArray(parsed) ? parsed as RecapEntry[] : [];
   } catch {
     return [];
+  }
+}
+
+// ── session capture ───────────────────────────────────────────────────────────
+
+/** Most entries one stretch of a session may produce. More is a sign of narration. */
+const SESSION_ENTRY_CAP = 4;
+
+/**
+ * Apply the same mechanical quality bar as commit capture to session entries,
+ * plus one check only a transcript allows: an error pattern must appear
+ * verbatim in the evidence. A paraphrased "error" matches nothing when someone
+ * later pastes the real one, so it is dropped rather than stored.
+ */
+export function finalizeSessionEntries(raw: unknown, evidence: string): RecapEntry[] {
+  if (!Array.isArray(raw)) return [];
+  const out: RecapEntry[] = [];
+  for (const item of raw as Record<string, unknown>[]) {
+    if (!item || typeof item !== 'object') continue;
+    const type = RECAP_TYPES.includes(String(item.type)) ? normalizeType(String(item.type)) : null;
+    if (!type) continue;
+    const errorPattern = typeof item.errorPattern === 'string' && evidence.includes(item.errorPattern.trim())
+      ? item.errorPattern.trim()
+      : undefined;
+    const checked = enforceEntryQuality({
+      problem: String(item.title ?? ''),
+      solution: String(item.content ?? ''),
+      tags: Array.isArray(item.tags) ? item.tags as string[] : [],
+      type,
+      category: ENTRY_CATEGORIES.includes(item.category as EntryCategory) ? item.category as EntryCategory : 'other',
+      errorPattern,
+      // A label like "syntax_error" names a bucket, not a transferable mistake;
+      // an archetype is a phrase ("escaping lost across two string layers").
+      causeArchetype: typeof item.causeArchetype === 'string' && /\s/.test(item.causeArchetype.trim())
+        ? item.causeArchetype
+        : undefined,
+    });
+    if (!checked) continue;
+    out.push({
+      type: checked.type,
+      title: checked.problem,
+      content: checked.solution,
+      tags: checked.tags,
+      category: checked.category,
+      ...(checked.errorPattern ? { errorPattern: checked.errorPattern } : {}),
+      ...(checked.causeArchetype ? { causeArchetype: checked.causeArchetype } : {}),
+    });
+    if (out.length >= SESSION_ENTRY_CAP) break;
+  }
+  return out;
+}
+
+/**
+ * Extract knowledge from a digest of a live coding session (see transcript.ts).
+ *
+ * Unlike recapSession, nobody summarised this: it is raw evidence — the user's
+ * words, failing output, edits, the agent's explanations. So the prompt holds it
+ * to the commit extractor's bar (symptom, cause, fix) and defaults to nothing.
+ * `background` is earlier session text already processed; it is there so a fix
+ * can be understood in light of the error that preceded it, not to be re-saved.
+ */
+export async function extractSessionKnowledge(digest: string, background = ''): Promise<RecapEntry[]> {
+  if (process.env.DEVBRAIN_MOCK === 'true') {
+    const error = digest.match(/^ERROR(?: \[[^\]]*\])?: (.+)$/m)?.[1];
+    if (!error) return [];
+    return finalizeSessionEntries([{
+      type: 'fix',
+      title: `Session fix for ${error.slice(0, 60)}`,
+      content: 'Mock extraction: the cause and the fix as stated by the agent in this session.',
+      tags: ['mock'],
+      category: 'other',
+      errorPattern: error,
+    }], digest);
+  }
+
+  if (!hasGeminiCreds()) throw new Error('No Gemini credentials configured (set GOOGLE_GENAI_USE_VERTEXAI + GOOGLE_CLOUD_PROJECT, or GEMINI_API_KEY)');
+
+  const prompt = `You read a developer's coding session with an AI agent and decide what, if anything, is worth remembering.
+
+The transcript is evidence, not a summary. Lines are:
+  USER:   what the developer asked or said (corrections from the user are strong signals)
+  AGENT:  what the AI agent explained or concluded
+  RAN:    a shell command
+  ERROR:  failing output, verbatim (the command that produced it is in [brackets] before the colon)
+  EDITED: a file that was changed
+
+Most sessions contain nothing worth keeping. Your default is an empty array.
+
+Keep an item ONLY if a developer facing the same situation months from now would be
+saved real time by it. Each item must be one of:
+  - a fix: a SYMPTOM someone could observe again, the CAUSE that was not obvious from
+    it, and the exact FIX. All three must be supported by the transcript.
+  - a decision: what was chosen, what was rejected, and why — only if the transcript
+    states the reason.
+  - a lesson or anti-pattern: something that looked right and was wrong, and why.
+  - a stack fact: a version, flag or environment behaviour that bites when forgotten.
+
+NEVER keep:
+  - what the agent did ("updated X", "added tests", "refactored Y") without a problem behind it
+  - explanations of how the code works that the code itself shows
+  - plans, TODOs, or anything not actually established in the session
+  - a fix the session did not confirm worked — if the last ERROR is never resolved, skip it
+  - anything from BACKGROUND (it was processed already; it is only there for context)
+
+WRITING RULES:
+  - "title" is the SYMPTOM or the decision, searchable, under 90 characters. Start with
+    the component. Not a narration: never "The X was missing" or "Fixed the Y".
+  - "content" states the cause, then the exact fix or reason — with the specific flag,
+    setting, command, version or line that mattered.
+  - "errorPattern" must be COPIED EXACTLY from an ERROR line — a substring someone could
+    paste into a search. If you would have to paraphrase, omit it.
+  - "tags": at most 4, lowercase, what a searcher would type.
+  - "causeArchetype": the transferable class of mistake as a short phrase, e.g.
+    "escaping lost across two layers of string interpolation" — not a label like
+    "syntax_error". Omit if there is none.
+  - At most ${SESSION_ENTRY_CAP} items. One well-stated fix beats three thin ones.
+${background ? `\nBACKGROUND (already processed — context only):\n${background.slice(-3000)}\n` : ''}
+SESSION:
+${digest}
+
+Return ONLY a JSON array, no markdown:
+[{"type": one of [${RECAP_TYPES.join(' | ')}], "title": "...", "content": "...", "tags": [], "category": one of [${ENTRY_CATEGORIES.join(' | ')}], "errorPattern": "...", "causeArchetype": "..."}]
+or [] if nothing qualifies.`;
+
+  try {
+    const text = await generateText(prompt);
+    const match = text.match(/\[[\s\S]*\]/);
+    if (!match) return [];
+    return finalizeSessionEntries(JSON.parse(match[0]), digest);
+  } catch (err) {
+    if (err instanceof SyntaxError) return [];
+    rethrowIfRateLimit(err);
   }
 }
 
