@@ -206,7 +206,8 @@ export function bm25Score(query: string, entryId: string, idx: KeywordIndex): nu
  * without readmitting the unrelated-query matches, since noise rarely scores on
  * both wording and meaning at once.
  *
- * Measured by sweeping both against the 38-query set: 0.60/0.12 recovers every
+ * Measured by sweeping both against the evaluation set — 30 queries with a known
+ * answer and 8 about problems never recorded: 0.60/0.12 recovers every
  * paraphrase the single threshold missed while still answering none of the eight
  * problems that were never recorded. Lowering SEMANTIC_THRESHOLD to 0.60 instead
  * admits one of them, so what holds the line is the pairing, not the lower floor.
