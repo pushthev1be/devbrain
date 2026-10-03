@@ -53,6 +53,12 @@ describe('agent hook settings', () => {
     expect(withoutDevbrainHooks(withDevbrainHooks({})).hooks).toBeUndefined();
   });
 
+  it('installs PostToolUse per shell tool, so recall fires when a command fails', () => {
+    const groups = withDevbrainHooks({}).hooks!.PostToolUse;
+    expect(groups.map(g => g.matcher)).toEqual(['Bash', 'PowerShell']);
+    expect(groups[0].hooks[0].command).toContain('hook post-tool');
+  });
+
   it('recognises a hook pointed at an absolute devbrain path', () => {
     const s = { hooks: { Stop: [{ hooks: [{ type: 'command', command: '"C:/tools/devbrain.cmd" hook stop' }] }] } };
     expect(installedDevbrainHooks(s)).toEqual(['Stop']);

@@ -19,7 +19,8 @@ import {
   isDuplicateEntry, findTextDuplicate, clip,
   parseMarkdownSource, planIndex, entryForSection,
   formatSessionBriefing, briefingEntries, isAlreadyInAgentContext,
-  readCursor, writeCursor, reviewTurn,
+  readCursor, writeCursor, markSurfaced, reviewTurn,
+  looksLikeError, isReadOnlyCommand, recallForFailure, formatRecallForAgent,
   withDevbrainHooks, withoutDevbrainHooks, installedDevbrainHooks,
   nextSessionChunk, formatBackfillBatch, commitExcerpt, BACKFILL_BATCH_BUDGET,
 } from '@devbrain/core';
@@ -332,6 +333,8 @@ async function handleInit(): Promise<void> {
       '### What DevBrain does for you (Claude Code, with `devbrain hooks install`)',
       '',
       '- At session start, this project\'s memory is put in your context.',
+      '- When a shell command fails and memory holds the same error, the past fix is handed to you',
+      '  unasked. You do not have to remember to search — but searching still finds more.',
       '- When a stretch of work fixes or decides something and you saved nothing,',
       '  DevBrain asks you to record it before you finish. Saving earlier means it never has to ask.',
       '- If it mentions unreviewed commits, run `devbrain backfill` when there is a pause,',
@@ -624,6 +627,43 @@ async function handleHook(event: string): Promise<void> {
       if (!briefing) return;
       process.stdout.write(JSON.stringify({
         hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: briefing },
+      }));
+      return;
+    }
+
+    // A shell command just ran. If it failed and memory holds a literal match
+    // for the error, hand it to the agent now — this is the moment recall pays
+    // off, and the moment an agent is least likely to go looking.
+    if (event === 'post-tool') {
+      const output = typeof input.tool_output === 'string'
+        ? input.tool_output
+        : JSON.stringify(input.tool_output ?? '');
+      const command = String((input.tool_input as { command?: unknown } | undefined)?.command ?? '');
+
+      // Decided before touching the database: most commands succeed, and a
+      // hook that runs after every one of them must cost nothing when idle.
+      if (!looksLikeError(output, false) || isReadOnlyCommand(command)) return;
+      const failure = extractFailure(output);
+      if (!failure) return;
+
+      const sessionId = typeof input.session_id === 'string' ? input.session_id : '';
+      const project = await getProjectByPath(getRepoRoot(cwd) ?? cwd);
+      if (!project) return;
+
+      const hits = recallForFailure(failure, await getAllEntriesWithProjects(), {
+        projectId: project.id,
+        // Pushing the same past fix after every retry of a flaky command would
+        // teach the agent to tune the whole channel out.
+        exclude: sessionId ? readCursor(sessionId).surfaced ?? [] : [],
+      });
+      const message = formatRecallForAgent(failure, hits);
+      if (!message) return;
+
+      if (sessionId) markSurfaced(sessionId, hits.map(h => h.entry.id));
+      bumpRetrievalCounts(hits.map(h => h.entry.id), project.id).catch(() => {});
+      captureLog(`${project.name} ${sessionId.slice(0, 8)}: recalled ${hits.length} for "${clip(failure, 60)}"`);
+      process.stdout.write(JSON.stringify({
+        hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: message },
       }));
       return;
     }

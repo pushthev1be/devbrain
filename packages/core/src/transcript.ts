@@ -48,6 +48,17 @@ const ERROR_LINE =
 // is full of the word Error; only the tool reporting failure counts for these.
 const READ_COMMAND = /^\s*(?:cd\s+\S+\s*&&\s*)?(?:cat|sed\s+-n|head|tail|less|grep|rg|ls|find|git\s+(?:show|diff|log|grep|blame)|Get-Content|Select-String|type)\b/;
 
+/**
+ * True when a command only prints files or searches them.
+ *
+ * Their output is source code, which is full of the word Error, so error
+ * detection on it produces false failures. Only the tool reporting a non-zero
+ * exit counts for these.
+ */
+export function isReadOnlyCommand(command: string): boolean {
+  return READ_COMMAND.test(command);
+}
+
 // Wrappers the IDE and harness put into user turns. They are context for the
 // agent, not something the user asked.
 const NOISE_TAGS = /<(system-reminder|ide_opened_file|ide_selection|ide_diagnostics|command-message|command-name|command-args|local-command-stdout|local-command-stderr|pasted_content)[^>]*>[\s\S]*?<\/\1>/g;

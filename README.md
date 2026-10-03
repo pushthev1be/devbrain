@@ -20,6 +20,7 @@ curl -X POST https://devbrain-oujuoveyvq-uc.a.run.app/agent \
 **The agent writes; DevBrain stores.** The coding agent that did the work already holds the whole story in its context — the error, the dead ends, why the fix works. It states that better than any second model reading a transcript afterwards, so it writes every entry, through the `save_entry` MCP tool or `devbrain note`. What agents lacked was a trigger they could not forget, so DevBrain supplies the triggers, mechanically and without a model:
 
 - **Session start** — the project's memory is put into the agent's context (a Claude Code hook).
+- **When a command fails** — the error text is matched against stored error patterns, and a literal hit is handed to the agent unasked, in the moment it would otherwise go looking. Writing was never the hard half; this is the read trigger.
 - **After each turn** — DevBrain checks the session locally. If the turn resolved an error or made a stated decision and nothing was saved, it asks the agent once, showing it the error text and files involved. The agent writes the entry; routine turns cost nothing.
 - **Past work** — commits and sessions from before DevBrain was installed are handed to the agent with `devbrain backfill`, in batches it reads and saves from.
 

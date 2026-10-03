@@ -48,13 +48,24 @@ export function briefingEntries<T extends Entry>(all: T[], projectId?: string): 
   return all.filter(e => !isAlreadyInAgentContext(e, projectId));
 }
 
-export const HOOK_EVENTS = ['SessionStart', 'Stop'] as const;
+export const HOOK_EVENTS = ['SessionStart', 'PostToolUse', 'Stop'] as const;
 export type HookEvent = typeof HOOK_EVENTS[number];
 
 const HOOK_ARG: Record<HookEvent, string> = {
   SessionStart: 'session-start',
+  PostToolUse: 'post-tool',
   Stop: 'stop',
 };
+
+/**
+ * Tool calls PostToolUse is installed for, one group each.
+ *
+ * Only shell tools: the point is recalling a past fix when a command fails, and
+ * a failure is something a shell reports. Written as separate matcher groups
+ * rather than one alternation, because a plain tool name is the one matcher
+ * spelling every Claude Code version accepts.
+ */
+const POST_TOOL_MATCHERS = ['Bash', 'PowerShell'];
 
 /** The CLI argument for a hook event, e.g. `devbrain hook stop`. */
 export function hookArg(event: HookEvent): string {
@@ -80,16 +91,18 @@ export function withDevbrainHooks(settings: Settings, binary = 'devbrain'): Sett
   const cleaned = withoutDevbrainHooks(settings);
   const hooks = { ...(cleaned.hooks ?? {}) };
   for (const event of HOOK_EVENTS) {
-    const group: HookGroup = {
-      hooks: [{
-        type: 'command',
-        command: `${binary} hook ${HOOK_ARG[event]}`,
-        // Both may read the store. Most Stop runs never do: the transcript check
-        // is local and decides first.
-        timeout: 20,
-      }],
+    const handler = {
+      type: 'command',
+      command: `${binary} hook ${HOOK_ARG[event]}`,
+      // Any of these may read the store, but most runs never do: each decides
+      // locally first — Stop from the transcript, PostToolUse from whether the
+      // output even looks like a failure.
+      timeout: 20,
     };
-    hooks[event] = [...(hooks[event] ?? []), group];
+    const groups: HookGroup[] = event === 'PostToolUse'
+      ? POST_TOOL_MATCHERS.map(matcher => ({ matcher, hooks: [handler] }))
+      : [{ hooks: [handler] }];
+    hooks[event] = [...(hooks[event] ?? []), ...groups];
   }
   return { ...cleaned, hooks };
 }
