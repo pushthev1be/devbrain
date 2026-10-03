@@ -57,13 +57,19 @@ function resultText(value) {
   }
 }
 
-/** The one line under the prompt, or nothing when there is nothing to report. */
+/**
+ * The one line under the prompt.
+ *
+ * It says something even at rest. A counter that is blank until the first save
+ * is indistinguishable from a mod that failed to load, which defeats the point
+ * of having a dial at all.
+ */
 function statusText() {
   const parts = [];
   if (saved.length > 0) parts.push(saved.length + ' saved');
   if (known > 0) parts.push(known + ' already known');
   if (recalled > 0) parts.push(recalled + ' recalled');
-  return parts.length > 0 ? 'DevBrain · ' + parts.join(' · ') : undefined;
+  return 'DevBrain · ' + (parts.length > 0 ? parts.join(' · ') : 'watching');
 }
 
 /**

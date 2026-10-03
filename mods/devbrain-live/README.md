@@ -10,7 +10,7 @@ DevBrain · 2 saved · 1 already known · 1 recalled
 
 DevBrain's hooks all speak to the *agent*: the briefing goes into its context, the save prompt goes to it, the recall after a failing command goes to it. None of it is addressed to the person watching, so from the outside a session looks identical whether memory is working or doing nothing at all. That is how this project went write-only for two days without anyone noticing.
 
-This is the dial on the outside of the box.
+This is the dial on the outside of the box. It reads `DevBrain · watching` while nothing has happened yet, so a loaded mod never looks like a broken one.
 
 - **saved** — entries recorded this session, through the `save_entry` MCP tool or `devbrain note`
 - **already known** — saves DevBrain rejected as near-duplicates. Counted separately so the line doesn't read as a failure, and doesn't inflate the saved count
