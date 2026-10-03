@@ -219,12 +219,36 @@ export async function bumpRetrievalCounts(ids: string[], fromProjectId?: string)
   );
 }
 
+/**
+ * Record that these entries were matched to a real failure.
+ *
+ * Separate from bumpRetrievalCounts because the two answer different questions:
+ * that one is "how often was this shown", this is "how often did it catch
+ * something". Only the second is evidence the entry was worth keeping.
+ */
+export async function bumpRecallCounts(ids: string[]): Promise<void> {
+  if (!ids.length) return;
+  if (useLocal()) return local.bumpRecallCounts(ids);
+  const db = await getDb();
+  await db.collection('entries').updateMany(
+    { id: { $in: ids } },
+    { $inc: { recallCount: 1 }, $set: { lastRecalledAt: Date.now() } }
+  );
+}
+
 export async function supersedeEntry(oldId: string, newId: string): Promise<void> {
   if (useLocal()) return local.supersedeEntry(oldId, newId);
   const db = await getDb();
+  const old = await db.collection('entries').findOne({ id: oldId });
   await db.collection('entries').updateOne(
     { id: oldId },
     { $set: { supersededBy: newId, supersededAt: Date.now() } }
+  );
+  // Carry the chain's depth onto the replacement: each correction is its own
+  // row, so without this a claim revised three times reads as brand new.
+  await db.collection('entries').updateOne(
+    { id: newId },
+    { $set: { supersedes: oldId, revisionCount: ((old?.revisionCount as number) ?? 0) + 1 } }
   );
 }
 

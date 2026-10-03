@@ -16,7 +16,7 @@ import {
   bumpRetrievalCounts, preciseSearch, vectorSearch,
   autoArchetype, supersedeEntry,
   ENTRY_TYPES, ENTRY_TYPE_NAMES, normalizeType,
-  buildDossier, describeStorage, findDuplicate, findTextDuplicate, clip,
+  buildDossier, describeStorage, findDuplicate, findTextDuplicate, clip, measureUse,
   filterUnprocessedCommits, listCommitHashes,
 } from '@devbrain/core';
 import type { EntryCategory } from '@devbrain/core';
@@ -567,12 +567,16 @@ const httpServer = createServer(async (req, res) => {
           if (!id) { json(res, 400, { error: 'id is required' }); return; }
           const project = (await getAllProjects()).find(p => p.id === id);
           if (!project) { json(res, 404, { error: 'project not found' }); return; }
-          const dossier = buildDossier(project, await getAllEntriesWithProjects());
+          const all = await getAllEntriesWithProjects();
+          const dossier = buildDossier(project, all);
           json(res, 200, {
             project: dossier.project,
             total: dossier.total,
             lastEntryAt: dossier.lastEntryAt,
             supersededCount: dossier.supersededCount,
+            // Whether any of this has ever caught a real failure, which is the
+            // only evidence the store is worth keeping.
+            use: measureUse(all.filter(e => e.projectId === project.id)),
             sections: dossier.sections.map(s => ({
               section: s.section, heading: s.heading, blurb: s.blurb,
               entries: s.entries.map(e => ({
@@ -585,6 +589,10 @@ const httpServer = createServer(async (req, res) => {
                 // Needed by the dashboard filters: how often this has been used,
                 // and whether it was captured from work or indexed from a file.
                 retrievalCount: e.retrievalCount ?? 0,
+                // Failures caught, and corrections made — kept apart from
+                // retrievalCount, which counts being shown rather than helping.
+                recallCount: e.recallCount ?? 0,
+                revisionCount: e.revisionCount ?? 0,
                 sourceFile: e.source?.file,
               })),
             })),

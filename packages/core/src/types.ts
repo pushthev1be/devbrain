@@ -143,6 +143,28 @@ export interface Entry {
   reinforcedCount?: number;
   lastRetrievedAt?: number;
   /**
+   * How often this entry was matched to a real failure and handed to an agent
+   * unasked — the one event that shows it earned its place.
+   *
+   * Deliberately apart from retrievalCount. That counts every surfacing, and
+   * the session briefing surfaces entries whether or not they turn out to be
+   * any use, so an entry can reach a high retrievalCount having never helped
+   * anyone. This only moves when a command actually failed and this entry
+   * matched the error.
+   */
+  recallCount?: number;
+  lastRecalledAt?: number;
+  /**
+   * How many times this knowledge has been corrected before arriving here.
+   *
+   * Each correction is a new row, so without carrying the depth forward a claim
+   * revised three times looks exactly like one written yesterday. A high count
+   * means unsettled, which is worth seeing next to the claim.
+   */
+  revisionCount?: number;
+  /** The entry this one corrects, so the chain can be walked backwards. */
+  supersedes?: string;
+  /**
    * Evidence that this entry is true — never how often it was read back.
    * observation  — recorded once, unverified
    * corroborated — a human confirmed it, or it recurred in a second project

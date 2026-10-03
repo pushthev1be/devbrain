@@ -185,12 +185,30 @@ export async function bumpRetrievalCounts(ids: string[], fromProjectId?: string)
   });
 }
 
+/** See db.ts: counts failures caught, not times shown. */
+export async function bumpRecallCounts(ids: string[]): Promise<void> {
+  if (!ids.length) return;
+  mutate(data => {
+    for (const entry of data.entries) {
+      if (!ids.includes(entry.id)) continue;
+      entry.recallCount = (entry.recallCount ?? 0) + 1;
+      entry.lastRecalledAt = Date.now();
+    }
+  });
+}
+
 export async function supersedeEntry(oldId: string, newId: string): Promise<void> {
   mutate(data => {
     const entry = data.entries.find(e => e.id === oldId);
     if (!entry) return;
     entry.supersededBy = newId;
     entry.supersededAt = Date.now();
+    // Carry the chain's depth onto the replacement.
+    const replacement = data.entries.find(e => e.id === newId);
+    if (replacement) {
+      replacement.supersedes = oldId;
+      replacement.revisionCount = (entry.revisionCount ?? 0) + 1;
+    }
   });
 }
 

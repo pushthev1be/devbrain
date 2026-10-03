@@ -171,6 +171,9 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
     .card.k-pattern, .card.k-lesson { border-left-color: var(--yellow); }
 
     .cmeta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; font-family: var(--mono); font-size: 11px; color: var(--text3); }
+    .caught { color: var(--green); }
+    .use { font-family: var(--mono); font-size: 11px; color: var(--text3); margin-top: 4px; }
+    .use.none { color: var(--yellow); }
     .cbody { color: var(--text2); font-size: 13px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
     .err { font-family: var(--mono); font-size: 11px; background: var(--surface2); border: 1px solid var(--border); padding: 6px 9px; border-radius: 3px; color: var(--yellow); margin-top: 7px; overflow-x: auto; }
     .arch { font-size: 12px; color: var(--purple); margin-top: 6px; }
@@ -379,7 +382,8 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
           // already contains an entity renders the entity as literal text.
           '<div class="pmeta">' +
           ((p.stack || []).length ? (p.stack).map(esc).join(' &middot; ') : 'stack not detected') +
-          ' &middot; ' + esc(p.path) + '</div></div>' +
+          ' &middot; ' + esc(p.path) + '</div>' +
+          useLine(d.use) + '</div>' +
           '<div class="actions">' +
           '<button class="btn" data-act="save-here">Save an entry here</button>' +
           '<button class="btn ghost" data-act="context">agent.md</button>' +
@@ -534,6 +538,24 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
       return body.trim();
     }
 
+    // Has any of this ever caught a real failure?
+    //
+    // Said plainly when the answer is none, rather than printed as a 0 that
+    // reads like a rounding error. A store nothing has recalled from is a
+    // diary, and the line should say so for as long as that is true.
+    function useLine(use) {
+      if (!use || !use.entries) return '';
+      if (!use.recalls) {
+        return '<div class="use none">no entry has caught a failure yet &mdash; ' +
+          'the count moves when a command fails and a stored error matches it</div>';
+      }
+      var pct = Math.round((use.earned / use.entries) * 100);
+      var txt = use.earned + ' of ' + use.entries + ' entries (' + pct + '%) have caught a failure &middot; ' +
+        use.recalls + (use.recalls === 1 ? ' catch' : ' catches') + ' in total';
+      if (use.revised) txt += ' &middot; ' + use.revised + ' revised';
+      return '<div class="use">' + txt + '</div>';
+    }
+
     function renderCard(e) {
       var type = esc(e.type);
       var meta = '';
@@ -543,6 +565,13 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
         meta += '<span class="conf-' + esc(e.confidence) + '">' + esc(e.confidence) + '</span>';
       }
       if (e.seenInProjects >= 2) meta += '<span>seen in ' + e.seenInProjects + ' projects</span>';
+      // Failures caught is the number that says this entry earned its place, so
+      // it is the one shown on the closed row.
+      if (e.recallCount > 0) {
+        meta += '<span class="caught">caught ' + e.recallCount +
+          (e.recallCount === 1 ? ' failure' : ' failures') + '</span>';
+      }
+      if (e.revisionCount > 0) meta += '<span>revised ' + e.revisionCount + 'x</span>';
       if (e.supersededBy) meta += '<span style="color:var(--red)">superseded</span>';
 
       var body = bodyOf(e);

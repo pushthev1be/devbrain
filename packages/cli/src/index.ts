@@ -11,11 +11,11 @@ import {
   getEmbedding,
   findSimilar, similarityLabel, timeAgo,
   buildContext, formatContext,
-  reinforceEntry, bumpRetrievalCounts, supersedeEntry,
+  reinforceEntry, bumpRetrievalCounts, bumpRecallCounts, supersedeEntry,
   preciseSearch, classifyQuery, deleteEntry,
   describeStorage, getLocalDbPath, closeDb,
   ENTRY_TYPES, normalizeType, getAllProjects,
-  buildDossier, formatDossierMarkdown, dossierFiles,
+  buildDossier, formatDossierMarkdown, dossierFiles, measureUse, describeUse,
   isDuplicateEntry, findTextDuplicate, clip,
   parseMarkdownSource, planIndex, entryForSection,
   formatSessionBriefing, briefingEntries, isAlreadyInAgentContext,
@@ -660,7 +660,11 @@ async function handleHook(event: string): Promise<void> {
       if (!message) return;
 
       if (sessionId) markSurfaced(sessionId, hits.map(h => h.entry.id));
-      bumpRetrievalCounts(hits.map(h => h.entry.id), project.id).catch(() => {});
+      const recalled = hits.map(h => h.entry.id);
+      bumpRetrievalCounts(recalled, project.id).catch(() => {});
+      // The one surfacing that shows the entry earned its place: a command
+      // failed and this entry matched it. Counted apart from being shown.
+      bumpRecallCounts(recalled).catch(() => {});
       captureLog(`${project.name} ${sessionId.slice(0, 8)}: recalled ${hits.length} for "${clip(failure, 60)}"`);
       process.stdout.write(JSON.stringify({
         hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: message },
@@ -964,7 +968,11 @@ async function handleRun(argv: string[]): Promise<void> {
       console.log();
     });
 
-    bumpRetrievalCounts(hits.map(r => r.entry.id), project?.id).catch(() => {});
+    const matched = hits.map(r => r.entry.id);
+    bumpRetrievalCounts(matched, project?.id).catch(() => {});
+    // `run` only looks anything up because the wrapped command failed, so every
+    // hit here is a failure caught, exactly as in the PostToolUse hook.
+    bumpRecallCounts(matched).catch(() => {});
     console.log(`${DIM}${'─'.repeat(W)}${RESET}\n`);
   } catch {
     // A memory lookup must never add noise to a failing build.
