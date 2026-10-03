@@ -1,0 +1,4 @@
+{
+  "description": "The devbrain-live hooks module",
+  "modules": ["./register.js"]
+}

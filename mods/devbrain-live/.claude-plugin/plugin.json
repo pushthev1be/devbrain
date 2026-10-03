@@ -1,0 +1,6 @@
+{
+  "name": "devbrain-live",
+  "version": "0.1.0",
+  "description": "Shows what DevBrain recorded and recalled this session, in the status line under the prompt",
+  "author": { "name": "DevBrain" }
+}

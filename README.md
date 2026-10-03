@@ -299,6 +299,14 @@ Read      devbrain context [task] · search <q> · project [name] [--write] · r
 
 `devbrain hooks status` also shows the last few times DevBrain asked an agent to record something (`~/.devbrain/capture.log`).
 
+### Watch it work
+
+Everything above talks to the agent, which means a session looks the same whether memory is working or idle. [`mods/devbrain-live`](mods/devbrain-live) is a Claude Code mod that pins the count under your prompt — `DevBrain · 2 saved · 1 already known · 1 recalled` — and lists the titles with `/devbrain-session`:
+
+```bash
+claude --plugin-dir ./mods/devbrain-live
+```
+
 ---
 
 ## Engineering & Architectural Decisions
