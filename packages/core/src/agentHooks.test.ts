@@ -18,7 +18,9 @@ vi.mock('os', async importOriginal => {
 
 import {
   withDevbrainHooks, withoutDevbrainHooks, installedDevbrainHooks, formatSessionBriefing, HOOK_EVENTS,
+  briefingEntries, isAlreadyInAgentContext,
 } from './agentHooks';
+import type { Entry } from './types';
 import { readCursor, writeCursor } from './sessionCursor';
 import { buildContext } from './search';
 import type { Project } from './types';
@@ -78,6 +80,54 @@ describe('formatSessionBriefing', () => {
     const text = formatSessionBriefing(buildContext([], project), { unreviewedCommits: 12 })!;
     expect(text).toContain('12 past commits');
     expect(text).toContain('devbrain backfill');
+  });
+
+  it('names what it left out, so the briefing does not read as everything stored', () => {
+    const text = formatSessionBriefing(buildContext([], project), {
+      indexedFromFile: { file: 'CLAUDE.md', count: 49 },
+    })!;
+    expect(text).toContain('49 further entries are indexed from CLAUDE.md');
+    expect(text).toContain('searchable by error text');
+  });
+});
+
+// ── not restating a file the agent already has ───────────────────────────────
+
+describe('briefingEntries', () => {
+  const sourced = (file: string, projectId = 'p1'): Entry => ({
+    id: `e-${file}-${projectId}`, projectId, type: 'lesson', title: `from ${file}`,
+    content: 'x', tags: [], createdAt: 1, confidence: 'observation',
+    source: { file, anchor: 'a', hash: 'h', heading: 'H', indexedAt: 1 },
+  });
+  const captured: Entry = {
+    id: 'own', projectId: 'p1', type: 'fix', title: 'captured from work',
+    content: 'x', tags: [], createdAt: 1, confidence: 'observation',
+  };
+
+  it('leaves out this project\'s CLAUDE.md — the agent already loaded it', () => {
+    expect(briefingEntries([captured, sourced('CLAUDE.md')], 'p1').map(e => e.id)).toEqual(['own']);
+    expect(isAlreadyInAgentContext(sourced('CLAUDE.md'), 'p1')).toBe(true);
+  });
+
+  it('keeps another project\'s CLAUDE.md — that is why the file is indexed', () => {
+    const other = sourced('CLAUDE.md', 'p2');
+    expect(briefingEntries([other], 'p1')).toEqual([other]);
+    expect(isAlreadyInAgentContext(other, 'p1')).toBe(false);
+  });
+
+  it('keeps a file the agent does not load on its own', () => {
+    for (const file of ['DEVBRAIN.md', 'docs/ENGINEERING.md']) {
+      expect(briefingEntries([sourced(file)], 'p1')).toHaveLength(1);
+    }
+  });
+
+  it('matches CLAUDE.md in a subdirectory, on either path separator', () => {
+    expect(isAlreadyInAgentContext(sourced('packages/api/CLAUDE.md'), 'p1')).toBe(true);
+    expect(isAlreadyInAgentContext(sourced('packages\\api\\AGENTS.md'), 'p1')).toBe(true);
+  });
+
+  it('keeps everything when the project is unknown', () => {
+    expect(briefingEntries([captured, sourced('CLAUDE.md')], undefined)).toHaveLength(2);
   });
 });
 

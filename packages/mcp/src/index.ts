@@ -410,12 +410,21 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       });
     }
 
-    const BASE_URL = `https://devbrain-715714057208.us-central1.run.app`;
+    // Whoever is serving this request is the server to advertise. Hardcoding one
+    // deployment's URL meant every copy of DevBrain published a spec pointing at
+    // that one host, which outlived its database and answered every call with a
+    // DNS failure. DEVBRAIN_PUBLIC_URL overrides for a proxy that rewrites Host.
+    function baseUrl(req: import('http').IncomingMessage): string {
+      const override = process.env.DEVBRAIN_PUBLIC_URL?.trim();
+      if (override) return override.replace(/\/+$/, '');
+      const host  = String(req.headers['x-forwarded-host'] ?? req.headers.host ?? `localhost:${PORT}`);
+      const proto = String(req.headers['x-forwarded-proto'] ?? (host.startsWith('localhost') ? 'http' : 'https')).split(',')[0];
+      return `${proto}://${host}`;
+    }
 
     const OPENAPI_SPEC = {
       openapi: '3.0.0',
       info: { title: 'DevBrain API', version: '1.0.0', description: 'Developer knowledge base — search past bugs, decisions, and patterns across projects.' },
-      servers: [{ url: BASE_URL }],
       paths: {
         '/api/search': {
           post: {
@@ -519,7 +528,7 @@ const httpServer = createServer(async (req, res) => {
       }
 
       if (req.method === 'GET' && url === '/openapi.json') {
-        json(res, 200, OPENAPI_SPEC); return;
+        json(res, 200, { ...OPENAPI_SPEC, servers: [{ url: baseUrl(req) }] }); return;
       }
 
       // ── projects ────────────────────────────────────────────────────────────

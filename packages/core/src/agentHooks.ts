@@ -14,8 +14,39 @@
 //
 // This file only edits the settings object; the CLI does the file I/O.
 
-import type { DevBrainContext } from './types';
+import type { DevBrainContext, Entry } from './types';
 import { formatContext } from './search';
+
+/**
+ * Files a coding agent already has in front of it without DevBrain's help.
+ * Claude Code loads CLAUDE.md and AGENTS.md into every session.
+ *
+ * So entries indexed from them must not go into the briefing: that would spend
+ * the agent's context restating a file it can already read, and a shorter
+ * version of it. They stay in search, and they still reach *other* projects —
+ * which is the actual point of indexing a file. CLAUDE.md is per-repo and
+ * cannot be searched by error text; indexing makes its knowledge findable by a
+ * pasted error and reusable in every other repo, without copying it anywhere.
+ */
+export const AGENT_LOADED_SOURCE_FILES = ['CLAUDE.md', 'AGENTS.md'];
+
+function baseName(file: string): string {
+  return file.replace(/\\/g, '/').split('/').pop() ?? file;
+}
+
+/** True when this entry came from a file the agent has already loaded itself. */
+export function isAlreadyInAgentContext(entry: Entry, projectId?: string): boolean {
+  return !!projectId && entry.projectId === projectId && !!entry.source
+    && AGENT_LOADED_SOURCE_FILES.includes(baseName(entry.source.file));
+}
+
+/**
+ * The entries a session-start briefing should rank over: everything except this
+ * project's own CLAUDE.md, which the agent already has.
+ */
+export function briefingEntries<T extends Entry>(all: T[], projectId?: string): T[] {
+  return all.filter(e => !isAlreadyInAgentContext(e, projectId));
+}
 
 export const HOOK_EVENTS = ['SessionStart', 'Stop'] as const;
 export type HookEvent = typeof HOOK_EVENTS[number];
@@ -93,12 +124,13 @@ const BRIEFING_BUDGET = 6000;
  */
 export function formatSessionBriefing(
   ctx: DevBrainContext,
-  opts: { unreviewedCommits?: number } = {},
+  opts: { unreviewedCommits?: number; indexedFromFile?: { file: string; count: number } } = {},
 ): string | null {
   const total = ctx.issues.length + ctx.decisions.length + ctx.architecture.length
     + ctx.patterns.length + ctx.antiPatterns.length + ctx.stacks.length + ctx.notes.length;
   const unreviewed = opts.unreviewedCommits ?? 0;
-  if (total === 0 && unreviewed === 0) return null;
+  const indexed = opts.indexedFromFile;
+  if (total === 0 && unreviewed === 0 && !indexed?.count) return null;
 
   const lines = [
     'DevBrain memory for this project — what broke before, what was decided, and what to avoid.',
@@ -109,6 +141,16 @@ export function formatSessionBriefing(
     'and pass the id of the wrong entry as `supersedes`.',
     'When a stretch of work fixes or decides something, DevBrain will ask you to record it with `save_entry` — you are welcome to do so earlier.',
   ];
+
+  // Say what is deliberately absent, so the agent does not assume the briefing
+  // is everything DevBrain holds for this project.
+  if (indexed?.count) {
+    lines.push(
+      '',
+      `${indexed.count} further ${indexed.count === 1 ? 'entry is' : 'entries are'} indexed from ${indexed.file} and left out here — you already have that file.`,
+      'They are searchable by error text, and they reach your other projects, which is why the file is indexed.',
+    );
+  }
 
   // The backfill trigger: history nobody has read yet. Mentioned, not pushed —
   // the user's task comes first.

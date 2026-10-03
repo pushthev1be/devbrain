@@ -18,7 +18,8 @@ import {
   buildDossier, formatDossierMarkdown, dossierFiles,
   isDuplicateEntry, findTextDuplicate, clip,
   parseMarkdownSource, planIndex, entryForSection,
-  formatSessionBriefing, readCursor, writeCursor, reviewTurn,
+  formatSessionBriefing, briefingEntries, isAlreadyInAgentContext,
+  readCursor, writeCursor, reviewTurn,
   withDevbrainHooks, withoutDevbrainHooks, installedDevbrainHooks,
   nextSessionChunk, formatBackfillBatch, commitExcerpt, BACKFILL_BATCH_BUDGET,
 } from '@devbrain/core';
@@ -259,6 +260,13 @@ async function handleInit(): Promise<void> {
       if (removeGitHook(repoRoot)) {
         console.log(`  ${GREEN}✓${RESET} Removed the old post-commit hook — your agent reviews commits now`);
       }
+      // That hook ran `devbrain capture`, which no longer exists, so it fails
+      // silently on every commit in any repo still carrying it. They are
+      // registered here, so they can be cleaned without visiting each one.
+      const alsoCleaned = await cleanStaleGitHooks(repoRoot);
+      if (alsoCleaned.length) {
+        console.log(`  ${GREEN}✓${RESET} Removed the same dead hook from ${alsoCleaned.join(', ')}`);
+      }
       unreviewed = (await unreviewedCommits(repoRoot)).length;
     } else {
       console.log(`  ${YELLOW}⚠${RESET}  Not a git repo — knowledge comes from agent sessions and notes`);
@@ -356,6 +364,19 @@ async function handleInit(): Promise<void> {
       }
     }
 
+    // Index CLAUDE.md if there is one, rather than competing with it.
+    //
+    // CLAUDE.md is usually the project's real knowledge base: in the repo,
+    // reviewed in PRs, and loaded into the agent automatically. A second store
+    // beside it is a duplicate nobody reads. Indexing makes DevBrain a
+    // searchable layer over it — findable by a pasted error, and reusable from
+    // other repos — while the file stays the source of truth.
+    if (DEFAULT_SOURCE_FILES.some(f => existsSync(join(repoRoot, f)))) {
+      await handleIndex().catch(err => {
+        console.log(`  ${YELLOW}⚠${RESET}  Could not index: ${explainError(err)}`);
+      });
+    }
+
     // Print MCP server config so standard AI tools see devbrain tools natively
     const W2  = Math.min(process.stdout.columns || 80, 80);
     const bar2 = `${DIM}${'─'.repeat(W2)}${RESET}`;
@@ -367,13 +388,16 @@ async function handleInit(): Promise<void> {
     console.log(`  ${DIM}{${RESET}`);
     console.log(`    ${DIM}"mcpServers": {${RESET}`);
     console.log(`      ${CYAN}"devbrain"${RESET}${DIM}: {${RESET}`);
-    console.log(`        ${CYAN}"type"${RESET}${DIM}: ${RESET}${GREEN}"http"${RESET}${DIM},${RESET}`);
-    console.log(`        ${CYAN}"url"${RESET}${DIM}: ${RESET}${GREEN}"https://devbrain-715714057208.us-central1.run.app/mcp"${RESET}`);
+    console.log(`        ${CYAN}"type"${RESET}${DIM}: ${RESET}${GREEN}"stdio"${RESET}${DIM},${RESET}`);
+    console.log(`        ${CYAN}"command"${RESET}${DIM}: ${RESET}${GREEN}"npx"${RESET}${DIM},${RESET}`);
+    console.log(`        ${CYAN}"args"${RESET}${DIM}: ${RESET}${GREEN}["-y", "@devbrain/mcp"]${RESET}`);
     console.log(`      ${DIM}}${RESET}`);
     console.log(`    ${DIM}}${RESET}`);
     console.log(`  ${DIM}}${RESET}`);
     console.log(`${CYAN}  └────────────────────────────────────────────────────────────────────┘${RESET}\n`);
-    console.log(`  ${DIM}Or configure standard stdio host using the DevBrain MCP server binary.${RESET}\n`);
+    console.log(`  ${DIM}Your knowledge stays on this machine. To point at a server you host${RESET}`);
+    console.log(`  ${DIM}yourself instead, use {"type": "http", "url": "<your-host>/mcp"}.${RESET}
+`);
     console.log(bar2);
     console.log();
 
@@ -408,6 +432,23 @@ const RUN_LOOKUP_TIMEOUT_MS = 8000;
 async function unreviewedCommits(repoRoot: string): Promise<string[]> {
   if (!isGitRepo(repoRoot)) return [];
   return filterUnprocessedCommits(listCommitHashes(repoRoot, BACKFILL_SCAN)).catch(() => []);
+}
+
+/**
+ * Remove the dead `devbrain capture` post-commit hook from every registered
+ * project except `skip` (already handled by the caller).
+ *
+ * Removing the command left those hooks calling something that does not exist.
+ * They swallow the error, so nothing surfaces — the repo just runs a failing
+ * command after every commit. Returns the names cleaned.
+ */
+async function cleanStaleGitHooks(skip?: string): Promise<string[]> {
+  const cleaned: string[] = [];
+  for (const p of await getAllProjects().catch(() => [])) {
+    if (p.path === skip) continue;
+    try { if (removeGitHook(p.path)) cleaned.push(p.name); } catch { /* unreadable repo */ }
+  }
+  return cleaned;
 }
 
 /** Past (not live) Claude Code sessions for this repo. */
@@ -570,8 +611,15 @@ async function handleHook(event: string): Promise<void> {
       const project = await getProjectByPath(repoRoot);
       if (!project) return;
       const all = await getAllEntriesWithProjects();
-      const briefing = formatSessionBriefing(buildContext(all, project), {
+      // This project's own CLAUDE.md is already in the agent's context; ranking
+      // it back in would restate the file in fewer words. Named, not hidden.
+      const shown = briefingEntries(all, project.id);
+      const skipped = all.filter(e => isAlreadyInAgentContext(e, project.id));
+      const briefing = formatSessionBriefing(buildContext(shown, project), {
         unreviewedCommits: (await unreviewedCommits(repoRoot)).length,
+        ...(skipped.length
+          ? { indexedFromFile: { file: skipped[0].source!.file, count: skipped.length } }
+          : {}),
       });
       if (!briefing) return;
       process.stdout.write(JSON.stringify({
