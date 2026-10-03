@@ -297,6 +297,14 @@ Write     devbrain note "<type>: <title> — <detail>" · backfill [n] [--print]
 Read      devbrain context [task] · search <q> · project [name] [--write] · run <cmd>
 ```
 
+To browse your memory in a browser, start the server with `--serve` — it listens on **http://localhost:8080**, the same port the Dockerfile exposes:
+
+```bash
+node packages/mcp/dist/index.js --serve     # dashboard at :8080, MCP at :8080/mcp
+```
+
+HTTP is opt-in: the default launch is a stdio MCP server, one per agent session, and binding a port on every launch would make the second session fail with `EADDRINUSE`. Set `PORT` to override.
+
 `devbrain hooks status` also shows the last few times DevBrain asked an agent to record something (`~/.devbrain/capture.log`).
 
 ### Watch it work

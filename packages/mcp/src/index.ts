@@ -392,7 +392,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 }
 
 (async () => {
-  const PORT = process.env.PORT ? parseInt(process.env.PORT) : null;
+  // Serving HTTP is opt-in. Cloud Run injects PORT; `--serve` is the local
+  // equivalent and defaults to the port the Dockerfile exposes, so the
+  // dashboard is at http://localhost:8080 without anyone having to know that.
+  //
+  // It stays opt-in because the default launch is a stdio MCP server, one per
+  // agent session: binding a port on every launch would make the second
+  // session die with EADDRINUSE.
+  const DEFAULT_HTTP_PORT = 8080;
+  const PORT = process.env.PORT
+    ? parseInt(process.env.PORT)
+    : (process.argv.includes('--serve') ? DEFAULT_HTTP_PORT : null);
 
   if (PORT) {
     // HTTP mode — Cloud Run
@@ -812,7 +822,8 @@ const httpServer = createServer(async (req, res) => {
     });
 
     httpServer.listen(PORT, '0.0.0.0', () => {
-      console.log(`DevBrain MCP server listening on port ${PORT}`);
+      console.log(`DevBrain dashboard  http://localhost:${PORT}`);
+      console.log(`DevBrain MCP        http://localhost:${PORT}/mcp`);
     });
   } else {
     // stdio mode — local MCP client / agent
