@@ -36,6 +36,17 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
       --purple: #9b7fd4; --cyan: #4aa8c0;
       --mono: 'Consolas', 'Courier New', monospace;
       --ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+
+      /* The sidebar keeps its own tokens, as shadcn/ui's Sidebar does, so the
+         panel can be themed without touching the rest of the page. */
+      --sidebar: #1a1a1a;
+      --sidebar-foreground: #c8c8c8;
+      --sidebar-accent: #242424;
+      --sidebar-accent-foreground: #f0f0f0;
+      --sidebar-border: #2b2b2b;
+      --sidebar-ring: #2f7fd4;
+      --sidebar-width: 16rem;
+      --sidebar-width-icon: 3.25rem;
     }
     * { box-sizing: border-box; }
     body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--ui); font-size: 14px; }
@@ -46,19 +57,70 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
     .badge { font-family: var(--mono); font-size: 11px; padding: 2px 8px; border: 1px solid var(--border2); border-radius: 3px; color: var(--text3); }
     .badge.ok { color: var(--green); border-color: var(--green); }
     .badge.bad { color: var(--red); border-color: var(--red); }
-    .menu-btn { display: none; background: var(--surface2); border: 1px solid var(--border2); color: var(--text); padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 13px; }
 
-    .layout { display: grid; grid-template-columns: 250px 1fr; min-height: calc(100vh - 41px); }
-    .sidebar { background: var(--surface); border-right: 1px solid var(--border); padding: 10px 0; overflow-y: auto; }
-    .side-label { font-size: 10px; text-transform: uppercase; letter-spacing: .1em; color: var(--text3); padding: 10px 14px 5px; }
-    .proj { display: flex; align-items: baseline; gap: 8px; padding: 7px 14px; cursor: pointer; border-left: 2px solid transparent; }
-    .proj:hover { background: var(--surface2); }
-    .proj.active { background: var(--surface2); border-left-color: var(--accent); }
-    .proj-name { flex: 1; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .proj-count { font-family: var(--mono); font-size: 11px; color: var(--text3); }
-    .navlink { display: block; width: 100%; text-align: left; background: none; border: none; border-left: 2px solid transparent; color: var(--text2); padding: 7px 14px; cursor: pointer; font-size: 13px; font-family: var(--ui); }
-    .navlink:hover { background: var(--surface2); color: var(--text); }
-    .navlink.active { background: var(--surface2); color: var(--text); border-left-color: var(--accent); }
+    /* ── sidebar ────────────────────────────────────────────────────────────
+       Ported from shadcn/ui's Sidebar: the same composition (header, content,
+       group with a label, menu, menu button, badge, footer, rail), the same
+       --sidebar-* theming contract, collapse-to-icon, and Ctrl/Cmd+B.
+       Written in plain CSS because this dashboard is one served string with no
+       React, Tailwind or build step — so the component itself cannot be
+       installed, only its structure and behaviour.
+       The open/collapsed state lives in a data attribute on <body>, which is
+       what shadcn's SidebarProvider does with a wrapper div, so these rules
+       read the way its group-data-[state=...] selectors do. */
+    .layout { display: grid; grid-template-columns: var(--sidebar-width) 1fr; min-height: calc(100vh - 41px); }
+
+    /* Sticky and exactly one viewport tall, as shadcn's panel is, so the header
+       and footer stay put and only .sidebar-content scrolls. Left to stretch,
+       the panel grows with the page and its footer ends up far below the fold. */
+    .sidebar { position: sticky; top: 41px; height: calc(100vh - 41px); display: flex; flex-direction: column; background: var(--sidebar); color: var(--sidebar-foreground); border-right: 1px solid var(--sidebar-border); overflow: hidden; }
+    .sidebar-header { flex: 0 0 auto; padding: 9px 12px; border-bottom: 1px solid var(--sidebar-border); }
+    .sidebar-content { flex: 1 1 auto; overflow-y: auto; overflow-x: hidden; padding: 4px 0; }
+    .sidebar-footer { flex: 0 0 auto; padding: 9px 12px; border-top: 1px solid var(--sidebar-border); }
+
+    .sidebar-group { display: flex; flex-direction: column; padding: 4px 0; }
+    .sidebar-group-label { font-size: 10px; text-transform: uppercase; letter-spacing: .1em; color: var(--text3); padding: 7px 14px 4px; white-space: nowrap; }
+    .sidebar-menu { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+    .sidebar-menu-item { position: relative; }
+    .sidebar-menu-button { display: flex; align-items: center; gap: 9px; width: 100%; text-align: left; background: none; border: none; border-left: 2px solid transparent; color: var(--sidebar-foreground); padding: 7px 12px; cursor: pointer; font-size: 13px; font-family: var(--ui); }
+    .sidebar-menu-button:hover { background: var(--sidebar-accent); color: var(--sidebar-accent-foreground); }
+    .sidebar-menu-button:focus-visible { outline: 2px solid var(--sidebar-ring); outline-offset: -2px; }
+    .sidebar-menu-button[data-active="true"] { background: var(--sidebar-accent); color: var(--sidebar-accent-foreground); border-left-color: var(--accent); }
+    .sidebar-menu-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .sidebar-menu-badge { font-family: var(--mono); font-size: 11px; color: var(--text3); }
+
+    /* Every row carries an icon, because that is all a collapsed panel can
+       show. A project has no icon of its own, so it gets a monogram. */
+    .sidebar-icon { flex: 0 0 20px; width: 20px; height: 20px; display: grid; place-items: center; font-family: var(--mono); font-size: 10px; text-transform: uppercase; color: var(--text2); border: 1px solid var(--border2); border-radius: 3px; }
+    .sidebar-icon svg { width: 13px; height: 13px; }
+    .sidebar-menu-button[data-active="true"] .sidebar-icon { color: var(--sidebar-accent-foreground); border-color: var(--accent); }
+    .sidebar-brand { display: flex; align-items: center; gap: 9px; font-family: var(--mono); font-size: 12px; color: var(--text2); }
+
+    /* The rail: the thin strip on the panel's edge that toggles it. */
+    .sidebar-rail { position: absolute; top: 0; bottom: 0; right: 0; width: 8px; padding: 0; border: none; background: transparent; cursor: ew-resize; }
+    .sidebar-rail:hover { background: var(--sidebar-border); }
+    .sidebar-rail:focus-visible { outline: 2px solid var(--sidebar-ring); outline-offset: -2px; }
+
+    .sidebar-trigger { display: inline-grid; place-items: center; width: 28px; height: 28px; padding: 0; background: none; border: 1px solid transparent; border-radius: 4px; color: var(--text2); cursor: pointer; }
+    .sidebar-trigger:hover { background: var(--surface2); color: var(--text); border-color: var(--border2); }
+    .sidebar-trigger svg { width: 15px; height: 15px; }
+
+    .sidebar-backdrop { display: none; position: fixed; inset: 41px 0 0 0; padding: 0; border: none; background: rgba(0, 0, 0, .5); z-index: 30; }
+
+    /* Collapsed to icons. Desktop only: an overlay the user opened on purpose
+       should show its labels, so these rules never apply on a narrow screen. */
+    @media (min-width: 861px) {
+      body[data-sidebar="collapsed"] .layout { grid-template-columns: var(--sidebar-width-icon) 1fr; }
+      body[data-sidebar="collapsed"] .sidebar-menu-label,
+      body[data-sidebar="collapsed"] .sidebar-menu-badge,
+      body[data-sidebar="collapsed"] .sidebar-group-label,
+      body[data-sidebar="collapsed"] .sidebar-collapse-hide { display: none; }
+      body[data-sidebar="collapsed"] .sidebar-menu-button { justify-content: center; gap: 0; padding: 7px 0; }
+      body[data-sidebar="collapsed"] .sidebar-brand,
+      body[data-sidebar="collapsed"] .sidebar-footer { justify-content: center; }
+      body[data-sidebar="collapsed"] .sidebar-header,
+      body[data-sidebar="collapsed"] .sidebar-footer { padding-left: 0; padding-right: 0; text-align: center; }
+    }
 
     .main { padding: 18px 22px 60px; overflow-x: hidden; }
     .phead h1 { margin: 0 0 4px; font-size: 20px; }
@@ -118,11 +180,14 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
     .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--surface2); border: 1px solid var(--border2); padding: 9px 16px; border-radius: 4px; font-size: 13px; opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 50; }
     .toast.show { opacity: 1; }
 
+    /* Offcanvas below this width: the panel slides over the page instead of
+       taking a column from it, and a backdrop closes it. */
     @media (max-width: 860px) {
       .layout { grid-template-columns: 1fr; }
-      .sidebar { display: none; border-right: none; border-bottom: 1px solid var(--border); }
-      .sidebar.open { display: block; }
-      .menu-btn { display: block; }
+      .sidebar { position: fixed; top: 41px; bottom: 0; left: 0; width: var(--sidebar-width); z-index: 40; transform: translateX(-100%); transition: transform .18s ease; }
+      .sidebar.open { transform: translateX(0); }
+      .sidebar-rail { display: none; }
+      .sidebar-backdrop.open { display: block; }
       .main { padding: 14px 14px 60px; }
       .grid2 { grid-template-columns: 1fr; }
     }
@@ -130,25 +195,62 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
 </head>
 <body>
   <div class="topbar">
-    <button class="menu-btn" data-act="menu">Projects</button>
+    <button class="sidebar-trigger" data-act="toggle-sidebar" title="Toggle sidebar (Ctrl+B)" aria-label="Toggle sidebar">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M9 3v18"></path></svg>
+    </button>
     <span class="brand">devbrain &mdash; developer memory</span>
     <span class="spacer"></span>
-    <span class="badge" id="storage-badge">checking&hellip;</span>
   </div>
 
   <div class="layout">
-    <aside class="sidebar" id="sidebar">
-      <div class="side-label">Projects</div>
-      <div id="project-list"><div class="empty" style="padding:10px 14px">loading&hellip;</div></div>
-      <div class="side-label">All projects</div>
-      <button class="navlink" data-view="search">Search everything</button>
-      <button class="navlink" data-view="save">Save an entry</button>
+    <aside class="sidebar" id="sidebar" data-collapsible="icon">
+      <div class="sidebar-header">
+        <div class="sidebar-brand">
+          <span class="sidebar-icon">db</span>
+          <span class="sidebar-menu-label">devbrain</span>
+        </div>
+      </div>
+
+      <div class="sidebar-content">
+        <div class="sidebar-group">
+          <div class="sidebar-group-label">Projects</div>
+          <ul class="sidebar-menu" id="project-list">
+            <li class="sidebar-menu-item"><div class="empty sidebar-collapse-hide" style="padding:8px 14px">loading&hellip;</div></li>
+          </ul>
+        </div>
+
+        <div class="sidebar-group">
+          <div class="sidebar-group-label">All projects</div>
+          <ul class="sidebar-menu">
+            <li class="sidebar-menu-item">
+              <button class="sidebar-menu-button" data-view="search" title="Search everything">
+                <span class="sidebar-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.6-3.6"></path></svg></span>
+                <span class="sidebar-menu-label">Search everything</span>
+              </button>
+            </li>
+            <li class="sidebar-menu-item">
+              <button class="sidebar-menu-button" data-view="save" title="Save an entry">
+                <span class="sidebar-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg></span>
+                <span class="sidebar-menu-label">Save an entry</span>
+              </button>
+            </li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="sidebar-footer">
+        <span class="badge" id="storage-badge">checking&hellip;</span>
+      </div>
+
+      <button class="sidebar-rail" data-act="toggle-sidebar" title="Toggle sidebar (Ctrl+B)" aria-label="Toggle sidebar"></button>
     </aside>
 
     <main class="main" id="main">
       <div class="empty">loading&hellip;</div>
     </main>
   </div>
+
+  <button class="sidebar-backdrop" id="sidebar-backdrop" data-act="close-sidebar" aria-label="Close sidebar"></button>
 
   <div class="toast" id="toast"></div>
 
@@ -195,6 +297,13 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
       }
     }
 
+    // A collapsed panel shows icons only, and a project has no icon, so it gets
+    // the first two letters of its name — enough to tell projects apart.
+    function monogram(name) {
+      var letters = String(name || '').replace(/[^A-Za-z0-9]/g, '');
+      return letters.slice(0, 2) || '?';
+    }
+
     async function loadProjects() {
       var box = el('project-list');
       try {
@@ -205,9 +314,14 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
           return;
         }
         box.innerHTML = STATE.projects.map(function (p) {
-          return '<div class="proj' + (p.id === STATE.projectId ? ' active' : '') + '" data-project="' + esc(p.id) + '">' +
-                 '<span class="proj-name" title="' + esc(p.path) + '">' + esc(p.name) + '</span>' +
-                 '<span class="proj-count">' + p.total + '</span></div>';
+          return '<li class="sidebar-menu-item">' +
+                 '<button class="sidebar-menu-button" data-project="' + esc(p.id) + '"' +
+                 (p.id === STATE.projectId ? ' data-active="true"' : '') +
+                 ' title="' + esc(p.name) + ' &mdash; ' + esc(p.path) + '">' +
+                 '<span class="sidebar-icon">' + esc(monogram(p.name)) + '</span>' +
+                 '<span class="sidebar-menu-label">' + esc(p.name) + '</span>' +
+                 '<span class="sidebar-menu-badge">' + p.total + '</span>' +
+                 '</button></li>';
         }).join('');
         if (!STATE.projectId) selectProject(STATE.projects[0].id);
       } catch (e) {
@@ -219,11 +333,12 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
       STATE.projectId = id;
       STATE.view = 'project';
       STATE.section = 'all';
-      document.querySelectorAll('.proj').forEach(function (n) {
-        n.classList.toggle('active', n.getAttribute('data-project') === id);
+      document.querySelectorAll('[data-project]').forEach(function (n) {
+        if (n.getAttribute('data-project') === id) n.setAttribute('data-active', 'true');
+        else n.removeAttribute('data-active');
       });
-      document.querySelectorAll('.navlink').forEach(function (n) { n.classList.remove('active'); });
-      el('sidebar').classList.remove('open');
+      document.querySelectorAll('[data-view]').forEach(function (n) { n.removeAttribute('data-active'); });
+      closeSidebarOverlay();
       renderProject();
     }
 
@@ -404,7 +519,7 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
     // ── search across every project ──
     function renderSearch(prefill) {
       STATE.view = 'search';
-      el('sidebar').classList.remove('open');
+      closeSidebarOverlay();
       el('main').innerHTML =
         '<div class="phead"><h1>Search</h1><div class="pmeta">across every project</div></div>' +
         '<div class="row"><input class="in" id="q" placeholder="paste an exact error message, or describe the problem" value="' + esc(prefill || '') + '">' +
@@ -467,7 +582,7 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
     // ── save, into a project you choose ──
     function renderSave() {
       STATE.view = 'save';
-      el('sidebar').classList.remove('open');
+      closeSidebarOverlay();
       var opts = STATE.projects.map(function (p) {
         return '<option value="' + esc(p.id) + '"' + (p.id === STATE.projectId ? ' selected' : '') + '>' + esc(p.name) + '</option>';
       }).join('');
@@ -568,8 +683,9 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
 
       var nav = t.closest('[data-view]');
       if (nav) {
-        document.querySelectorAll('.navlink').forEach(function (n) { n.classList.remove('active'); });
-        nav.classList.add('active');
+        document.querySelectorAll('[data-view]').forEach(function (n) { n.removeAttribute('data-active'); });
+        document.querySelectorAll('[data-project]').forEach(function (n) { n.removeAttribute('data-active'); });
+        nav.setAttribute('data-active', 'true');
         if (nav.getAttribute('data-view') === 'search') renderSearch();
         else renderSave();
         return;
@@ -586,7 +702,8 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
         STATE.q = ''; STATE.category = 'all'; STATE.origin = 'all'; STATE.showRetracted = false;
         renderProject();
       }
-      else if (a === 'menu') el('sidebar').classList.toggle('open');
+      else if (a === 'toggle-sidebar') toggleSidebar();
+      else if (a === 'close-sidebar') closeSidebarOverlay();
       else if (a === 'save-here' || a === 'do-save-nav') renderSave();
       else if (a === 'do-save') doSave();
       else if (a === 'search-here') renderSearch();
@@ -608,6 +725,50 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
         toast('agent.md downloaded');
       }
     });
+
+    // ── sidebar state ──
+    //
+    // Narrow screens get the offcanvas panel, which is open or shut; wider ones
+    // get the column, which is expanded or collapsed to icons. The collapsed
+    // choice is remembered, because a sidebar that reopens itself on every
+    // page load is one the user has to close again every time.
+
+    function isNarrow() { return window.matchMedia('(max-width: 860px)').matches; }
+
+    function closeSidebarOverlay() {
+      el('sidebar').classList.remove('open');
+      el('sidebar-backdrop').classList.remove('open');
+    }
+
+    function setCollapsed(collapsed) {
+      document.body.setAttribute('data-sidebar', collapsed ? 'collapsed' : 'expanded');
+      try { localStorage.setItem('devbrain:sidebar', collapsed ? 'collapsed' : 'expanded'); } catch (e) {}
+    }
+
+    function toggleSidebar() {
+      if (isNarrow()) {
+        var open = el('sidebar').classList.toggle('open');
+        el('sidebar-backdrop').classList.toggle('open', open);
+        return;
+      }
+      setCollapsed(document.body.getAttribute('data-sidebar') !== 'collapsed');
+    }
+
+    // The shortcut shadcn's Sidebar uses, on both platforms.
+    document.addEventListener('keydown', function (ev) {
+      if ((ev.ctrlKey || ev.metaKey) && !ev.altKey && (ev.key === 'b' || ev.key === 'B')) {
+        ev.preventDefault();
+        toggleSidebar();
+      } else if (ev.key === 'Escape' && isNarrow()) {
+        closeSidebarOverlay();
+      }
+    });
+
+    try {
+      setCollapsed(localStorage.getItem('devbrain:sidebar') === 'collapsed');
+    } catch (e) {
+      setCollapsed(false);
+    }
 
     loadStorage();
     loadProjects();
