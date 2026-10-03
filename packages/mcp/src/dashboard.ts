@@ -171,7 +171,12 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
     .card.k-pattern, .card.k-lesson { border-left-color: var(--yellow); }
 
     .cmeta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; font-family: var(--mono); font-size: 11px; color: var(--text3); }
+    /* A fixed-width column on the right, so the eye can run down it rather
+       than hunting for the number in a different place on every row. */
+    .cstat { flex: 0 0 auto; min-width: 128px; text-align: right; font-family: var(--mono); font-size: 11px; color: var(--text3); }
     .caught { color: var(--green); }
+    .caught.zero { color: var(--text3); }
+    .cstat .shown, .cstat .sep { color: var(--text3); }
     .use { font-family: var(--mono); font-size: 11px; color: var(--text3); margin-top: 4px; }
     .use.none { color: var(--yellow); }
     .cbody { color: var(--text2); font-size: 13px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
@@ -433,7 +438,8 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
     var SORTS = [
       ['newest',     'Newest first'],
       ['oldest',     'Oldest first'],
-      ['used',       'Most used'],
+      ['caught',     'Most failures caught'],
+      ['used',       'Most shown'],
       ['confidence', 'Most confident'],
       ['title',      'Title A-Z'],
     ];
@@ -458,6 +464,14 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
       var copy = list.slice();
       if (STATE.sort === 'oldest')      copy.sort(function (a, b) { return a.createdAt - b.createdAt; });
       else if (STATE.sort === 'used')   copy.sort(function (a, b) { return (b.retrievalCount || 0) - (a.retrievalCount || 0); });
+      // Ties broken by how often it was shown: among entries that have caught
+      // nothing, the one surfaced most often is the most conspicuous failure.
+      else if (STATE.sort === 'caught') {
+        copy.sort(function (a, b) {
+          return (b.recallCount || 0) - (a.recallCount || 0)
+            || (b.retrievalCount || 0) - (a.retrievalCount || 0);
+        });
+      }
       else if (STATE.sort === 'title')  copy.sort(function (a, b) { return String(a.title).localeCompare(String(b.title)); });
       else if (STATE.sort === 'confidence') {
         copy.sort(function (a, b) {
@@ -565,14 +579,20 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
         meta += '<span class="conf-' + esc(e.confidence) + '">' + esc(e.confidence) + '</span>';
       }
       if (e.seenInProjects >= 2) meta += '<span>seen in ' + e.seenInProjects + ' projects</span>';
-      // Failures caught is the number that says this entry earned its place, so
-      // it is the one shown on the closed row.
-      if (e.recallCount > 0) {
-        meta += '<span class="caught">caught ' + e.recallCount +
-          (e.recallCount === 1 ? ' failure' : ' failures') + '</span>';
-      }
       if (e.revisionCount > 0) meta += '<span>revised ' + e.revisionCount + 'x</span>';
       if (e.supersededBy) meta += '<span style="color:var(--red)">superseded</span>';
+
+      // Shown on every row, including at zero. Hidden when zero it was
+      // invisible on a store where nothing had fired yet, which is exactly the
+      // store you most need to be able to see. Both halves are here because
+      // together they say which of three states an entry is in: never surfaced,
+      // surfaced but never useful, or earning its place.
+      var stat = '<span class="cstat" title="surfaced ' + e.retrievalCount +
+        ' times, caught ' + e.recallCount + ' real failures">' +
+        '<span class="shown">' + e.retrievalCount + ' shown</span>' +
+        '<span class="sep"> &middot; </span>' +
+        '<span class="' + (e.recallCount > 0 ? 'caught' : 'caught zero') + '">' +
+        e.recallCount + ' caught</span></span>';
 
       var body = bodyOf(e);
       var detail = '';
@@ -590,7 +610,7 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
 
       var head = '<span class="t t-' + type + '">' + type + '</span>' +
         '<span class="ctitle">' + esc(e.title) + '</span>' +
-        '<div class="cmeta">' + meta + '</div>';
+        '<div class="cmeta">' + meta + '</div>' + stat;
       var cls = 'card k-' + type + (e.supersededBy ? ' superseded' : '');
 
       // A title with nothing behind it is a plain row, not an empty disclosure
