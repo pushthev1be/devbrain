@@ -144,10 +144,33 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
     .sec { margin-bottom: 26px; }
     .sec h2 { font-size: 14px; margin: 0 0 2px; }
     .sec .blurb { color: var(--text3); font-size: 12px; margin-bottom: 10px; }
-    .card { background: var(--surface); border: 1px solid var(--border); border-left: 2px solid var(--border2); border-radius: 4px; padding: 11px 13px; margin-bottom: 8px; }
+    /* An entry is a closed row until you ask for it. Titles are written to be
+       the symptom, so the title is the thing worth scanning; the detail is for
+       the one entry you stopped on. Thirty-six entries opened at once is a wall
+       nobody reads, which is the state this replaces. */
+    .card { background: var(--surface); border: 1px solid var(--border); border-left: 2px solid var(--border2); border-radius: 4px; margin-bottom: 6px; }
     .card.superseded { opacity: .5; }
-    .card h3 { margin: 0 0 5px; font-size: 13px; font-weight: 600; line-height: 1.4; }
-    .cmeta { display: flex; flex-wrap: wrap; gap: 8px; font-family: var(--mono); font-size: 11px; color: var(--text3); margin-bottom: 6px; }
+    .card > summary, .card > .chead { display: flex; align-items: baseline; gap: 9px; padding: 9px 12px; }
+    .card > summary { cursor: pointer; list-style: none; }
+    .card > summary::-webkit-details-marker { display: none; }
+    .card > summary:hover { background: var(--surface2); }
+    .card > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+    .card[open] > summary { border-bottom: 1px solid var(--border); }
+    .ctitle { flex: 1; font-size: 13px; font-weight: 600; line-height: 1.4; color: var(--text); }
+    .cmark { font-family: var(--mono); font-size: 13px; color: var(--text3); }
+    .card > summary .cmark::after { content: '+'; }
+    .card[open] > summary .cmark::after { content: '-'; }
+    .cdetail { padding: 10px 12px 11px; }
+
+    /* The spine carries the type, so a section's shape is visible before
+       reading a word of it. */
+    .card.k-bug, .card.k-anti-pattern { border-left-color: var(--red); }
+    .card.k-fix { border-left-color: var(--green); }
+    .card.k-decision { border-left-color: var(--purple); }
+    .card.k-architecture, .card.k-stack { border-left-color: var(--cyan); }
+    .card.k-pattern, .card.k-lesson { border-left-color: var(--yellow); }
+
+    .cmeta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; font-family: var(--mono); font-size: 11px; color: var(--text3); }
     .cbody { color: var(--text2); font-size: 13px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
     .err { font-family: var(--mono); font-size: 11px; background: var(--surface2); border: 1px solid var(--border); padding: 6px 9px; border-radius: 3px; color: var(--yellow); margin-top: 7px; overflow-x: auto; }
     .arch { font-size: 12px; color: var(--purple); margin-top: 6px; }
@@ -473,6 +496,7 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
           ? '<label class="tb-check"><input type="checkbox" id="f-retracted"' + (STATE.showRetracted ? ' checked' : '') + '> ' +
             'retracted (' + retractedCount + ')</label>'
           : '') +
+        '<button class="chip" data-act="toggle-all">expand all</button>' +
         '<span class="tb-count">' + kept + ' of ' + total + '</span>' +
         '</div>';
     }
@@ -489,8 +513,30 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
       }
     }
 
+    // Entries saved before the CLI stopped repeating the title still carry it
+    // at the head of their body. Strip it on read, so an old entry reads like a
+    // new one without rewriting anything in the store.
+    //
+    // Done with string slicing rather than a regular expression: inside this
+    // template literal a lone backslash is dropped, so a written \\s would reach
+    // the browser as s — a different pattern that still parses and silently
+    // matches the wrong thing.
+    function bodyOf(e) {
+      var body = String(e.content || '');
+      var title = String(e.title || '');
+      if (title && body.slice(0, title.length) === title) {
+        body = body.slice(title.length).trim();
+        var seps = ['\\u2014', '\\u2013', '--'];
+        for (var i = 0; i < seps.length; i++) {
+          if (body.slice(0, seps[i].length) === seps[i]) { body = body.slice(seps[i].length); break; }
+        }
+      }
+      return body.trim();
+    }
+
     function renderCard(e) {
-      var meta = '<span class="t t-' + esc(e.type) + '">' + esc(e.type) + '</span>';
+      var type = esc(e.type);
+      var meta = '';
       if (e.category) meta += '<span>' + esc(e.category) + '</span>';
       meta += '<span>' + esc(e.timeAgo) + '</span>';
       if (e.confidence && e.confidence !== 'observation') {
@@ -499,21 +545,30 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
       if (e.seenInProjects >= 2) meta += '<span>seen in ' + e.seenInProjects + ' projects</span>';
       if (e.supersededBy) meta += '<span style="color:var(--red)">superseded</span>';
 
-      var html = '<div class="card' + (e.supersededBy ? ' superseded' : '') + '">' +
-        '<h3>' + esc(e.title) + '</h3>' +
-        '<div class="cmeta">' + meta + '</div>';
-      if (e.content && e.content !== e.title) html += '<div class="cbody">' + esc(e.content) + '</div>';
-      if (e.errorPattern) html += '<div class="err">' + esc(e.errorPattern) + '</div>';
-      if (e.causeArchetype) html += '<div class="arch">root-cause pattern: ' + esc(e.causeArchetype) + '</div>';
+      var body = bodyOf(e);
+      var detail = '';
+      if (body) detail += '<div class="cbody">' + esc(body) + '</div>';
+      if (e.errorPattern) detail += '<div class="err">' + esc(e.errorPattern) + '</div>';
+      if (e.causeArchetype) detail += '<div class="arch">root-cause pattern: ' + esc(e.causeArchetype) + '</div>';
       if (e.tags && e.tags.length) {
-        html += '<div class="tags">' + e.tags.map(function (t) {
+        detail += '<div class="tags">' + e.tags.map(function (t) {
           return '<span class="tag">' + esc(t) + '</span>';
         }).join('') + '</div>';
       }
       if (e.type === 'decision' && !e.supersededBy) {
-        html += '<button class="supersede-btn" data-supersede="' + esc(e.id) + '">supersede</button>';
+        detail += '<button class="supersede-btn" data-supersede="' + esc(e.id) + '">supersede</button>';
       }
-      return html + '</div>';
+
+      var head = '<span class="t t-' + type + '">' + type + '</span>' +
+        '<span class="ctitle">' + esc(e.title) + '</span>' +
+        '<div class="cmeta">' + meta + '</div>';
+      var cls = 'card k-' + type + (e.supersededBy ? ' superseded' : '');
+
+      // A title with nothing behind it is a plain row, not an empty disclosure
+      // that opens onto nothing.
+      if (!detail) return '<div class="' + cls + '"><div class="chead">' + head + '</div></div>';
+      return '<details class="' + cls + '"><summary>' + head + '<span class="cmark"></span></summary>' +
+        '<div class="cdetail">' + detail + '</div></details>';
     }
 
     // ── search across every project ──
@@ -701,6 +756,13 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
         ev.preventDefault();
         STATE.q = ''; STATE.category = 'all'; STATE.origin = 'all'; STATE.showRetracted = false;
         renderProject();
+      }
+      else if (a === 'toggle-all') {
+        var cards = el('main').querySelectorAll('details.card');
+        var opening = false;
+        cards.forEach(function (c) { if (!c.open) opening = true; });
+        cards.forEach(function (c) { c.open = opening; });
+        act.textContent = opening ? 'collapse all' : 'expand all';
       }
       else if (a === 'toggle-sidebar') toggleSidebar();
       else if (a === 'close-sidebar') closeSidebarOverlay();

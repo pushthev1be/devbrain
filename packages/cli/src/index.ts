@@ -1153,6 +1153,11 @@ async function handleNote(text: string, inq?: any): Promise<void> {
     // title is the searchable statement, so keep it apart from the detail.
     const dash = content.search(/\s[—–]\s|\s--\s/);
     const title = clip(dash > 10 ? content.slice(0, dash) : content, 120);
+    // The body is the detail only. Storing the whole string here repeated the
+    // title at the head of every entry, so each one had to be read twice.
+    const detail = dash > 10
+      ? content.slice(dash).replace(/^\s*(?:[—–]|--)\s*/, '').trim()
+      : content;
 
     // With no embedding (no AI configured), compare titles instead.
     const known = !inq && (embedding
@@ -1164,7 +1169,7 @@ async function handleNote(text: string, inq?: any): Promise<void> {
       return;
     }
 
-    await insertEntry({ id: nanoid(), projectId: project.id, type, title, content, tags: [], embedding, createdAt: Date.now(), confidence: 'observation' });
+    await insertEntry({ id: nanoid(), projectId: project.id, type, title, content: detail, tags: [], embedding, createdAt: Date.now(), confidence: 'observation' });
     if (inq) {
       console.log(`  ${GREEN}✓${RESET} Saved  ${DIM}[${type}]${RESET}\n`);
     } else {

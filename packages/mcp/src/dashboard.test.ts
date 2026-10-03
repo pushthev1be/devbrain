@@ -56,9 +56,20 @@ describe('dashboard inline script', () => {
     expect(js).toMatch(/function esc\(/);
     // Entry titles and content come from commit messages and agent output, so
     // they are untrusted. Every card field must go through esc().
-    for (const field of ['e.title', 'e.content', 'r.title', 'r.content', 'p.name']) {
+    for (const field of ['e.title', 'r.title', 'r.content', 'p.name']) {
       expect(js, `${field} is rendered without esc()`).toContain(`esc(${field})`);
     }
+    // e.content reaches a card through bodyOf(), which trims a repeated title
+    // off the front. What it returns still has to be escaped, and the raw field
+    // must never be concatenated into markup — which this now checks directly,
+    // rather than inferring it from the presence of one call.
+    expect(js, 'the body is rendered without esc()').toContain('esc(body)');
+    // The risk is the raw field landing on a line that emits tags. It may still
+    // be read for the search haystack and by bodyOf, neither of which builds
+    // markup, so the check is for markup specifically rather than for any use.
+    const markupUses = js.split('\n').map(l => l.trim())
+      .filter(l => l.includes('e.content') && l.includes('<'));
+    expect(markupUses, 'e.content appears on a line that builds markup').toEqual([]);
   });
 
   it('has no unescaped quote left by template-literal collapsing', () => {
