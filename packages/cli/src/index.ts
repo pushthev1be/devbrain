@@ -14,7 +14,7 @@ import {
   reinforceEntry, bumpRetrievalCounts, bumpRecallCounts, supersedeEntry,
   preciseSearch, classifyQuery, deleteEntry,
   describeStorage, getLocalDbPath, closeDb,
-  ENTRY_TYPES, normalizeType, getAllProjects,
+  ENTRY_TYPES, ENTRY_CATEGORIES, normalizeType, getAllProjects,
   buildDossier, formatDossierMarkdown, dossierFiles, measureUse, describeUse,
   isDuplicateEntry, findTextDuplicate, clip,
   parseMarkdownSource, planIndex, entryForSection,
@@ -784,7 +784,7 @@ const DEFAULT_SOURCE_FILES = ['CLAUDE.md', 'AGENTS.md', 'DEVBRAIN.md'];
  * section adds one. That is what keeps DevBrain and the file from drifting —
  * the failure the whole feature exists to prevent.
  */
-async function handleIndex(fileArg?: string): Promise<void> {
+async function handleIndex(fileArg?: string, opts: { force?: boolean } = {}): Promise<void> {
   const cwd      = process.cwd();
   const repoRoot = getRepoRoot(cwd) ?? cwd;
 
@@ -806,7 +806,7 @@ async function handleIndex(fileArg?: string): Promise<void> {
   const text     = readFileSync(join(repoRoot, file), 'utf-8');
   const sections = parseMarkdownSource(text);
   const existing = (await getAllEntriesWithProjects()).filter(e => e.projectId === project!.id);
-  const plan     = planIndex(sections, existing, file);
+  const plan     = planIndex(sections, existing, file, { force: opts.force });
 
   console.log(`\n  ${bold(`Indexing ${file}`)}  ${dim(`${sections.length} sections`)}`);
   console.log(`  ${DIM}${plan.added.length} new · ${plan.updated.length} changed · ${plan.unchanged} unchanged · ${plan.removed.length} gone${RESET}\n`);
@@ -1063,7 +1063,19 @@ function parseQuickSave(text: string): { type: Entry['type']; content: string } 
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function handleNote(text: string, inq?: any): Promise<void> {
+/**
+ * `devbrain note "<type>: <title> — <detail>" [--error …] [--category …] [--tags a,b]`
+ *
+ * The extra fields are not decoration. error_pattern is what the failure hook
+ * matches against, so a note saved without one can never be recalled unasked —
+ * and until these flags existed the CLI had nowhere to put it, while the Stop
+ * hook was busy asking agents to supply it.
+ */
+async function handleNote(
+  text: string,
+  inq?: any,
+  extra: { error?: string; category?: string; tags?: string } = {},
+): Promise<void> {
   if (!text.trim()) return;
   const cwd = process.cwd();
   const repoRoot = getRepoRoot(cwd) ?? cwd;
@@ -1177,7 +1189,16 @@ async function handleNote(text: string, inq?: any): Promise<void> {
       return;
     }
 
-    await insertEntry({ id: nanoid(), projectId: project.id, type, title, content: detail, tags: [], embedding, createdAt: Date.now(), confidence: 'observation' });
+    const tags = (extra.tags ?? '').split(',').map(t => t.trim().toLowerCase()).filter(Boolean).slice(0, 4);
+    const category = ENTRY_CATEGORIES.includes(extra.category as EntryCategory)
+      ? extra.category as EntryCategory
+      : undefined;
+    await insertEntry({
+      id: nanoid(), projectId: project.id, type, title, content: detail, tags,
+      embedding, createdAt: Date.now(), confidence: 'observation',
+      ...(extra.error?.trim() ? { errorPattern: extra.error.trim() } : {}),
+      ...(category ? { category } : {}),
+    });
     if (inq) {
       console.log(`  ${GREEN}✓${RESET} Saved  ${DIM}[${type}]${RESET}\n`);
     } else {
@@ -1888,7 +1909,19 @@ async function main(): Promise<void> {
     switch (command) {
       case 'setup':   await runOnboarding();                       break;
       case 'init':    await handleInit();                          break;
-      case 'note':    await handleNote(args.slice(1).join(' '));   break;
+      case 'note': {
+        const rest = args.slice(1);
+        const flags = new Set(['--error', '--category', '--tags']);
+        // Keep only the words that are not a flag or a flag's value, so the
+        // note text can still be given unquoted.
+        const words = rest.filter((a, i) => !flags.has(a) && !flags.has(rest[i - 1] ?? ''));
+        await handleNote(words.join(' '), undefined, {
+          error: flag(rest, '--error'),
+          category: flag(rest, '--category'),
+          tags: flag(rest, '--tags'),
+        });
+        break;
+      }
       case 'search':  await handleSearch(args.slice(1).join(' ')); break;
       case 'context': await handleContext(args.slice(1).join(' ') || undefined); break;
       case 'project': case 'projects': {
@@ -1898,7 +1931,11 @@ async function main(): Promise<void> {
         break;
       }
       case 'run':     await handleRun(args.slice(1));              break;
-      case 'index':   await handleIndex(args[1]);                  break;
+      case 'index': {
+        const rest = args.slice(1);
+        await handleIndex(rest.find(a => !a.startsWith('--')), { force: rest.includes('--force') });
+        break;
+      }
       case 'backfill': await handleBackfill(args.slice(1));        break;
       case 'hooks':   await handleHooks(args.slice(1));            break;
       // Called by Claude Code, not by people. Never fails.

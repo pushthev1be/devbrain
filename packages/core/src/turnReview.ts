@@ -51,8 +51,12 @@ export function buildRecordPrompt(events: DigestEvent[]): string {
     .filter(Boolean).slice(-3);
   const files = unique(events.filter(e => e.kind === 'edit').map(e => shortPath(e.text))).slice(-6);
 
+  // The exact string is handed over, not described. DevBrain already has it,
+  // and asking the agent to retype an error it read minutes ago is how entries
+  // ended up without one: on a real project only 3 of 130 carried a pattern,
+  // and an entry without one can never be matched to a future failure.
   const evidence: string[] = [];
-  for (const err of errors) evidence.push(`- error seen: ${err.length > 160 ? `${err.slice(0, 160)}…` : err}`);
+  for (const err of errors) evidence.push(`- error seen — use this verbatim as error_pattern:\n    ${err.length > 200 ? `${err.slice(0, 200)}` : err}`);
   if (files.length) evidence.push(`- files changed: ${files.join(', ')}`);
 
   return [
@@ -73,11 +77,14 @@ export function buildRecordPrompt(events: DigestEvent[]): string {
  * something, so the Stop hook and backfill hold entries to the same bar.
  */
 export const ENTRY_GUIDE: readonly string[] = [
-  '(or run `devbrain note "fix: <title> — <cause and fix>"` if the tool is not available):',
+  '(or, if the tool is not available, `devbrain note "fix: <title> — <cause and fix>" --error "<exact error>"`',
+  ' — the --error flag matters, because without it the CLI stores no pattern at all):',
   '- type: fix, bug, decision, lesson, anti-pattern, pattern or stack',
   '- title: the symptom or the decision, searchable, under 90 characters. Not "Fixed X" or "Updated Y".',
   '- content: the root cause, then the exact fix — or for a decision, what was chosen, what was rejected, and why',
-  '- error_pattern: the exact error text, copied verbatim, whenever there was one',
+  '- error_pattern: the exact error text, copied verbatim, whenever there was one. This is the',
+  '  field that lets a future failure find the entry — an entry without one can only be found',
+  '  by someone already searching for it. Copy any error quoted above exactly, character for character.',
 ];
 
 /**

@@ -16,6 +16,7 @@
 
 import { createHash } from 'crypto';
 import type { Entry, EntryType, EntrySource, Project } from './types';
+import { looksLikeError } from './transcript';
 
 export interface ParsedSection {
   anchor: string;
@@ -146,10 +147,20 @@ export interface IndexPlan {
  * Kept separate from applying it so the CLI can show a plan, and so the
  * reconciliation logic is testable without a database.
  */
+/**
+ * @param opts.force Re-derive every section even when its body is unchanged.
+ *
+ * The hash answers "did the source change", which is not the same question as
+ * "would indexing produce something different now". When the indexer itself
+ * learns something — extracting error patterns, say — every previously indexed
+ * section is stale in a way no hash can see, and without this they would stay
+ * frozen at the old logic forever.
+ */
 export function planIndex(
   sections: ParsedSection[],
   existing: Entry[],
   file: string,
+  opts: { force?: boolean } = {},
 ): IndexPlan {
   const derived = existing.filter(e => e.source?.file === file && !e.supersededBy);
   const byAnchor = new Map(derived.map(e => [e.source!.anchor, e]));
@@ -161,7 +172,7 @@ export function planIndex(
     seen.add(section.anchor);
     const match = byAnchor.get(section.anchor);
     if (!match) plan.added.push(section);
-    else if (match.source!.hash !== section.hash) plan.updated.push({ section, entry: match });
+    else if (opts.force || match.source!.hash !== section.hash) plan.updated.push({ section, entry: match });
     else plan.unchanged++;
   }
 
@@ -173,6 +184,73 @@ export function planIndex(
 }
 
 /** Build the stored entry for a parsed section. */
+// A template lifted out of source code rather than a real error anyone could
+// paste: "Gemini error {errorCode}", "Failed: ${reason}".
+const PLACEHOLDER = /\$\{[^}]*\}|\{[a-zA-Z_][\w.]*\}|<[A-Z_]{2,}>|%[sd]\b/;
+
+/** A JSON error payload, which is an error by shape without saying "Error". */
+const JSON_ERROR = /^\{[\s\S]*"(?:error|message|code)"\s*:/;
+
+/**
+ * A named error type anywhere in the line: `QuotaExceededError`, `TypeError`.
+ *
+ * The capital is doing the work. It admits the token even with no colon and no
+ * message after it — real files name errors that way, in a heading or mid
+ * sentence — while "error handling" and "a permissions error" stay out, because
+ * a lowercase `error` can never match.
+ */
+const NAMED_ERROR = /\b[A-Z][\w.]*(?:Error|Exception)\b/;
+
+/**
+ * A verbatim error string from a section body, or undefined.
+ *
+ * This is what makes an indexed entry reachable by the failure hook, which
+ * matches a failing command's output against stored error patterns. Without it
+ * a CLAUDE.md bug write-up can only be found by someone already searching for
+ * it — and on a real file the errors are sitting right there in the prose,
+ * usually inside backticks. Measured before this existed: 0 of 85 indexed
+ * entries carried a pattern, so none of them could ever be recalled.
+ *
+ * Shape is required, not the word "error". Prose that merely describes one
+ * ("it threw a permissions error") is not something anyone can paste.
+ */
+export function extractErrorPattern(body: string, title = ''): string | undefined {
+  const candidates: string[] = [];
+
+  // An explicit field wins: the author already said this is the error. Prefer a
+  // backticked span inside it, because field() reads to the next field and so
+  // carries the sentences after the error along with it.
+  //
+  // "Problem" is here because that is what real files call it. Looking only for
+  // "Error" found nothing at all in an 85-section CLAUDE.md whose every bug was
+  // written up under **Problem**.
+  for (const name of ['Error', 'Symptom', 'Problem']) {
+    const explicit = field(body, name);
+    if (!explicit) continue;
+    for (const m of explicit.matchAll(/`([^`]{6,200})`/g)) candidates.push(m[1]);
+    candidates.push(explicit);
+  }
+
+  // Then fenced blocks and inline code, where a verbatim error normally goes.
+  for (const m of body.matchAll(/```[a-zA-Z]*\n([\s\S]*?)```/g)) candidates.push(...m[1].split('\n'));
+  for (const m of body.matchAll(/`([^`\n]{6,200})`/g)) candidates.push(m[1]);
+  // The heading often carries the error name when the body only describes it.
+  if (title) candidates.push(title);
+  candidates.push(...body.split('\n'));
+
+  for (const raw of candidates) {
+    const line = raw
+      .replace(/^[\s>*\-+#]+/, '')   // bullets, quotes and heading markers
+      .replace(/^\d+\.\s*/, '')      // "6. localStorage QuotaExceededError"
+      .replace(/`/g, '')
+      .trim();
+    if (line.length < 6 || line.length > 200) continue;
+    if (PLACEHOLDER.test(line)) continue;
+    if (looksLikeError(line, false) || JSON_ERROR.test(line) || NAMED_ERROR.test(line)) return line;
+  }
+  return undefined;
+}
+
 export function entryForSection(
   section: ParsedSection,
   project: Project,
@@ -199,9 +277,13 @@ export function entryForSection(
     embedding: opts.embedding,
     createdAt: opts.createdAt ?? Date.now(),
     confidence: 'observation',
-    // `**Where**` names the file this knowledge is about — the anchor that makes
-    // a stale entry detectable rather than merely believed.
-    ...(section.where ? { causeArchetype: undefined, errorPattern: undefined } : {}),
+    // Lift the verbatim error out of the prose, so the failure hook can reach
+    // this entry at all. Without it an indexed section is invisible to the one
+    // retrieval path that fires unasked.
+    ...(() => {
+      const errorPattern = extractErrorPattern(section.body, section.title);
+      return errorPattern ? { errorPattern } : {};
+    })(),
     source,
   } as Entry;
 }
