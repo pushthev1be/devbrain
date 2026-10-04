@@ -15,11 +15,15 @@
 // Pure: transcript text in, decision out. No I/O, no model.
 
 import { parseTranscript, assessSegment } from './transcript';
+import { detectStuck, formatStepBack, episodeFingerprints } from './stuck';
+import type { StuckSignal } from './stuck';
 import type { DigestEvent } from './transcript';
 
 export type TurnAction =
   /** Ask the agent to record what this stretch established. */
   | 'ask'
+  /** Interrupt: the work is going in circles rather than progressing. */
+  | 'step-back'
   /** The agent already recorded something here; nothing to ask. */
   | 'recorded'
   /** Nothing yet — keep reading, so this stretch is judged with what follows. */
@@ -29,12 +33,29 @@ export interface TurnReview {
   action: TurnAction;
   /** Line the cursor should move to. Unchanged on `hold`. */
   cursor: number;
-  /** For `ask`: the message shown to the agent. */
+  /** For `ask` and `step-back`: the message shown to the agent. */
   prompt?: string;
+  /** For `step-back`: what is repeating, so the caller can look it up. */
+  signals?: StuckSignal[];
+  /** For `step-back`: every fingerprint of this episode, to mark as already raised. */
+  suppress?: string[];
 }
 
 /** Past this, a stretch is judged now rather than accumulated further. */
 const MAX_HELD_EVENTS = 600;
+
+/**
+ * How far back a loop is looked for, in transcript lines.
+ *
+ * Bounded so a long session does not re-read itself every turn, and short
+ * enough that a loop resolved an hour ago does not keep counting against the
+ * agent now.
+ */
+const STUCK_WINDOW_LINES = 400;
+
+function recentFrom(jsonl: string): number {
+  return Math.max(0, jsonl.split('\n').length - STUCK_WINDOW_LINES);
+}
 
 function unique<T>(items: T[]): T[] {
   return [...new Set(items)];
@@ -91,10 +112,32 @@ export const ENTRY_GUIDE: readonly string[] = [
  * Decide what to do after the agent's turn, given the transcript and the line
  * up to which it has already been reviewed.
  */
-export function reviewTurn(jsonl: string, fromLine: number): TurnReview {
+export function reviewTurn(jsonl: string, fromLine: number, opts: { warned?: readonly string[] } = {}): TurnReview {
   const segment = parseTranscript(jsonl, fromLine);
   const { events, endLine } = segment;
   if (endLine <= fromLine || events.length === 0) return { action: 'hold', cursor: fromLine };
+
+  // Being stuck is checked first, and before the unresolved-error hold below,
+  // because the two look identical from here: an error outstanding and edits
+  // still coming. Held instead of raised, a loop would be waited out in silence
+  // for exactly as long as it kept failing.
+  //
+  // It reads a window of recent history rather than the unreviewed segment,
+  // because the two answer different questions. The cursor tracks what has been
+  // asked about, and it advances every time the agent is asked to record
+  // something — so a loop spread over three turns would be examined one failure
+  // at a time and never look like repetition at all.
+  const recent = parseTranscript(jsonl, recentFrom(jsonl)).events;
+  const signals = detectStuck(recent, { warned: opts.warned });
+  if (signals.length) {
+    // The cursor does not move: this stretch has still established nothing to
+    // record, and once the agent gets unstuck it should be asked to write up
+    // the whole episode, not just the part after the interruption.
+    return {
+      action: 'step-back', cursor: fromLine, prompt: formatStepBack(signals)!, signals,
+      suppress: episodeFingerprints(recent),
+    };
+  }
 
   // The agent saved on its own during this stretch. It chose what mattered;
   // asking again would only produce a duplicate.

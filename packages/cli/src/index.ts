@@ -19,7 +19,7 @@ import {
   isDuplicateEntry, findTextDuplicate, clip,
   parseMarkdownSource, planIndex, entryForSection,
   formatSessionBriefing, briefingEntries, isAlreadyInAgentContext,
-  readCursor, writeCursor, markSurfaced, reviewTurn,
+  readCursor, writeCursor, markSurfaced, markWarned, reviewTurn, formatStepBack,
   looksLikeError, isReadOnlyCommand, recallForFailure, formatRecallForAgent,
   withDevbrainHooks, withoutDevbrainHooks, installedDevbrainHooks,
   nextSessionChunk, formatBackfillBatch, commitExcerpt, BACKFILL_BATCH_BUDGET,
@@ -686,8 +686,33 @@ async function handleHook(event: string): Promise<void> {
     if (typeof transcript !== 'string' || typeof sessionId !== 'string' || !existsSync(transcript)) return;
 
     const cursor = readCursor(sessionId);
-    const review = reviewTurn(readFileSync(transcript, 'utf-8'), cursor.line);
+    const review = reviewTurn(readFileSync(transcript, 'utf-8'), cursor.line, { warned: cursor.warned ?? [] });
     const advance = () => writeCursor(sessionId, review.cursor);
+
+    // Going in circles. Interrupt with what is repeating, plus anything memory
+    // holds about it — the part a generic loop detector cannot do.
+    if (review.action === 'step-back') {
+      const project = await getProjectByPath(getRepoRoot(cwd) ?? cwd);
+      let related: string[] = [];
+      if (project) {
+        const failing = review.signals!.find(s => s.kind === 'repeated-failure');
+        if (failing) {
+          const hits = recallForFailure(failing.subject, await getAllEntriesWithProjects(), {
+            projectId: project.id, topK: 2,
+          });
+          related = hits.map(h => `[${normalizeType(h.entry.type)}] ${h.entry.title} (id: ${h.entry.id})`);
+          if (hits.length) bumpRecallCounts(hits.map(h => h.entry.id)).catch(() => {});
+        }
+      }
+      markWarned(sessionId, review.suppress ?? review.signals!.map(s => s.fingerprint));
+      captureLog(`${project?.name ?? '?'} ${sessionId.slice(0, 8)}: step-back — ` +
+        review.signals!.map(s => s.kind + ' x' + s.count).join(', '));
+      process.stdout.write(JSON.stringify({
+        decision: 'block',
+        reason: formatStepBack(review.signals!, related),
+      }));
+      return;
+    }
 
     if (review.action !== 'ask') {
       if (review.cursor !== cursor.line) advance();

@@ -155,6 +155,21 @@ describe('session cursor', () => {
     expect(existsSync(join(home, '.devbrain', 'sessions', 's1.json'))).toBe(true);
   });
 
+  it('writing one field does not erase another', async () => {
+    // These are written by different hooks on different turns, so a lossy
+    // read-modify-write silently disarms whichever one was written first.
+    const { markSurfaced, markWarned } = await import('./sessionCursor');
+    writeCursor('s2', 10);
+    markSurfaced('s2', ['e1']);
+    markWarned('s2', ['err:boom']);
+    markSurfaced('s2', ['e2']);
+
+    const state = readCursor('s2');
+    expect(state.line).toBe(10);
+    expect(state.surfaced).toEqual(['e1', 'e2']);
+    expect(state.warned).toEqual(['err:boom']);
+  });
+
   it('keeps an odd session id inside the sessions folder', () => {
     writeCursor('../../evil', 3);
     expect(readCursor('../../evil').line).toBe(3);
