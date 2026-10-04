@@ -70,6 +70,11 @@ function commandFingerprint(command: string): string {
   return command.toLowerCase().replace(/\s+/g, ' ').trim().slice(0, 120);
 }
 
+/** The tail of a path: an absolute Windows path reads as noise in a one-line warning. */
+function shortPath(path: string): string {
+  return path.replace(/\\/g, '/').split('/').slice(-2).join('/');
+}
+
 function tally<T>(items: T[]): Map<T, number> {
   const counts = new Map<T, number>();
   for (const item of items) counts.set(item, (counts.get(item) ?? 0) + 1);
@@ -111,12 +116,16 @@ export function detectStuck(events: DigestEvent[], opts: StuckOptions = {}): Stu
     signals.push({ kind: 'retry-loop', subject: cmd, count, fingerprint: 'cmd:' + cmd });
   }
 
-  // One file rewritten repeatedly while errors keep arriving. Without the error
-  // condition this would fire on ordinary iterative work, which is not stuck.
-  if (errors.length >= 2) {
+  // One file rewritten repeatedly, but only while the *same* error keeps coming
+  // back. Thrashing is not a signal on its own: editing a file many times while
+  // different errors appear and get fixed is what productive work looks like,
+  // and gating only on "some errors happened" fired on exactly that — 30 edits
+  // across a busy window with six unrelated, already-resolved errors in it.
+  // Without a recurring failure there is no evidence the edits are not working.
+  if (signals.some(s => s.kind === 'repeated-failure')) {
     for (const [file, count] of tally(edits.map(e => e.text))) {
       if (count < editLimit) continue;
-      signals.push({ kind: 'thrashing', subject: file, count, fingerprint: 'file:' + file });
+      signals.push({ kind: 'thrashing', subject: shortPath(file), count, fingerprint: 'file:' + file });
     }
   }
 

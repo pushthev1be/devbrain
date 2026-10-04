@@ -50,6 +50,26 @@ describe('detectStuck — staying quiet', () => {
     expect(detectStuck([edit('a.ts'), edit('a.ts'), edit('a.ts'), edit('a.ts'), edit('a.ts')])).toEqual([]);
   });
 
+  it('says nothing about heavy editing alongside unrelated errors that were fixed', () => {
+    // Taken from a false positive this raised on its own author: 30 edits over
+    // a busy window containing six distinct, already-resolved errors. That is
+    // what a productive session looks like, and warning there teaches the agent
+    // to ignore the channel.
+    const events: DigestEvent[] = [];
+    for (let i = 0; i < 8; i++) {
+      events.push(edit('src/indexSource.ts'), edit('src/turnReview.ts'), say());
+    }
+    for (const distinct of ['TS2305: Module has no exported member markWarned',
+                            'TypeError: x is not a function',
+                            'npm ERR! missing script: buildz',
+                            'AssertionError: expected 2 to be 3',
+                            'ENOENT: no such file or directory',
+                            'SyntaxError: Unexpected token']) {
+      events.push(err(distinct), edit('src/fix.ts'));
+    }
+    expect(detectStuck(events)).toEqual([]);
+  });
+
   it('does not raise the same loop twice in a session', () => {
     const events = [err(TS), edit('a.ts'), err(TS), edit('a.ts'), err(TS)];
     const [first] = detectStuck(events);
@@ -84,11 +104,21 @@ describe('detectStuck — speaking up', () => {
     expect(retry.count).toBe(3);
   });
 
-  it('catches one file rewritten while the errors keep coming', () => {
+  it('catches one file rewritten while the SAME error keeps coming back', () => {
+    // Only alongside a recurring failure. Distinct errors appearing and being
+    // fixed between edits is progress, however many edits there are.
     const signals = detectStuck([
-      err('a'), edit('src/x.ts'), err('b'), edit('src/x.ts'), edit('src/x.ts'), edit('src/x.ts'),
+      err(TS), edit('src/x.ts'), err(TS), edit('src/x.ts'), err(TS), edit('src/x.ts'), edit('src/x.ts'),
     ]);
     expect(signals.find(s => s.kind === 'thrashing')?.subject).toBe('src/x.ts');
+  });
+
+  it('reports the file by its tail, not an absolute path', () => {
+    const long = 'C:\\Users\\me\\proj\\packages\\core\\src\\indexSource.ts';
+    const signals = detectStuck([
+      err(TS), edit(long), err(TS), edit(long), err(TS), edit(long), edit(long),
+    ]);
+    expect(signals.find(s => s.kind === 'thrashing')?.subject).toBe('src/indexSource.ts');
   });
 
   it('puts the most repeated signal first', () => {
