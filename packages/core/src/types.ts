@@ -165,6 +165,24 @@ export interface Entry {
   /** The entry this one corrects, so the chain can be walked backwards. */
   supersedes?: string;
   /**
+   * The agent session this was recorded in.
+   *
+   * Entries saved in one session are almost always one episode of work, so this
+   * is what makes a sequence of them readable as progression rather than as
+   * unrelated rows that happen to share a timestamp. Captured from the hook,
+   * which knows the session; the save paths look it up by project.
+   */
+  sessionId?: string;
+  /**
+   * id of the entry this one resolves — the bug this fix fixed.
+   *
+   * Distinct from `supersedes`, which means the other entry was *wrong*. This
+   * means it was right and is now closed, so both stay true and both keep
+   * surfacing. Without it a bug and its fix are two unrelated rows and there is
+   * no answer to "where did this get fixed".
+   */
+  fixes?: string;
+  /**
    * Evidence that this entry is true — never how often it was read back.
    * observation  — recorded once, unverified
    * corroborated — a human confirmed it, or it recurred in a second project

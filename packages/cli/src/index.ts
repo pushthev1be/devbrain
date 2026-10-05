@@ -16,10 +16,11 @@ import {
   describeStorage, getLocalDbPath, closeDb,
   ENTRY_TYPES, ENTRY_CATEGORIES, normalizeType, getAllProjects,
   buildDossier, formatDossierMarkdown, dossierFiles, measureUse, describeUse,
-  isDuplicateEntry, findTextDuplicate, clip,
+  findDuplicate, findTextDuplicate, clip,
   parseMarkdownSource, planIndex, entryForSection,
   formatSessionBriefing, briefingEntries, isAlreadyInAgentContext,
-  readCursor, writeCursor, markSurfaced, markWarned, reviewTurn, formatStepBack,
+  readCursor, writeCursor, markSurfaced, markWarned, markActiveSession, activeSession,
+  reviewTurn, formatStepBack, buildRecordPrompt, openBugsInSession,
   looksLikeError, isReadOnlyCommand, isEchoedOutput, isGenericFailureLine, recallForFailure, formatRecallForAgent,
   withDevbrainHooks, withoutDevbrainHooks, installedDevbrainHooks,
   nextSessionChunk, formatBackfillBatch, commitExcerpt, BACKFILL_BATCH_BUDGET,
@@ -611,6 +612,10 @@ async function handleHook(event: string): Promise<void> {
 
     if (event === 'session-start') {
       const repoRoot = getRepoRoot(cwd) ?? cwd;
+      // Only the hooks are told the session id. Recorded here so save_entry and
+      // `devbrain note` can stamp it, which is what makes a run of entries
+      // readable as one episode instead of unrelated rows.
+      if (typeof input.session_id === 'string') markActiveSession(repoRoot, input.session_id);
       const project = await getProjectByPath(repoRoot);
       if (!project) return;
       const all = await getAllEntriesWithProjects();
@@ -693,6 +698,7 @@ async function handleHook(event: string): Promise<void> {
     const sessionId = input.session_id;
     if (typeof transcript !== 'string' || typeof sessionId !== 'string' || !existsSync(transcript)) return;
 
+    markActiveSession(getRepoRoot(cwd) ?? cwd, sessionId);
     const cursor = readCursor(sessionId);
     const review = reviewTurn(readFileSync(transcript, 'utf-8'), cursor.line, { warned: cursor.warned ?? [] });
     const advance = () => writeCursor(sessionId, review.cursor);
@@ -733,8 +739,15 @@ async function handleHook(event: string): Promise<void> {
     if (!project) return;
 
     advance();
-    captureLog(`${project.name} ${sessionId.slice(0, 8)}: asked the agent to record this stretch`);
-    process.stdout.write(JSON.stringify({ decision: 'block', reason: review.prompt }));
+    // The `fixes` link is offered here rather than inside reviewTurn because
+    // only this point in the hook has the database: knowing which bugs are
+    // still open is a query, and running it on every turn would make the
+    // common case (nothing to ask) pay for the rare one.
+    const open = openBugsInSession(await getEntriesByProject(project.id), sessionId);
+    const prompt = open.length ? buildRecordPrompt(review.events!, open) : review.prompt;
+    captureLog(`${project.name} ${sessionId.slice(0, 8)}: asked the agent to record this stretch` +
+      (open.length ? `, offering ${open.length} open bug(s) to close` : ''));
+    process.stdout.write(JSON.stringify({ decision: 'block', reason: prompt }));
   } catch (err) {
     captureLog(`hook ${event} failed: ${explainError(err)}`);
   }
@@ -1116,7 +1129,7 @@ function parseQuickSave(text: string): { type: Entry['type']; content: string } 
 async function handleNote(
   text: string,
   inq?: any,
-  extra: { error?: string; category?: string; tags?: string } = {},
+  extra: { error?: string; category?: string; tags?: string; fixes?: string } = {},
 ): Promise<void> {
   if (!text.trim()) return;
   const cwd = process.cwd();
@@ -1222,9 +1235,16 @@ async function handleNote(
       : content;
 
     // With no embedding (no AI configured), compare titles instead.
-    const known = !inq && (embedding
-      ? await isDuplicateEntry(embedding, project.id)
-      : !!(await findTextDuplicate(title, project.id).catch(() => null)));
+    //
+    // The entry being closed never counts as the duplicate. A fix restates the
+    // bug it fixes almost word for word, so without this the fix is rejected as
+    // already known, the link is never written, and the bug stays open forever.
+    const dupe = !inq
+      ? await (embedding
+          ? findDuplicate(embedding, project.id)
+          : findTextDuplicate(title, project.id)).catch(() => null)
+      : null;
+    const known = !!dupe && dupe.entry.id !== extra.fixes?.trim();
     if (known) {
       s.stop();
       console.log(`  ${DIM}Already known — near-duplicate of an existing entry, not saved.${RESET}\n`);
@@ -1235,11 +1255,22 @@ async function handleNote(
     const category = ENTRY_CATEGORIES.includes(extra.category as EntryCategory)
       ? extra.category as EntryCategory
       : undefined;
+    // Read once. Looked up twice, the value could change between the check and
+    // the use and store `sessionId: undefined`.
+    const session = activeSession(project.path);
+    // An id that matches nothing would be an edge to nothing: the graph would
+    // show the bug as closed with no other end to look at. Checked, not trusted.
+    const wants = extra.fixes?.trim();
+    const closes = wants
+      ? (await getEntriesByProject(project.id)).find(e => e.id === wants)
+      : undefined;
     await insertEntry({
       id: nanoid(), projectId: project.id, type, title, content: detail, tags,
       embedding, createdAt: Date.now(), confidence: 'observation',
       ...(extra.error?.trim() ? { errorPattern: extra.error.trim() } : {}),
       ...(category ? { category } : {}),
+      ...(session ? { sessionId: session } : {}),
+      ...(closes ? { fixes: closes.id } : {}),
     });
     if (inq) {
       console.log(`  ${GREEN}✓${RESET} Saved  ${DIM}[${type}]${RESET}\n`);
@@ -1247,6 +1278,8 @@ async function handleNote(
       s.succeed(`Saved  ${DIM}[${type}]${RESET}`);
       console.log();
     }
+    if (closes) console.log(`  ${DIM}Closes: ${clip(closes.title, 70)}${RESET}\n`);
+    else if (wants) console.log(`  ${DIM}No entry with id ${wants}, so nothing was linked.${RESET}\n`);
   } catch (err) {
     s.fail('Failed to save');
     reportError(err);
@@ -1953,7 +1986,7 @@ async function main(): Promise<void> {
       case 'init':    await handleInit();                          break;
       case 'note': {
         const rest = args.slice(1);
-        const flags = new Set(['--error', '--category', '--tags']);
+        const flags = new Set(['--error', '--category', '--tags', '--fixes']);
         // Keep only the words that are not a flag or a flag's value, so the
         // note text can still be given unquoted.
         const words = rest.filter((a, i) => !flags.has(a) && !flags.has(rest[i - 1] ?? ''));
@@ -1961,6 +1994,7 @@ async function main(): Promise<void> {
           error: flag(rest, '--error'),
           category: flag(rest, '--category'),
           tags: flag(rest, '--tags'),
+          fixes: flag(rest, '--fixes'),
         });
         break;
       }

@@ -17,7 +17,7 @@ import {
   autoArchetype, supersedeEntry,
   ENTRY_TYPES, ENTRY_TYPE_NAMES, normalizeType,
   buildDossier, describeStorage, findDuplicate, findTextDuplicate, clip, measureUse,
-  filterUnprocessedCommits, listCommitHashes,
+  filterUnprocessedCommits, listCommitHashes, activeSession,
 } from '@devbrain/core';
 import type { EntryCategory } from '@devbrain/core';
 import type { Entry } from '@devbrain/core';
@@ -173,6 +173,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           error_pattern: { type: 'string', description: 'The exact error text, copied verbatim. Include whenever there was one.' },
           cause_archetype: { type: 'string', description: 'The transferable class of mistake, as a short phrase, e.g. "environment config divergence between local and deploy".' },
           supersedes: { type: 'string', description: 'id of an entry this corrects (from search_knowledge). It is retracted in the same call.' },
+          fixes: { type: 'string', description: 'id of the bug this resolves (from search_knowledge). Use when you have just fixed something DevBrain already recorded — unlike supersedes, both entries stay true, and this is what records where the bug was closed.' },
           project_path: { type: 'string', description: 'Absolute path to the project. Omit to use the current working directory.' },
         },
         required: ['type', 'title', 'content'],
@@ -300,10 +301,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     // ── save_entry ────────────────────────────────────────────────────────────
     if (name === 'save_entry') {
-      const { type, title, content, tags = [], category, error_pattern, cause_archetype, project_path, supersedes } = args as {
+      const { type, title, content, tags = [], category, error_pattern, cause_archetype, project_path, supersedes, fixes } = args as {
         type: Entry['type']; title: string; content: string;
         tags?: string[]; category?: EntryCategory; error_pattern?: string; cause_archetype?: string;
-        project_path?: string; supersedes?: string;
+        project_path?: string; supersedes?: string; fixes?: string;
       };
 
       const cwd      = project_path ?? process.cwd();
@@ -318,7 +319,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // A correction: check the target first, so nothing is saved if it cannot apply.
-      const target = supersedes ? (await getAllEntriesWithProjects()).find(e => e.id === supersedes) : undefined;
+      // The bug being closed is resolved from the same read, so an id that does
+      // not exist is never written down as an edge to nothing.
+      const known = supersedes || fixes ? await getAllEntriesWithProjects() : [];
+      const target = supersedes ? known.find(e => e.id === supersedes) : undefined;
+      const closing = fixes ? known.find(e => e.id === fixes) : undefined;
       if (target?.source) {
         // Derived from a file, which stays the source of truth: retracting it
         // here would be undone by the next `devbrain index`.
@@ -337,12 +342,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       try { embedding = await getEmbedding(`${title} ${content} ${tags.join(' ')}`); } catch {}
 
       // Agents restate the same insight across a long task. Embeddings when there
-      // are any, titles otherwise. The entry being corrected is naturally similar
-      // to its correction, so it never counts as the duplicate.
+      // are any, titles otherwise. Neither the entry being corrected nor the bug
+      // being closed counts as the duplicate: both are naturally near-identical
+      // to the entry that names them, and rejecting that entry would mean the
+      // correction never lands and the bug is never closed.
       const dupe = embedding
         ? await findDuplicate(embedding, project.id).catch(() => null)
         : await findTextDuplicate(title, project.id).catch(() => null);
-      if (dupe && dupe.entry.id !== supersedes) {
+      if (dupe && dupe.entry.id !== supersedes && dupe.entry.id !== fixes) {
         return { content: [{ type: 'text', text:
           `DevBrain: already known — this matches an existing entry, so nothing was added.\n` +
           `Existing: [${normalizeType(dupe.entry.type)}] ${dupe.entry.title} (id: ${dupe.entry.id})\n` +
@@ -351,6 +358,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       const newId = nanoid();
+      // Read once, not once per use: looked up twice, the value could change
+      // between the check and the use and store `sessionId: undefined`.
+      const session = activeSession(project.path);
       await insertEntry({
         id: newId, projectId: project.id,
         // Clip on a word boundary: a title cut mid-token is the first thing anyone reads.
@@ -359,6 +369,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         ...(category      ? { category }                      : {}),
         ...(error_pattern ? { errorPattern: error_pattern }   : {}),
         ...(archetype     ? { causeArchetype: archetype }     : {}),
+        // Stamped from the hook's record of which session owns this project, so
+        // a run of entries reads as one episode rather than unrelated rows.
+        ...(session ? { sessionId: session } : {}),
+        ...(closing ? { fixes: closing.id } : {}),
       });
 
       // Retract in the same call that records the correction, so the wrong
@@ -373,8 +387,19 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
       }
 
+      // A fix that names the bug it closed is what makes the history readable
+      // later; a dangling id would quietly produce an edge to nothing.
+      let closed = '';
+      if (fixes) {
+        closed = closing
+          ? `
+Closes: "${clip(closing.title, 70)}" — both stay, linked.`
+          : `
+Note: no entry with id ${fixes}, so nothing was linked.`;
+      }
+
       const confirmation = saveConfirmation(type, title, category, archetype, error_pattern);
-      return { content: [{ type: 'text', text: `DevBrain: ${confirmation}${retracted}` }] };
+      return { content: [{ type: 'text', text: `DevBrain: ${confirmation}${retracted}${closed}` }] };
     }
 
     return { content: [{ type: 'text', text: `Unknown tool: ${name}. DevBrain has get_context, search_knowledge and save_entry.` }], isError: true };

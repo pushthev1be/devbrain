@@ -87,6 +87,39 @@ export function markSurfaced(sessionId: string, ids: readonly string[]): void {
   patchState(sessionId, { surfaced: [...new Set([...seen, ...ids])].slice(-200) });
 }
 
+/**
+ * Which session is currently working in which project.
+ *
+ * The saves happen through the MCP tool and the CLI, neither of which is told
+ * the session id — only the hooks know it. So the hooks record it here, keyed
+ * by project, and the save paths look it up. Two sessions in one repo at once
+ * means the later one wins; the cost is an entry attributed to the wrong
+ * sibling session, which is why nothing depends on this being exact.
+ */
+const ACTIVE_PATH = () => join(sessionsDir(), 'active.json');
+
+/** Past this, a recorded session is assumed finished rather than idle. */
+const ACTIVE_TTL_MS = 12 * 60 * 60 * 1000;
+
+export function markActiveSession(projectPath: string, sessionId: string): void {
+  if (!projectPath || !sessionId) return;
+  let map: Record<string, { sessionId: string; at: number }> = {};
+  try { map = JSON.parse(readFileSync(ACTIVE_PATH(), 'utf-8')); } catch { /* first write */ }
+  map[projectPath] = { sessionId, at: Date.now() };
+  mkdirSync(sessionsDir(), { recursive: true });
+  writeFileSync(ACTIVE_PATH(), JSON.stringify(map), 'utf-8');
+}
+
+export function activeSession(projectPath: string): string | undefined {
+  try {
+    const row = JSON.parse(readFileSync(ACTIVE_PATH(), 'utf-8'))[projectPath];
+    if (!row) return undefined;
+    return Date.now() - row.at < ACTIVE_TTL_MS ? row.sessionId : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Record that these loops have been raised, so each is named once per session. */
 export function markWarned(sessionId: string, fingerprints: readonly string[]): void {
   if (!fingerprints.length) return;
