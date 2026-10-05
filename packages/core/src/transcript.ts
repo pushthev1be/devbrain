@@ -115,14 +115,35 @@ export function errorExcerpt(output: string, max = 600): string {
   const lines = output.split(/\r?\n/);
   const keep: string[] = [];
   for (let i = 0; i < lines.length && keep.join('\n').length < max; i++) {
-    if (ERROR_LINE.test(lines[i])) {
-      keep.push(lines[i].trimEnd());
-      if (lines[i + 1]?.trim()) keep.push(lines[i + 1].trimEnd());
-      i++;
-    }
+    // A generic line is never the best text available: it announces the failure
+    // without describing it, so it is skipped even though it looks like an error.
+    if (!ERROR_LINE.test(lines[i]) || isGenericFailureLine(lines[i])) continue;
+    keep.push(lines[i].trimEnd());
+    if (lines[i + 1]?.trim()) { keep.push(lines[i + 1].trimEnd()); i++; }
   }
-  const text = (keep.length ? keep : lines.filter(l => l.trim()).slice(-6)).join('\n').trim();
+  const informative = lines.filter(l => l.trim() && !isGenericFailureLine(l)).slice(-6);
+  // Last resort: a command that failed and said nothing else. "Exit code 1" is
+  // then all there is, and an empty excerpt would be worse — it would make
+  // every silent failure identical to every other kind.
+  const anything = lines.filter(l => l.trim()).slice(-3);
+  const text = (keep.length ? keep : informative.length ? informative : anything).join('\n').trim();
   return text.length > max ? text.slice(0, max) : text;
+}
+
+/**
+ * A line that announces a failure without describing it.
+ *
+ * "Exit code 1" is equally true of every failed command. Chosen as the failure
+ * text it discards the only part worth matching on — which is exactly what
+ * happened: a command failed with "No Gemini credentials", an entry stored that
+ * very pattern, and the recall matched nothing because it searched for
+ * "Exit code 1". It also makes unrelated failures fingerprint identically, so
+ * the loop detector sees a repeat that never happened.
+ */
+const GENERIC_FAILURE = /^\s*(?:exit (?:code|status) \d+|command failed[.:]?|FAIL|✗|×)\s*$/i;
+
+export function isGenericFailureLine(line: string): boolean {
+  return GENERIC_FAILURE.test(line);
 }
 
 /** True when a tool result reports a failure. */

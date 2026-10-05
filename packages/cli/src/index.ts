@@ -20,7 +20,7 @@ import {
   parseMarkdownSource, planIndex, entryForSection,
   formatSessionBriefing, briefingEntries, isAlreadyInAgentContext,
   readCursor, writeCursor, markSurfaced, markWarned, reviewTurn, formatStepBack,
-  looksLikeError, isReadOnlyCommand, isEchoedOutput, recallForFailure, formatRecallForAgent,
+  looksLikeError, isReadOnlyCommand, isEchoedOutput, isGenericFailureLine, recallForFailure, formatRecallForAgent,
   withDevbrainHooks, withoutDevbrainHooks, installedDevbrainHooks,
   nextSessionChunk, formatBackfillBatch, commitExcerpt, BACKFILL_BATCH_BUDGET,
 } from '@devbrain/core';
@@ -665,10 +665,14 @@ async function handleHook(event: string): Promise<void> {
 
       if (sessionId) markSurfaced(sessionId, hits.map(h => h.entry.id));
       const recalled = hits.map(h => h.entry.id);
-      bumpRetrievalCounts(recalled, project.id).catch(() => {});
+      // Awaited, not fired and forgotten. These race closeDb() and process exit,
+      // and against a remote store they lose: the recall was handed over and the
+      // count stayed at zero, which is worse than not measuring at all because
+      // it reads as "this never helped".
+      await bumpRetrievalCounts(recalled, project.id).catch(() => {});
       // The one surfacing that shows the entry earned its place: a command
       // failed and this entry matched it. Counted apart from being shown.
-      bumpRecallCounts(recalled).catch(() => {});
+      await bumpRecallCounts(recalled).catch(() => {});
       captureLog(`${project.name} ${sessionId.slice(0, 8)}: recalled ${hits.length} for "${clip(failure, 60)}"`);
       process.stdout.write(JSON.stringify({
         hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: message },
@@ -705,7 +709,7 @@ async function handleHook(event: string): Promise<void> {
             projectId: project.id, topK: 2,
           });
           related = hits.map(h => `[${normalizeType(h.entry.type)}] ${h.entry.title} (id: ${h.entry.id})`);
-          if (hits.length) bumpRecallCounts(hits.map(h => h.entry.id)).catch(() => {});
+          if (hits.length) await bumpRecallCounts(hits.map(h => h.entry.id)).catch(() => {});
         }
       }
       markWarned(sessionId, review.suppress ?? review.signals!.map(s => s.fingerprint));
@@ -907,13 +911,19 @@ export function extractFailure(output: string): string | null {
     .filter(l => !/^\s*at\s+/.test(l));             // drop stack frames
   if (lines.length === 0) return null;
 
+  // "Exit code 1" is the last line of most failures and describes none of them.
+  // Left in, it won the fallback below and became the text every lookup
+  // searched for, which matches nothing in particular.
+  const informative = lines.filter(l => !isGenericFailureLine(l));
+  const usable = informative.length ? informative : lines;
+
   // Search the tail first: the failure is usually near the end of a log.
-  const tail = lines.slice(-80).reverse();
+  const tail = usable.slice(-80).reverse();
   for (const re of ERROR_SIGNALS) {
     const hit = tail.find(l => re.test(l));
     if (hit) return hit.slice(0, 300);
   }
-  return lines[lines.length - 1].slice(0, 300);
+  return usable[usable.length - 1].slice(0, 300);
 }
 
 /**
@@ -998,10 +1008,13 @@ async function handleRun(argv: string[]): Promise<void> {
     });
 
     const matched = hits.map(r => r.entry.id);
-    bumpRetrievalCounts(matched, project?.id).catch(() => {});
+    // Awaited before the finally block exits the process. It also leaves no
+    // write in flight at exit, which is the condition the libuv assertion noted
+    // below is about.
+    await bumpRetrievalCounts(matched, project?.id).catch(() => {});
     // `run` only looks anything up because the wrapped command failed, so every
     // hit here is a failure caught, exactly as in the PostToolUse hook.
-    bumpRecallCounts(matched).catch(() => {});
+    await bumpRecallCounts(matched).catch(() => {});
     console.log(`${DIM}${'─'.repeat(W)}${RESET}\n`);
   } catch {
     // A memory lookup must never add noise to a failing build.
