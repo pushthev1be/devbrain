@@ -49,6 +49,34 @@ const ERROR_LINE =
 const READ_COMMAND = /^\s*(?:cd\s+\S+\s*&&\s*)?(?:cat|sed\s+-n|head|tail|less|grep|rg|ls|find|git\s+(?:show|diff|log|grep|blame)|Get-Content|Select-String|type)\b/;
 
 /**
+ * DevBrain's own messages, which quote the error they are about.
+ *
+ * A step-back or a recall lands in the transcript carrying error text, so the
+ * next parse reads it as a fresh failure and the warning becomes its own
+ * evidence. Matched on the opening phrases rather than the word "DevBrain",
+ * which an application is free to print for its own reasons.
+ */
+const SELF_VOICE = /DevBrain: (?:step back|this stretch of work|this failure matches)|# DevBrain backfill/;
+
+/**
+ * True when output is DevBrain quoting an error back, or a command printing an
+ * error string it was handed.
+ *
+ * The second case is what test fixtures and demo scripts do: the literal error
+ * appears in the command, so the command did not discover a failure, it echoed
+ * one. Both are distinguishable from a real failure precisely because the text
+ * was already there before the command ran.
+ */
+export function isEchoedOutput(output: string, command?: string): boolean {
+  if (SELF_VOICE.test(output)) return true;
+  if (!command) return false;
+  const flat = (s: string) => s.toLowerCase().replace(/\s+/g, ' ');
+  const line = flat(errorExcerpt(output).split('\n')[0]);
+  // Short lines match too easily to be evidence of anything.
+  return line.length >= 20 && flat(command).includes(line.slice(0, 60));
+}
+
+/**
  * True when a command only prints files or searches them.
  *
  * Their output is source code, which is full of the word Error, so error
@@ -151,7 +179,8 @@ export function parseTranscript(jsonl: string, fromLine = 0): TranscriptSegment 
           const fromShell = !tool || SHELL_TOOLS.has(tool.name);
           const failed = block.is_error === true;
           const reading = !!tool?.command && READ_COMMAND.test(tool.command);
-          if (fromShell && (reading ? failed : looksLikeError(out, failed))) {
+          if (fromShell && (reading ? failed : looksLikeError(out, failed))
+              && !isEchoedOutput(out, tool?.command)) {
             events.push({
               kind: 'error', text: errorExcerpt(out), line: i,
               ...(tool?.command ? { via: tool.command.slice(0, 120) } : {}),

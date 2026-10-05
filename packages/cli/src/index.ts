@@ -20,7 +20,7 @@ import {
   parseMarkdownSource, planIndex, entryForSection,
   formatSessionBriefing, briefingEntries, isAlreadyInAgentContext,
   readCursor, writeCursor, markSurfaced, markWarned, reviewTurn, formatStepBack,
-  looksLikeError, isReadOnlyCommand, recallForFailure, formatRecallForAgent,
+  looksLikeError, isReadOnlyCommand, isEchoedOutput, recallForFailure, formatRecallForAgent,
   withDevbrainHooks, withoutDevbrainHooks, installedDevbrainHooks,
   nextSessionChunk, formatBackfillBatch, commitExcerpt, BACKFILL_BATCH_BUDGET,
 } from '@devbrain/core';
@@ -642,7 +642,11 @@ async function handleHook(event: string): Promise<void> {
 
       // Decided before touching the database: most commands succeed, and a
       // hook that runs after every one of them must cost nothing when idle.
-      if (!looksLikeError(output, false) || isReadOnlyCommand(command)) return;
+      // The echo check matters most here: DevBrain's own recall message quotes
+      // the error it matched, so without it one failure could recall itself.
+      if (!looksLikeError(output, false)
+        || isReadOnlyCommand(command)
+        || isEchoedOutput(output, command)) return;
       const failure = extractFailure(output);
       if (!failure) return;
 

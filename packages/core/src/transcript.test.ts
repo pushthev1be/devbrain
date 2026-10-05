@@ -9,7 +9,7 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  parseTranscript, assessSegment, buildDigest, chunkEvents, errorExcerpt, looksLikeError,
+  parseTranscript, assessSegment, buildDigest, chunkEvents, errorExcerpt, looksLikeError, isEchoedOutput,
 } from './transcript';
 import type { DigestEvent } from './transcript';
 
@@ -90,6 +90,66 @@ describe('parseTranscript', () => {
   it('survives malformed lines', () => {
     const t = 'not json\n' + jsonl(user('still read'));
     expect(parseTranscript(t).events.map(e => e.text)).toEqual(['still read']);
+  });
+});
+
+describe('isEchoedOutput', () => {
+  // Every message DevBrain sends an agent quotes the error it is about, so each
+  // one lands in the transcript carrying error text. Generated here from the
+  // real producers rather than copied, so a reworded message fails this test
+  // instead of silently becoming its own evidence on the next parse.
+  it('recognises every message DevBrain itself sends', async () => {
+    const { formatStepBack, detectStuck } = await import('./stuck');
+    const { buildRecordPrompt } = await import('./turnReview');
+    const { formatRecallForAgent, recallForFailure } = await import('./recall');
+    const { formatBackfillBatch } = await import('./backfill');
+
+    const failure = 'Error: listen EADDRINUSE: address already in use :::8080';
+    const entry = {
+      id: 'e1', projectId: 'p1', type: 'fix' as const, title: 'Port 8080 held by a stale server',
+      content: 'Kill it.', tags: [], createdAt: Date.now(), errorPattern: failure,
+      project: { id: 'p1', name: 'app', path: '/p', stack: [], createdAt: 1, lastSeen: 1 },
+    };
+    const events = [
+      { kind: 'error' as const, text: failure, via: 'npm start' },
+      { kind: 'edit' as const, text: 'a.ts' },
+      { kind: 'error' as const, text: failure, via: 'npm start' },
+      { kind: 'error' as const, text: failure, via: 'npm start' },
+    ];
+
+    const messages = [
+      formatStepBack(detectStuck(events))!,
+      buildRecordPrompt(events),
+      formatRecallForAgent(failure, recallForFailure(failure, [entry], { projectId: 'p1' }))!,
+      formatBackfillBatch({
+        project: 'app', commits: [], sessions: [], remainingCommits: 0,
+        remainingSessions: 0, markedReviewed: true,
+      }),
+    ];
+    for (const message of messages) {
+      expect(isEchoedOutput(message), message.split('\n')[0]).toBe(true);
+    }
+  });
+
+  it('treats a command printing an error it was handed as an echo', () => {
+    const fixture = "src/a.ts(3,1): error TS2304: Cannot find name 'tier'.";
+    expect(isEchoedOutput(fixture, `node -e "console.log('${fixture}')"`)).toBe(true);
+  });
+
+  it('leaves a real failure alone', () => {
+    expect(isEchoedOutput("src/a.ts(3,1): error TS2304: Cannot find name 'tier'.", 'npm run build')).toBe(false);
+    expect(isEchoedOutput('npm ERR! code ELIFECYCLE', 'npm test')).toBe(false);
+  });
+
+  it('does not treat a short line as evidence of an echo', () => {
+    // "Exit code 1" appearing in a command proves nothing about its output.
+    expect(isEchoedOutput('Exit code 1', 'sh check.sh && echo "Exit code 1"')).toBe(false);
+  });
+
+  it('produces no error event for DevBrain quoting itself', () => {
+    const own = 'DevBrain: step back for a moment\n\n- the same error has come back 3 times: TypeError: x';
+    const t = jsonl(tool('Bash', { command: 'sh ./e2e.sh' }, own, false));
+    expect(parseTranscript(t).events.some(e => e.kind === 'error')).toBe(false);
   });
 });
 
