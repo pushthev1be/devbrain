@@ -63,19 +63,25 @@ function makeEntry(
 // ── similarityLabel ───────────────────────────────────────────────────────────
 
 describe('similarityLabel', () => {
-  it('returns 99% match for score >= 0.92', () => {
-    expect(similarityLabel(0.92)).toBe('99% match');
-    expect(similarityLabel(1.0)).toBe('99% match');
+  it('describes the match without a number', () => {
+    // The old labels printed a percentage and rounded it up — 0.82 as "90%
+    // match". With the relevant band only 0.007 wide, a digit invites a
+    // comparison between results that the score cannot support.
+    for (const score of [0.5, 0.63, 0.64, 0.75, 0.82, 0.92, 1.0]) {
+      expect(similarityLabel(score), String(score)).not.toMatch(/\d/);
+    }
   });
-  it('returns 95% match for score >= 0.88', () => {
-    expect(similarityLabel(0.88)).toBe('95% match');
-    expect(similarityLabel(0.91)).toBe('95% match');
+
+  it('bands are wider than the noise between a right and a wrong answer', () => {
+    // 0.63 and 0.64 decided a correct hit from a coincidental one on a real
+    // search. Nothing should present them as meaningfully different.
+    expect(similarityLabel(0.63)).toBe(similarityLabel(0.64));
   });
-  it('returns 90% match for score >= 0.82', () => {
-    expect(similarityLabel(0.82)).toBe('90% match');
-  });
-  it('returns percentage for low scores', () => {
-    expect(similarityLabel(0.5)).toBe('50% match');
+
+  it('still separates a strong match from a weak one', () => {
+    expect(similarityLabel(0.92)).toBe('very close');
+    expect(similarityLabel(0.75)).toBe('close');
+    expect(similarityLabel(0.5)).toBe('related');
   });
 });
 
