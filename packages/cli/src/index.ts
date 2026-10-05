@@ -20,6 +20,7 @@ import {
   parseMarkdownSource, planIndex, entryForSection,
   formatSessionBriefing, briefingEntries, isAlreadyInAgentContext,
   readCursor, writeCursor, markSurfaced, markWarned, markActiveSession, activeSession,
+  markAsked, takeAsk,
   reviewTurn, formatStepBack, buildRecordPrompt, openBugsInSession,
   looksLikeError, isReadOnlyCommand, isEchoedOutput, isGenericFailureLine, recallForFailure, formatRecallForAgent,
   withDevbrainHooks, withoutDevbrainHooks, installedDevbrainHooks,
@@ -677,7 +678,7 @@ async function handleHook(event: string): Promise<void> {
       await bumpRetrievalCounts(recalled, project.id).catch(() => {});
       // The one surfacing that shows the entry earned its place: a command
       // failed and this entry matched it. Counted apart from being shown.
-      await bumpRecallCounts(recalled).catch(() => {});
+      await bumpRecallCounts(recalled, { query: failure, sessionId }).catch(() => {});
       captureLog(`${project.name} ${sessionId.slice(0, 8)}: recalled ${hits.length} for "${clip(failure, 60)}"`);
       process.stdout.write(JSON.stringify({
         hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: message },
@@ -715,7 +716,7 @@ async function handleHook(event: string): Promise<void> {
             projectId: project.id, topK: 2,
           });
           related = hits.map(h => `[${normalizeType(h.entry.type)}] ${h.entry.title} (id: ${h.entry.id})`);
-          if (hits.length) await bumpRecallCounts(hits.map(h => h.entry.id)).catch(() => {});
+          if (hits.length) await bumpRecallCounts(hits.map(h => h.entry.id), { query: failing.subject, sessionId }).catch(() => {});
         }
       }
       markWarned(sessionId, review.suppress ?? review.signals!.map(s => s.fingerprint));
@@ -747,6 +748,9 @@ async function handleHook(event: string): Promise<void> {
     const prompt = open.length ? buildRecordPrompt(review.events!, open) : review.prompt;
     captureLog(`${project.name} ${sessionId.slice(0, 8)}: asked the agent to record this stretch` +
       (open.length ? `, offering ${open.length} open bug(s) to close` : ''));
+    // Marked at the moment of asking, so the save that follows can tell a reply
+    // from something the agent chose to write down on its own.
+    markAsked(sessionId);
     process.stdout.write(JSON.stringify({ decision: 'block', reason: prompt }));
   } catch (err) {
     captureLog(`hook ${event} failed: ${explainError(err)}`);
@@ -1027,7 +1031,7 @@ async function handleRun(argv: string[]): Promise<void> {
     await bumpRetrievalCounts(matched, project?.id).catch(() => {});
     // `run` only looks anything up because the wrapped command failed, so every
     // hit here is a failure caught, exactly as in the PostToolUse hook.
-    await bumpRecallCounts(matched).catch(() => {});
+    await bumpRecallCounts(matched, { query: failure }).catch(() => {});
     console.log(`${DIM}${'─'.repeat(W)}${RESET}\n`);
   } catch {
     // A memory lookup must never add noise to a failing build.
@@ -1258,6 +1262,10 @@ async function handleNote(
     // Read once. Looked up twice, the value could change between the check and
     // the use and store `sessionId: undefined`.
     const session = activeSession(project.path);
+    // `inq` is the interactive REPL, which only a person drives. Everything else
+    // reaching this command is an agent following the instruction to use the
+    // CLI when the MCP tool is not available.
+    const origin = inq ? 'manual' : (session && takeAsk(session) ? 'hook' : 'agent');
     // An id that matches nothing would be an edge to nothing: the graph would
     // show the bug as closed with no other end to look at. Checked, not trusted.
     const wants = extra.fixes?.trim();
@@ -1270,6 +1278,7 @@ async function handleNote(
       ...(extra.error?.trim() ? { errorPattern: extra.error.trim() } : {}),
       ...(category ? { category } : {}),
       ...(session ? { sessionId: session } : {}),
+      origin,
       ...(closes ? { fixes: closes.id } : {}),
     });
     if (inq) {

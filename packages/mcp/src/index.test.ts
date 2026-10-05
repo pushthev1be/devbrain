@@ -78,6 +78,8 @@ vi.mock('@devbrain/core', async importOriginal => {
   // No hook has run in these tests, so no session is active — the same as a
   // save made from an editor DevBrain's hooks are not installed in.
   activeSession:             vi.fn().mockReturnValue(undefined),
+  // No ask outstanding, so a save in these tests is one the agent volunteered.
+  takeAsk:                   vi.fn().mockReturnValue(false),
   getProjectName:            vi.fn().mockReturnValue('test-project'),
   detectStack:               vi.fn().mockReturnValue(['Node.js']),
   getEmbedding:              vi.fn().mockResolvedValue(new Array(3072).fill(0.1)),

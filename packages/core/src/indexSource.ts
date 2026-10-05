@@ -268,6 +268,9 @@ export function entryForSection(
   return {
     id: opts.id,
     projectId: project.id,
+    // Derived from a file, not captured from work. Said explicitly so the two
+    // are distinguishable without inspecting `source` on every row.
+    origin: 'indexed',
     type: section.type,
     title: section.title.slice(0, 120),
     content: section.body,

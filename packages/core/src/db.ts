@@ -2,6 +2,7 @@ import { MongoClient, Db, ServerApiVersion } from 'mongodb';
 import { join } from 'path';
 import { homedir } from 'os';
 import type { Entry, Project } from './types';
+import { RECALL_LOG_MAX } from './types';
 import * as local from './localStore';
 
 export { getLocalDbPath } from './localStore';
@@ -226,13 +227,33 @@ export async function bumpRetrievalCounts(ids: string[], fromProjectId?: string)
  * that one is "how often was this shown", this is "how often did it catch
  * something". Only the second is evidence the entry was worth keeping.
  */
-export async function bumpRecallCounts(ids: string[]): Promise<void> {
+/**
+ * Record that these entries were matched to a real failure and handed over.
+ *
+ * The count alone cannot distinguish an entry that caught nine different
+ * failures from one that matched the same flaky command nine times, so the
+ * failure text is kept alongside it. Capped with $slice so the log cannot grow
+ * without bound on an entry that fires often.
+ */
+export async function bumpRecallCounts(
+  ids: string[],
+  context: { query?: string; sessionId?: string } = {},
+): Promise<void> {
   if (!ids.length) return;
-  if (useLocal()) return local.bumpRecallCounts(ids);
+  if (useLocal()) return local.bumpRecallCounts(ids, context);
   const db = await getDb();
+  const event = {
+    at: Date.now(),
+    query: (context.query ?? '').slice(0, 200),
+    ...(context.sessionId ? { sessionId: context.sessionId } : {}),
+  };
   await db.collection('entries').updateMany(
     { id: { $in: ids } },
-    { $inc: { recallCount: 1 }, $set: { lastRecalledAt: Date.now() } }
+    {
+      $inc: { recallCount: 1 },
+      $set: { lastRecalledAt: event.at },
+      ...(context.query ? { $push: { recalls: { $each: [event], $slice: -RECALL_LOG_MAX } } } : {}),
+    } as never,
   );
 }
 

@@ -16,6 +16,8 @@ export interface SessionState {
   updatedAt: number;
   /** Entry ids DevBrain has already volunteered this session, so it never repeats one. */
   surfaced?: string[];
+  /** When the Stop hook last asked this session to record something. */
+  askedAt?: number;
   /**
    * Stuck signals already raised this session.
    *
@@ -118,6 +120,36 @@ export function activeSession(projectPath: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Past this, an outstanding ask is treated as unanswered rather than pending.
+ *
+ * Generous, because the agent may work for a while before it writes anything
+ * down, but bounded: an ask from this morning must not make an unprompted save
+ * this afternoon look like a reply to it.
+ */
+const ASK_TTL_MS = 15 * 60 * 1000;
+
+/** The Stop hook has just asked this session to record something. */
+export function markAsked(sessionId: string): void {
+  if (!sessionId) return;
+  patchState(sessionId, { askedAt: Date.now() });
+}
+
+/**
+ * Was this save a reply to DevBrain asking? Consumes the ask either way.
+ *
+ * Consuming matters: the agent may save three entries from one prompt, and
+ * only the first is the reply. Counting all three as prompted would hide the
+ * two it volunteered, which is the behaviour actually worth measuring.
+ */
+export function takeAsk(sessionId: string): boolean {
+  if (!sessionId) return false;
+  const asked = (readRaw(sessionId) as { askedAt?: number }).askedAt;
+  if (!asked) return false;
+  patchState(sessionId, { askedAt: undefined });
+  return Date.now() - asked < ASK_TTL_MS;
 }
 
 /** Record that these loops have been raised, so each is named once per session. */

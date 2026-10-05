@@ -17,7 +17,7 @@ import {
   autoArchetype, supersedeEntry,
   ENTRY_TYPES, ENTRY_TYPE_NAMES, normalizeType,
   buildDossier, describeStorage, findDuplicate, findTextDuplicate, clip, measureUse,
-  filterUnprocessedCommits, listCommitHashes, activeSession,
+  filterUnprocessedCommits, listCommitHashes, activeSession, takeAsk,
   buildGraph, graphSubset,
 } from '@devbrain/core';
 import type { EntryCategory } from '@devbrain/core';
@@ -362,6 +362,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       // Read once, not once per use: looked up twice, the value could change
       // between the check and the use and store `sessionId: undefined`.
       const session = activeSession(project.path);
+      // Whether DevBrain had to ask. An agent that only ever saves when
+      // prompted and one that volunteers are indistinguishable in a list of
+      // entries, and the difference is the whole question about capture.
+      const origin = session && takeAsk(session) ? 'hook' : 'agent';
       await insertEntry({
         id: newId, projectId: project.id,
         // Clip on a word boundary: a title cut mid-token is the first thing anyone reads.
@@ -373,6 +377,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         // Stamped from the hook's record of which session owns this project, so
         // a run of entries reads as one episode rather than unrelated rows.
         ...(session ? { sessionId: session } : {}),
+        origin,
         ...(closing ? { fixes: closing.id } : {}),
       });
 
@@ -748,7 +753,7 @@ const httpServer = createServer(async (req, res) => {
             id: newId, projectId: 'agent-builder',
             type: 'decision', title: `[Superseded] ${reason?.slice(0, 100) ?? 'Manually overridden via dashboard'}`,
             content: reason ?? 'Manually marked as superseded via DevBrain dashboard.',
-            tags: ['superseded'], createdAt: Date.now(), confidence: 'observation',
+            tags: ['superseded'], createdAt: Date.now(), confidence: 'observation', origin: 'manual',
           });
           await supersedeEntry(oldId, newId);
           json(res, 200, { ok: true, oldId, newId });
@@ -815,6 +820,8 @@ const httpServer = createServer(async (req, res) => {
             id: nanoid(), projectId: targetId, type,
             title: title.slice(0, 120), content, tags,
             embedding, createdAt: Date.now(), confidence: 'observation',
+            // Typed into the dashboard by a person, whatever else is open.
+            origin: 'manual',
             ...(category ? { category } : {}),
             ...(error_pattern ? { errorPattern: error_pattern } : {}),
             ...(cause_archetype ? { causeArchetype: cause_archetype } : {}),

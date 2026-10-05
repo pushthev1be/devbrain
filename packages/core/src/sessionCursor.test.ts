@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'fs';
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
@@ -20,7 +20,7 @@ vi.mock('os', async importOriginal => {
   return { ...actual, homedir: () => process.env.__DEVBRAIN_TEST_HOME as string };
 });
 
-import { markActiveSession, activeSession, readCursor, writeCursor, markWarned, markSurfaced } from './sessionCursor';
+import { markActiveSession, activeSession, readCursor, writeCursor, markWarned, markSurfaced, markAsked, takeAsk } from './sessionCursor';
 
 let home: string;
 
@@ -111,5 +111,52 @@ describe('cursor state', () => {
 
   it('starts at zero for a session it has never seen', () => {
     expect(readCursor('unknown').line).toBe(0);
+  });
+});
+
+describe('the outstanding ask', () => {
+  it('reports no ask when none was made', () => {
+    expect(takeAsk('s1')).toBe(false);
+  });
+
+  it('reports an ask that was just made', () => {
+    markAsked('s1');
+    expect(takeAsk('s1')).toBe(true);
+  });
+
+  // The agent may write three entries from one prompt. Counting all three as
+  // prompted would hide the two it volunteered, which is the behaviour the
+  // origin field exists to measure.
+  it('is consumed, so only the first save counts as the reply', () => {
+    markAsked('s1');
+    expect(takeAsk('s1')).toBe(true);
+    expect(takeAsk('s1')).toBe(false);
+  });
+
+  it('expires, so this morning\'s ask does not claim this afternoon\'s save', () => {
+    markAsked('s1');
+    const path = join(home, '.devbrain', 'sessions', 's1.json');
+    const state = JSON.parse(readFileSync(path, 'utf-8'));
+    state.askedAt = Date.now() - 16 * 60 * 1000;
+    writeFileSync(path, JSON.stringify(state));
+    expect(takeAsk('s1')).toBe(false);
+  });
+
+  it('keeps the asks of two sessions apart', () => {
+    markAsked('s1');
+    expect(takeAsk('s2')).toBe(false);
+    expect(takeAsk('s1')).toBe(true);
+  });
+
+  // Same regression as `warned`: a normaliser that forgets a field erases it on
+  // the next write of any other one.
+  it('does not erase the cursor or the warnings', () => {
+    markWarned('s1', ['fp-1']);
+    writeCursor('s1', 12);
+    markAsked('s1');
+    takeAsk('s1');
+    const state = readCursor('s1');
+    expect(state.line).toBe(12);
+    expect(state.warned).toEqual(['fp-1']);
   });
 });

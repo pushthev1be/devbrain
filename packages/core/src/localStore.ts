@@ -15,6 +15,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from '
 import { join } from 'path';
 import { homedir } from 'os';
 import type { Entry, Project } from './types';
+import { RECALL_LOG_MAX } from './types';
 import { cosineSimilarity } from './search';
 
 interface ProcessedCommit {
@@ -186,13 +187,29 @@ export async function bumpRetrievalCounts(ids: string[], fromProjectId?: string)
 }
 
 /** See db.ts: counts failures caught, not times shown. */
-export async function bumpRecallCounts(ids: string[]): Promise<void> {
+export async function bumpRecallCounts(
+  ids: string[],
+  context: { query?: string; sessionId?: string } = {},
+): Promise<void> {
   if (!ids.length) return;
+  const at = Date.now();
   mutate(data => {
     for (const entry of data.entries) {
       if (!ids.includes(entry.id)) continue;
       entry.recallCount = (entry.recallCount ?? 0) + 1;
-      entry.lastRecalledAt = Date.now();
+      entry.lastRecalledAt = at;
+      // Only when there is a query to record: a bump with nothing to say about
+      // what matched would add a row that reads as a blank line in the log.
+      if (context.query) {
+        entry.recalls = [
+          ...(entry.recalls ?? []),
+          {
+            at,
+            query: context.query.slice(0, 200),
+            ...(context.sessionId ? { sessionId: context.sessionId } : {}),
+          },
+        ].slice(-RECALL_LOG_MAX);
+      }
     }
   });
 }
