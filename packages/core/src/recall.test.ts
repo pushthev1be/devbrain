@@ -107,3 +107,70 @@ describe('deciding whether to look at all', () => {
     expect(isReadOnlyCommand('npm start')).toBe(false);
   });
 });
+
+describe('the semantic route', () => {
+  // A vector near e1's, so "close in meaning" is expressible without a model.
+  const vec = (a: number, b: number, c = 0) => [a, b, c];
+
+  const noPattern = (o: Partial<Entry> = {}) => entry({
+    id: 'np', title: 'The dev server kept serving a stale build',
+    content: 'The old process was never killed, so the new bundle never shipped.',
+    errorPattern: undefined, embedding: vec(1, 0), ...o,
+  });
+
+  it('finds an entry whose wording does not match but whose meaning does', () => {
+    const hits = recallForFailure('browser keeps loading the previous bundle', [noPattern()], {
+      projectId: 'p1', embedding: vec(0.99, 0.1),
+    });
+    expect(hits.map(h => h.entry.id)).toEqual(['np']);
+  });
+
+  // The behaviour before this route existed, and the behaviour offline. An
+  // entry with no error pattern simply cannot be reached by wording alone.
+  it('finds nothing for the same failure when no embedding is supplied', () => {
+    const hits = recallForFailure('browser keeps loading the previous bundle', [noPattern()], {
+      projectId: 'p1',
+    });
+    expect(hits).toEqual([]);
+  });
+
+  it('stays quiet when the meaning is not close either', () => {
+    const hits = recallForFailure('certificate has expired', [noPattern()], {
+      projectId: 'p1', embedding: vec(0, 1),
+    });
+    expect(hits).toEqual([]);
+  });
+
+  // Precision comes from the cap, not from the threshold alone: an unranked
+  // "everything above 0.62" would be an interruption rather than a hint.
+  it('still offers no more than topK', () => {
+    const many = Array.from({ length: 6 }, (_, i) =>
+      noPattern({ id: 'n' + i, embedding: vec(1, i * 0.001) }));
+    const hits = recallForFailure('stale bundle served to the browser', many, {
+      projectId: 'p1', embedding: vec(1, 0),
+    });
+    expect(hits.length).toBeLessThanOrEqual(VOLUNTEER_TOP_K);
+  });
+
+  it('does not let a semantic neighbour displace a literal hit', () => {
+    const literal = entry({ id: 'lit', embedding: vec(0, 1) });
+    const near = noPattern({ id: 'near', embedding: vec(1, 0) });
+    const hits = recallForFailure(FAILURE, [near, literal], {
+      projectId: 'p1', embedding: vec(1, 0),
+    });
+    expect(hits[0].entry.id).toBe('lit');
+  });
+
+  it('never resurrects a retracted entry through the new route', () => {
+    const hits = recallForFailure('browser keeps loading the previous bundle',
+      [noPattern({ supersededBy: 'x' })], { projectId: 'p1', embedding: vec(0.99, 0.1) });
+    expect(hits).toEqual([]);
+  });
+
+  it('still honours the session exclusion list', () => {
+    const hits = recallForFailure('browser keeps loading the previous bundle', [noPattern()], {
+      projectId: 'p1', embedding: vec(0.99, 0.1), exclude: ['np'],
+    });
+    expect(hits).toEqual([]);
+  });
+});

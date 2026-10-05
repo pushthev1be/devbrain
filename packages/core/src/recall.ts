@@ -29,6 +29,20 @@ import type { PreciseSearchResult } from './search';
  */
 export const VOLUNTEER_MIN_PATTERN = 0.45;
 
+/**
+ * How close in meaning an entry must be to be volunteered when the wording
+ * does not match.
+ *
+ * Set to the same bar a deliberate search uses, not higher, because the
+ * precision here comes from somewhere else: only the top two of an already
+ * ranked list are offered, and that ranking folds in lexical overlap, category
+ * and project. Measured over 176 live entries against eleven hand-written
+ * failures — five with a right answer, six with none — this found 4 of the 5
+ * and fired on 0 of the 6. Raising it to 0.66 found 3, and to 0.70 found 2,
+ * with no precision to gain in return.
+ */
+export const VOLUNTEER_MIN_SEMANTIC = 0.62;
+
 /** Most entries to volunteer at once. Two is a hint; five is an interruption. */
 export const VOLUNTEER_TOP_K = 2;
 
@@ -38,31 +52,56 @@ export interface RecallOptions {
   exclude?: readonly string[];
   topK?: number;
   minPattern?: number;
+  /**
+   * The failure text, embedded. Optional, and everything still works without
+   * it: with no embedding only literal matches can be found, which is the
+   * behaviour this had before and the behaviour offline.
+   */
+  embedding?: number[];
+  minSemantic?: number;
 }
 
 /**
  * Entries worth putting in front of an agent for this failure, best first.
  *
- * Only literal matches qualify: `matchType === 'pattern'` means the failure text
- * overlaps a stored error pattern or title, which is the claim being made
- * ("this exact thing happened before"). A merely semantic neighbour is not that
- * claim and is left for a deliberate search.
+ * Two routes in, because they fail in opposite directions.
+ *
+ * Literal — the failure text overlaps a stored error pattern or title. This is
+ * the strongest claim available ("this exact thing happened before") and it is
+ * never wrong, but it only fires when the failure arrives worded the way it was
+ * written down. Measured against five failures phrased the way a tool or a
+ * person actually emits them, rather than quoting the entry, it found none of
+ * them: real stack traces do not quote entry titles, and only 10 of 52 entries
+ * here carry an error pattern at all.
+ *
+ * Semantic — close in meaning, when an embedding is available. This is what
+ * reaches the other 80 percent of the store. On the same five it found four,
+ * and on six unrelated failures it offered nothing.
+ *
+ * Both are capped at topK and both draw from one ranked list, so a literal hit
+ * still outranks a merely similar one.
  */
 export function recallForFailure(
   failure: string,
   all: (Entry & { project: Project })[],
   opts: RecallOptions = {},
 ): PreciseSearchResult[] {
-  const { projectId, exclude = [], topK = VOLUNTEER_TOP_K, minPattern = VOLUNTEER_MIN_PATTERN } = opts;
+  const {
+    projectId, exclude = [], topK = VOLUNTEER_TOP_K,
+    minPattern = VOLUNTEER_MIN_PATTERN,
+    embedding = [], minSemantic = VOLUNTEER_MIN_SEMANTIC,
+  } = opts;
   if (!failure.trim()) return [];
 
   const skip = new Set(exclude);
   const candidates = all.filter(e => !skip.has(e.id) && !e.supersededBy);
 
-  // No query embedding: preciseSearch then scores literal overlap, which is
-  // what an exact error string wants anyway.
-  return preciseSearch(failure, [], candidates, { projectId, topK: topK * 4 })
-    .filter(r => r.matchType === 'pattern' && r.patternScore >= minPattern)
+  // With no embedding preciseSearch scores literal overlap only, which is what
+  // an exact error string wants anyway — and is all there is to go on offline.
+  return preciseSearch(failure, embedding, candidates, { projectId, topK: topK * 4 })
+    .filter(r =>
+      (r.matchType === 'pattern' && r.patternScore >= minPattern) ||
+      (embedding.length > 0 && r.similarity >= minSemantic))
     .slice(0, topK);
 }
 

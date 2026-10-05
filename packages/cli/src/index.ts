@@ -660,8 +660,16 @@ async function handleHook(event: string): Promise<void> {
       const project = await getProjectByPath(getRepoRoot(cwd) ?? cwd);
       if (!project) return;
 
+      // Embedded so a failure worded differently from the entry can still find
+      // it — without this, only a literal match fires, and real stack traces do
+      // not quote what someone wrote down months ago. Best effort: if there is
+      // no AI configured, or the call is slow, recall falls back to literal
+      // matching rather than holding up the agent's turn.
+      const queryEmbedding = await getEmbedding(failure).catch(() => [] as number[]);
+
       const hits = recallForFailure(failure, await getAllEntriesWithProjects(), {
         projectId: project.id,
+        embedding: queryEmbedding,
         // Pushing the same past fix after every retry of a flaky command would
         // teach the agent to tune the whole channel out.
         exclude: sessionId ? readCursor(sessionId).surfaced ?? [] : [],
