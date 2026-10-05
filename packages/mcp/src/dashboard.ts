@@ -248,6 +248,8 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
     .gspark.e-same-error { color: var(--yellow); }
     .gspark.e-same-cause { color: var(--purple); }
     .gspark.e-related { color: var(--accent); }
+    /* Brighter than the ambient light: these were asked for, not stumbled on. */
+    .gspark.gfocus { filter: drop-shadow(0 0 7px currentColor); }
     .gbadge { font-family: var(--mono); font-size: 9px; font-weight: 700; text-anchor: middle; pointer-events: none; }
     .gbadge.dim { opacity: .12; }
     .gbadge.n-bug, .gbadge.n-anti-pattern { fill: var(--red); }
@@ -916,6 +918,8 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
     var GSTATE = { graph: null, sel: null };
     /** Roughly how long the light takes to walk the whole graph once. */
     var LAP_SECONDS = 50;
+    /** How long a clicked node's own lights take to run one of its lines. */
+    var FOCUS_SECONDS = 1.8;
 
     function entryById(id) {
       var d = STATE.dossier;
@@ -1084,6 +1088,31 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
           ' dur="1.5s" begin="' + when.join(';') + '"></animate>' +
           '</text>';
       });
+
+      // A clicked node lights its own connections, one light per line, on top
+      // of the ambient walk.
+      //
+      // The walk reaches any given edge once a lap, which is no use when the
+      // question is "what is this one entry connected to" — you would stand
+      // there waiting for it to come round. These run continuously, so the
+      // answer is immediate and the lines are traced rather than merely
+      // highlighted.
+      //
+      // Always outward from the node clicked, whichever end of the edge it
+      // happens to be stored at, so the picture reads as "from here, to
+      // these" rather than as traffic arriving from nowhere. keyPoints
+      // reverses the direction of travel along the path.
+      if (sel) {
+        g.edges.forEach(function (e, idx) {
+          if (e.from !== sel && e.to !== sel) return;
+          if (!L.pos[e.from] || !L.pos[e.to]) return;
+          var outward = e.from === sel ? '0;1' : '1;0';
+          out += '<circle class="gspark gfocus e-' + esc(e.kind) + '" r="4.2">' +
+            '<animateMotion dur="' + FOCUS_SECONDS + 's" begin="0s" repeatCount="indefinite"' +
+            ' calcMode="linear" keyTimes="0;1" keyPoints="' + outward + '">' +
+            '<mpath href="#ge' + idx + '"></mpath></animateMotion></circle>';
+        });
+      }
       return out;
     }
 
