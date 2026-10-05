@@ -11,7 +11,7 @@ import {
   getProjectByPath, upsertProject, insertEntry,
   getEntriesByProject, getAllEntriesWithProjects, getAllProjects,
   getRepoRoot, getProjectName, detectStack,
-  getEmbedding, similarityLabel, timeAgo, hasGeminiCreds,
+  getEmbedding, similarityLabel, timeAgo, hasGeminiCreds, CONFIDENT_MATCH,
   buildContext, compressContext, formatContext,
   bumpRetrievalCounts, preciseSearch, vectorSearch,
   autoArchetype, supersedeEntry,
@@ -295,9 +295,27 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const origin = r.sameProject ? 'this project' : `other project: ${r.project.name}`;
         return renderEntry(r.entry as Entry & { project: { name: string } }, i, `${match} · ${origin} · ${timeAgo(r.entry.createdAt)}`);
       }).join('\n\n');
+      // Say so when nothing here is a confident answer.
+      //
+      // Search always returns its best candidates, and a reader takes being
+      // handed something as evidence there was something to hand over.
+      // Measured from real use on another project: an error this store had
+      // never seen -- a stack overflow in a codebase with no recursion --
+      // came back with an unrelated entry, and a correct hit on a different
+      // query scored barely above it. The ranking is sound; the confidence
+      // it implies is not.
+      //
+      // A literal pattern match is exempt: it is a different mechanism, and
+      // it has been right even when the variable in the error was renamed.
+      const confident = results.some(r =>
+        r.matchType === 'pattern' || r.similarity >= CONFIDENT_MATCH);
+      const caveat = confident
+        ? 'If any of these is now wrong, save what is true with save_entry and pass its id as supersedes.'
+        : 'None of these is a close match, so DevBrain may simply have nothing on this. '
+          + 'Read the top one before relying on it rather than treating it as prior experience here.';
       return { content: [{ type: 'text', text:
         `DevBrain results for "${searchText}":\n\n${text}\n\n` +
-        `If any of these is now wrong, save what is true with save_entry and pass its id as supersedes.` }] };
+        caveat }] };
     }
 
     // ── save_entry ────────────────────────────────────────────────────────────

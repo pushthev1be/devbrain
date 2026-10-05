@@ -67,14 +67,36 @@ const HOOK_ARG: Record<HookEvent, string> = {
 };
 
 /**
- * Tool calls PostToolUse is installed for, one group each.
+ * Tool calls PostToolUse is installed for.
  *
- * Only shell tools: the point is recalling a past fix when a command fails, and
- * a failure is something a shell reports. Written as separate matcher groups
- * rather than one alternation, because a plain tool name is the one matcher
- * spelling every Claude Code version accepts.
+ * Every tool, filtered in the hook rather than here. It used to be Bash and
+ * PowerShell only, on the reasoning that a failure is something a shell
+ * reports — but that is where it was wrong. A production error is usually found
+ * by *reading* it: a log query, a database probe, a deploy status. On a project
+ * with the Supabase connector those run as MCP tools, so DevBrain never saw the
+ * output and never nudged, while holding the exact entry for the error on
+ * screen. Reported from real use: "nudges at the moment of debugging: zero".
+ *
+ * The cost of widening is false positives from tools whose output is source
+ * code rather than a result, and those are excluded by name in isFileTool.
  */
-const POST_TOOL_MATCHERS = ['Bash', 'PowerShell'];
+const POST_TOOL_MATCHERS = ['*'];
+
+/**
+ * Tools whose output is file content, not a result.
+ *
+ * Source code is full of the word Error, so scanning it for failures produces
+ * them. For shell commands the equivalent guard is isReadOnlyCommand; this is
+ * the same rule for tools that take no command at all.
+ */
+const FILE_TOOLS = new Set([
+  'Read', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'NotebookRead',
+  'Glob', 'Grep', 'LS', 'TodoWrite', 'ExitPlanMode',
+]);
+
+export function isFileTool(name: string): boolean {
+  return FILE_TOOLS.has(name);
+}
 
 /** The CLI argument for a hook event, e.g. `devbrain hook stop`. */
 export function hookArg(event: HookEvent): string {

@@ -18,8 +18,7 @@ vi.mock('os', async importOriginal => {
 
 import {
   withDevbrainHooks, withoutDevbrainHooks, installedDevbrainHooks, formatSessionBriefing, HOOK_EVENTS,
-  briefingEntries, isAlreadyInAgentContext,
-} from './agentHooks';
+  briefingEntries, isAlreadyInAgentContext, isFileTool } from './agentHooks';
 import type { Entry } from './types';
 import { readCursor, writeCursor } from './sessionCursor';
 import { buildContext } from './search';
@@ -53,10 +52,25 @@ describe('agent hook settings', () => {
     expect(withoutDevbrainHooks(withDevbrainHooks({})).hooks).toBeUndefined();
   });
 
-  it('installs PostToolUse per shell tool, so recall fires when a command fails', () => {
+  // Shell-only was the original mistake. A production error is usually found by
+  // reading it — a log query, a database probe — and on a project with an MCP
+  // connector those are not shell commands, so DevBrain saw none of them and
+  // never nudged while holding the entry for the error on screen.
+  it('installs PostToolUse for every tool, not only the shells', () => {
     const groups = withDevbrainHooks({}).hooks!.PostToolUse;
-    expect(groups.map(g => g.matcher)).toEqual(['Bash', 'PowerShell']);
+    expect(groups.map(g => g.matcher)).toEqual(['*']);
     expect(groups[0].hooks[0].command).toContain('hook post-tool');
+  });
+
+  // Widening is only safe because the tools whose output is file content are
+  // dropped: source code is full of the word Error.
+  it('excludes the tools whose output is source rather than a result', () => {
+    for (const t of ['Read', 'Edit', 'Write', 'Grep', 'Glob', 'NotebookEdit']) {
+      expect(isFileTool(t), t).toBe(true);
+    }
+    for (const t of ['Bash', 'PowerShell', 'mcp__supabase__query_logs', 'WebFetch', '']) {
+      expect(isFileTool(t), t).toBe(false);
+    }
   });
 
   it('recognises a hook pointed at an absolute devbrain path', () => {

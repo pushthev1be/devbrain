@@ -22,7 +22,7 @@ import {
   readCursor, writeCursor, markSurfaced, markWarned, markActiveSession, activeSession,
   markAsked, takeAsk,
   reviewTurn, formatStepBack, buildRecordPrompt, openBugsInSession,
-  isWorthLookingUp,
+  isWorthLookingUp, isFileTool,
   looksLikeError, isReadOnlyCommand, isEchoedOutput, isGenericFailureLine, recallForFailure, formatRecallForAgent,
   withDevbrainHooks, withoutDevbrainHooks, installedDevbrainHooks,
   nextSessionChunk, formatBackfillBatch, commitExcerpt, BACKFILL_BATCH_BUDGET,
@@ -685,6 +685,12 @@ async function handleHook(event: string): Promise<void> {
     // for the error, hand it to the agent now — this is the moment recall pays
     // off, and the moment an agent is least likely to go looking.
     if (event === 'post-tool') {
+      // Now installed for every tool, so the ones whose output is file content
+      // rather than a result are dropped here — their source is full of the
+      // word Error and scanning it would invent failures.
+      const toolName = typeof input.tool_name === 'string' ? input.tool_name : '';
+      if (isFileTool(toolName)) return;
+
       const output = typeof input.tool_output === 'string'
         ? input.tool_output
         : JSON.stringify(input.tool_output ?? '');

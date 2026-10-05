@@ -239,6 +239,18 @@ export const AGREEMENT_KEYWORD  = 0.12;
  */
 export const SEMANTIC_THRESHOLD = 0.62;
 
+/**
+ * Above this, a hit is worth presenting as prior experience rather than as a
+ * candidate to go and read.
+ *
+ * SEMANTIC_THRESHOLD decides what is worth returning at all; this decides what
+ * is worth believing. The gap between them is where search is useful but not
+ * trustworthy, and saying so is the whole point: measured on a real store, an
+ * error it had never seen came back at 0.63 while a correct hit on a different
+ * query scored 0.64, and every hit at or above 0.70 was right.
+ */
+export const CONFIDENT_MATCH = 0.70;
+
 export interface PreciseSearchResult extends SearchResult {
   matchType: 'pattern' | 'semantic';
   patternScore: number;
