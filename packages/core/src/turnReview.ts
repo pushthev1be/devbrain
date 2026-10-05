@@ -14,7 +14,7 @@
 //
 // Pure: transcript text in, decision out. No I/O, no model.
 
-import { parseTranscript, assessSegment } from './transcript';
+import { parseTranscript, assessSegment, isGenericFailureLine } from './transcript';
 import { detectStuck, formatStepBack, episodeFingerprints } from './stuck';
 import type { StuckSignal } from './stuck';
 import type { DigestEvent } from './transcript';
@@ -68,8 +68,12 @@ function shortPath(path: string): string {
 
 /** The message that asks the agent to record this stretch, built from its evidence. */
 export function buildRecordPrompt(events: DigestEvent[]): string {
+  // A generic line is offered to nobody as an error_pattern. "Exit code 1" is
+  // true of every failure, so stored as a pattern it would match all of them —
+  // and the prompt asks for it to be copied verbatim, so offering it is how a
+  // pattern that poisons every future query gets written down.
   const errors = unique(events.filter(e => e.kind === 'error').map(e => e.text.split('\n')[0].trim()))
-    .filter(Boolean).slice(-3);
+    .filter(line => line && !isGenericFailureLine(line)).slice(-3);
   const files = unique(events.filter(e => e.kind === 'edit').map(e => shortPath(e.text))).slice(-6);
 
   // The exact string is handed over, not described. DevBrain already has it,
