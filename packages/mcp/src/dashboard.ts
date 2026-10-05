@@ -237,8 +237,17 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
     .gnode.dim { opacity: .2; }
     .gnode[data-sel="true"] circle { stroke: var(--text); stroke-width: 2.5; }
     /* The travelling light, and the type badge it lights on arrival. */
-    .gspark { fill: #ffe9b8; }
-    .gspark.dim { opacity: .08; }
+    /* The light takes its line's colour, so it reads as the legend while it
+       moves. Same tokens as .gedge below, so the two can never drift. */
+    /* Coloured by its line but glowing, so it stays findable against a line of
+       the same colour. One is visible at a time, so the filter costs nothing. */
+    .gspark { fill: currentColor; color: var(--text2); filter: drop-shadow(0 0 4px currentColor); }
+    .gspark.e-fixes { color: var(--green); }
+    .gspark.e-supersedes { color: var(--red); }
+    .gspark.e-sequence { color: var(--text2); }
+    .gspark.e-same-error { color: var(--yellow); }
+    .gspark.e-same-cause { color: var(--purple); }
+    .gspark.e-related { color: var(--accent); }
     .gbadge { font-family: var(--mono); font-size: 9px; font-weight: 700; text-anchor: middle; pointer-events: none; }
     .gbadge.dim { opacity: .12; }
     .gbadge.n-bug, .gbadge.n-anti-pattern { fill: var(--red); }
@@ -905,8 +914,8 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
     var LANE_X = 104, STEP = 42, LANE_H = 46, TOP = 34;
     var MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
     var GSTATE = { graph: null, sel: null };
-    /** How long a pulse takes to cross any edge. Slow enough to follow one. */
-    var PULSE_SECONDS = 3;
+    /** Roughly how long the light takes to walk the whole graph once. */
+    var LAP_SECONDS = 50;
 
     function entryById(id) {
       var d = STATE.dossier;
@@ -1011,47 +1020,68 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
     }
 
     /**
-     * A light down every edge at once, lighting the type of the node it reaches.
+     * One light, walking the graph edge by edge.
      *
-     * The point is not decoration: a still picture of 79 lines does not say
-     * which way anything flows, and the badge answers "what did it arrive at"
-     * without making the reader hover each dot in turn. Abbreviations only —
-     * 50 titles printed on the canvas would bury the graph underneath them.
+     * Every edge lit at once was 79 dots moving, and a picture with 79 moving
+     * things in it has no focus at all. A single light can be followed, and
+     * following it is what makes the connections legible: you see where it came
+     * from and where it goes next.
      *
-     * Every pulse starts together and takes the same time, however long its
-     * line, so arrivals land on one beat and the badges read as a chord rather
-     * than as scattered flickering. That also means a single repeating
-     * animation can drive every badge, instead of one timer per edge.
+     * It takes the colour of the line it is on, so the light doubles as the
+     * legend — amber means it is crossing an inferred likeness, red a
+     * correction, green a fix closing a bug.
+     *
+     * The node it reaches flashes its type, abbreviated. Fifty titles printed
+     * on the canvas would bury the graph under them.
      */
     function pulses(g, L, sel, near) {
-      // The animation is SMIL rather than JS: the browser runs it off the main
-      // thread, so 200 travelling dots cost nothing per frame here and nothing
-      // keeps running when the tab is hidden.
-      var period = PULSE_SECONDS;
-      var out = '';
+      var hops = [];
       g.edges.forEach(function (e, idx) {
-        if (!L.pos[e.from] || !L.pos[e.to]) return;
-        var dim = sel && e.from !== sel && e.to !== sel ? ' dim' : '';
-        out += '<circle class="gspark' + dim + '" r="2.4">' +
-          '<animateMotion dur="' + period + 's" begin="0s" repeatCount="indefinite">' +
-          '<mpath href="#ge' + idx + '"></mpath></animateMotion></circle>';
+        if (L.pos[e.from] && L.pos[e.to]) hops.push({ e: e, path: idx });
+      });
+      if (!hops.length) return '';
+
+      // Left to right, so the walk reads as a pass over the history rather than
+      // as a random tour of the canvas.
+      hops.sort(function (a, b) {
+        return Math.min(L.pos[a.e.from].x, L.pos[a.e.to].x) -
+               Math.min(L.pos[b.e.from].x, L.pos[b.e.to].x);
       });
 
-      // Only nodes something actually arrives at. A badge over a node no line
-      // reaches would be announcing an event that never happens.
-      var arrivedAt = {};
-      g.edges.forEach(function (e) { if (L.pos[e.to]) arrivedAt[e.to] = true; });
+      // One lap stays about the same length whatever the project's size: a
+      // fixed hop would make a 188-edge graph take three minutes to come round.
+      var hop = Math.max(0.3, Math.min(1.1, LAP_SECONDS / hops.length));
+      var last = 'm' + (hops.length - 1);
+
+      // Each hop is its own circle, shown only while the light is on that edge.
+      // That is what lets CSS colour it by the kind of line, which animating a
+      // single circle's fill could not do.
+      var out = '';
+      var arrivals = {};
+      hops.forEach(function (h, i) {
+        var begin = i === 0 ? ('0s;' + last + '.end') : ('m' + (i - 1) + '.end');
+        var dim = sel && h.e.from !== sel && h.e.to !== sel ? ' dim' : '';
+        out += '<circle class="gspark e-' + esc(h.e.kind) + dim + '" r="3.6" opacity="0">' +
+          '<animateMotion id="m' + i + '" dur="' + hop + 's" begin="' + begin + '">' +
+          '<mpath href="#ge' + h.path + '"></mpath></animateMotion>' +
+          '<set attributeName="opacity" to="1" begin="m' + i + '.begin" end="m' + i + '.end"></set>' +
+          '</circle>';
+        arrivals[h.e.to] = (arrivals[h.e.to] || []).concat('m' + i + '.end');
+      });
+
+      // Only nodes the light actually reaches. A badge over a node nothing
+      // arrives at would announce an event that never happens.
       g.nodes.forEach(function (n) {
-        if (!arrivedAt[n.id]) return;
+        var when = arrivals[n.id];
+        if (!when) return;
         var pt = L.pos[n.id];
         var dim = sel && !near[n.id] ? ' dim' : '';
-        // begin is one full period, because that is when the first pulse lands.
-        out += '<text class="gbadge n-' + esc(n.type) + dim + '" x="' + pt.x + '" y="' + (pt.y - 11) + '" opacity="0">' +
+        // keyTimes must span the full 0 to 1 or the animation is discarded as
+        // invalid, and silently: the badge simply never lights.
+        out += '<text class="gbadge n-' + esc(n.type) + dim + '" x="' + pt.x + '" y="' + (pt.y - 12) + '" opacity="0">' +
           esc(TYPE_ABBR[n.type] || 'NOTE') +
-          // keyTimes must span the full 0..1 or the whole animation is discarded
-          // as invalid, which is silent: the badge simply never lights.
-          '<animate attributeName="opacity" values="0;1;1;0;0" keyTimes="0;0.05;0.3;0.55;1"' +
-          ' dur="' + period + 's" begin="' + period + 's" repeatCount="indefinite"></animate>' +
+          '<animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.1;0.55;1"' +
+          ' dur="1.5s" begin="' + when.join(';') + '"></animate>' +
           '</text>';
       });
       return out;
