@@ -22,6 +22,7 @@ import {
   readCursor, writeCursor, markSurfaced, markWarned, markActiveSession, activeSession,
   markAsked, takeAsk,
   reviewTurn, formatStepBack, buildRecordPrompt, openBugsInSession,
+  isWorthLookingUp,
   looksLikeError, isReadOnlyCommand, isEchoedOutput, isGenericFailureLine, recallForFailure, formatRecallForAgent,
   withDevbrainHooks, withoutDevbrainHooks, installedDevbrainHooks,
   nextSessionChunk, formatBackfillBatch, commitExcerpt, BACKFILL_BATCH_BUDGET,
@@ -633,6 +634,49 @@ async function handleHook(event: string): Promise<void> {
       if (!briefing) return;
       process.stdout.write(JSON.stringify({
         hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: briefing },
+      }));
+      return;
+    }
+
+    // The user just asked for something. Search memory with their own words,
+    // before any work starts.
+    //
+    // This is the trigger PostToolUse cannot be: it only fires once a command
+    // has already failed, which is late and narrow. Most work begins with a
+    // sentence — "the sidebar is stretching to full height" — and that sentence
+    // is the best description of the problem anyone will write all session.
+    // Measured before this existed: 2 recalls against 17 capture prompts in
+    // four days, because nothing read memory at the start of a task.
+    if (event === 'user-prompt') {
+      const prompt = typeof input.prompt === 'string' ? input.prompt : '';
+      if (!isWorthLookingUp(prompt)) return;
+
+      const sessionId = typeof input.session_id === 'string' ? input.session_id : '';
+      const project = await getProjectByPath(getRepoRoot(cwd) ?? cwd);
+      if (!project) return;
+
+      const embedding = await getEmbedding(prompt).catch(() => [] as number[]);
+      const hits = recallForFailure(prompt, await getAllEntriesWithProjects(), {
+        projectId: project.id,
+        embedding,
+        // Never the same entry twice in one session. A briefing that repeats
+        // itself every message is one the agent learns to skim past.
+        exclude: sessionId ? readCursor(sessionId).surfaced ?? [] : [],
+      });
+      if (!hits.length) return;
+
+      if (sessionId) markSurfaced(sessionId, hits.map(h => h.entry.id));
+      const ids = hits.map(h => h.entry.id);
+      await bumpRetrievalCounts(ids, project.id).catch(() => {});
+      // Counted as a catch: this is memory matched to a real problem someone
+      // brought, which is the same event as matching a failing command.
+      await bumpRecallCounts(ids, { query: prompt, sessionId }).catch(() => {});
+      captureLog(`${project.name} ${sessionId.slice(0, 8)}: prompt recall, ${hits.length} for "${clip(prompt, 60)}"`);
+      process.stdout.write(JSON.stringify({
+        hookSpecificOutput: {
+          hookEventName: 'UserPromptSubmit',
+          additionalContext: formatRecallForAgent(prompt, hits, { of: 'request' }) ?? '',
+        },
       }));
       return;
     }

@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { recallForFailure, formatRecallForAgent, VOLUNTEER_TOP_K } from './recall';
+import { recallForFailure, formatRecallForAgent, isWorthLookingUp, VOLUNTEER_TOP_K } from './recall';
 import { isReadOnlyCommand, looksLikeError } from './transcript';
 import type { Entry, Project } from './types';
 
@@ -172,5 +172,42 @@ describe('the semantic route', () => {
       projectId: 'p1', embedding: vec(0.99, 0.1), exclude: ['np'],
     });
     expect(hits).toEqual([]);
+  });
+});
+
+describe('isWorthLookingUp', () => {
+  // This runs on every single thing the user types, so the cost of firing on
+  // the wrong ones is paid constantly.
+  it('looks up a described problem', () => {
+    expect(isWorthLookingUp('the sidebar is stretching to full page height')).toBe(true);
+    expect(isWorthLookingUp('why does the dev server keep serving a stale build?')).toBe(true);
+  });
+
+  it('ignores the replies that carry no problem to match', () => {
+    for (const bare of ['yes', 'ok', 'continue', 'push', 'go ahead', 'proceed', 'thanks', 'do it']) {
+      expect(isWorthLookingUp(bare), bare).toBe(false);
+    }
+  });
+
+  it('ignores them with trailing punctuation and odd case', () => {
+    expect(isWorthLookingUp('Yes.')).toBe(false);
+    expect(isWorthLookingUp('CONTINUE!')).toBe(false);
+    expect(isWorthLookingUp('  proceed  ')).toBe(false);
+  });
+
+  it('ignores anything too short to describe a problem', () => {
+    expect(isWorthLookingUp('fix the bug')).toBe(false);
+    expect(isWorthLookingUp('')).toBe(false);
+    expect(isWorthLookingUp('   ')).toBe(false);
+  });
+
+  // A slash command is an instruction to the harness, not a question for memory.
+  it('ignores slash commands', () => {
+    expect(isWorthLookingUp('/code-review ultra 1234')).toBe(false);
+  });
+
+  // A long message that happens to begin with a short reply is still a message.
+  it('does not mistake a long message for a bare reply', () => {
+    expect(isWorthLookingUp('yes, and the footer is still below the fold on mobile')).toBe(true);
   });
 });

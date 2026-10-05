@@ -46,6 +46,35 @@ export const VOLUNTEER_MIN_SEMANTIC = 0.62;
 /** Most entries to volunteer at once. Two is a hint; five is an interruption. */
 export const VOLUNTEER_TOP_K = 2;
 
+/**
+ * Whether a message is worth a lookup at all.
+ *
+ * This hook runs on every single thing the user types, so the cost of firing on
+ * the wrong ones is paid constantly. "yes", "continue", "push" carry no problem
+ * to match against, and a hit on them would be a coincidence dressed up as
+ * memory — exactly the noise that teaches an agent to skim past the channel.
+ *
+ * Deliberately crude: a length floor and a list of the replies that actually
+ * recur. Anything cleverer here would be a model, and this must stay instant.
+ */
+const BARE_REPLIES = new Set([
+  'yes', 'no', 'y', 'n', 'ok', 'okay', 'sure', 'yep', 'yeah', 'nope',
+  'continue', 'go', 'go ahead', 'proceed', 'carry on', 'keep going', 'next',
+  'push', 'commit', 'stop', 'wait', 'thanks', 'thank you', 'ty', 'nice',
+  'do it', 'please', 'again', 'retry', 'fix it', 'done',
+]);
+
+export function isWorthLookingUp(prompt: string): boolean {
+  const text = prompt.trim();
+  // Shorter than this carries no description of a problem, whatever it says.
+  if (text.length < 15) return false;
+  const bare = text.toLowerCase().replace(/[.!?,]+$/g, '').trim();
+  if (BARE_REPLIES.has(bare)) return false;
+  // A slash command is an instruction to the harness, not a question for memory.
+  if (text.startsWith('/')) return false;
+  return true;
+}
+
 export interface RecallOptions {
   projectId?: string;
   /** Entry ids already surfaced this session — never repeated. */
@@ -112,11 +141,18 @@ export function recallForFailure(
  * entry may be stale, and an agent that cannot name a wrong entry cannot
  * correct it.
  */
-export function formatRecallForAgent(failure: string, hits: PreciseSearchResult[]): string | null {
+export function formatRecallForAgent(
+  failure: string,
+  hits: PreciseSearchResult[],
+  // Recall now fires on a request as well as on a failure, and calling what the
+  // user just asked for "this failure" is both wrong and faintly accusing.
+  opts: { of?: 'failure' | 'request' } = {},
+): string | null {
   if (!hits.length) return null;
 
+  const subject = opts.of === 'request' ? 'what you were just asked' : 'this failure';
   const lines: string[] = [
-    `DevBrain: this failure matches ${hits.length === 1 ? 'something' : 'things'} already recorded.`,
+    `DevBrain: ${subject} matches ${hits.length === 1 ? 'something' : 'things'} already recorded.`,
     `Matched on: ${clip(failure, 160)}`,
     '',
   ];

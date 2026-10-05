@@ -6,9 +6,14 @@
 // are run by the agent's harness, not chosen by the model, so they cannot be
 // forgotten:
 //
-//   SessionStart — inject this project's briefing into the agent's context
-//   Stop         — after each turn, if the work established something and the
-//                  agent saved nothing, ask it to record it (see turnReview.ts)
+//   SessionStart     — inject this project's briefing into the agent's context
+//   UserPromptSubmit — search memory for what was just asked, before any work
+//                      starts (see recall.ts)
+//   PostToolUse      — after a shell command fails, match the error against
+//                      what is stored
+//   Stop             — after each turn, if the work established something and
+//                      the agent saved nothing, ask it to record it (see
+//                      turnReview.ts)
 //
 // Neither needs a model: the agent does all the writing, DevBrain stores it.
 //
@@ -48,11 +53,15 @@ export function briefingEntries<T extends Entry>(all: T[], projectId?: string): 
   return all.filter(e => !isAlreadyInAgentContext(e, projectId));
 }
 
-export const HOOK_EVENTS = ['SessionStart', 'PostToolUse', 'Stop'] as const;
+export const HOOK_EVENTS = ['SessionStart', 'UserPromptSubmit', 'PostToolUse', 'Stop'] as const;
 export type HookEvent = typeof HOOK_EVENTS[number];
 
 const HOOK_ARG: Record<HookEvent, string> = {
   SessionStart: 'session-start',
+  // What the user just asked for, searched against memory before the agent
+  // starts. PostToolUse only fires once something has already failed, which is
+  // late: most work begins with a sentence, not a stack trace.
+  UserPromptSubmit: 'user-prompt',
   PostToolUse: 'post-tool',
   Stop: 'stop',
 };
