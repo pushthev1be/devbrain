@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { openBugsInSession } from './graph';
+import { openBugsInSession, buildGraph, graphSubset } from './graph';
 import { buildFixHint, buildRecordPrompt } from './turnReview';
 import type { Entry } from './types';
 
@@ -94,5 +94,101 @@ describe('the fixes hint', () => {
     const lines = buildFixHint(many);
     expect(lines.filter(l => l.startsWith('  '))).toHaveLength(3);
     expect(lines.join('\n')).not.toContain('bug d');
+  });
+});
+
+describe('buildGraph', () => {
+  it('draws the fix over the bug it closed', () => {
+    const { edges } = buildGraph([
+      entry({ id: 'bug' }),
+      entry({ id: 'fix', type: 'fix', fixes: 'bug' }),
+    ]);
+    expect(edges).toEqual([{ from: 'fix', to: 'bug', kind: 'fixes' }]);
+  });
+
+  // An edge to an id that is not in the set would be a line to nowhere — which
+  // happens whenever the graph is filtered to one project or a recent window.
+  it('ignores a link whose other end is not in the set', () => {
+    const { edges } = buildGraph([entry({ id: 'fix', type: 'fix', fixes: 'elsewhere' })]);
+    expect(edges).toEqual([]);
+  });
+
+  it('keeps a retracted entry in the graph, marked — the correction needs it to read against', () => {
+    const { nodes } = buildGraph([
+      entry({ id: 'wrong', supersededBy: 'right' }),
+      entry({ id: 'right', supersedes: 'wrong' }),
+    ]);
+    expect(nodes.find(n => n.id === 'wrong')!.superseded).toBe(true);
+    expect(nodes.find(n => n.id === 'right')!.superseded).toBe(false);
+  });
+
+  // Ten entries in a session is a thread of work. Every pair would be
+  // forty-five lines through the same ten nodes, which reads as noise.
+  it('threads a session in order rather than joining every pair', () => {
+    const { edges } = buildGraph(['a', 'b', 'c', 'd'].map(id => entry({ id, sessionId: 's1' })));
+    expect(edges).toHaveLength(3);
+    expect(edges.map(e => [e.from, e.to])).toEqual([['a', 'b'], ['b', 'c'], ['c', 'd']]);
+  });
+
+  it('lets a recorded edge win the pair over an inferred one', () => {
+    const { edges } = buildGraph([
+      entry({ id: 'bug', sessionId: 's1' }),
+      entry({ id: 'fix', type: 'fix', sessionId: 's1', fixes: 'bug' }),
+    ]);
+    expect(edges).toHaveLength(1);
+    expect(edges[0].kind).toBe('fixes');
+  });
+
+  it('connects two entries that failed the same way', () => {
+    const { edges } = buildGraph([
+      entry({ id: 'a', errorPattern: "src/a.ts(3,1): error TS2304: Cannot find name 'tier'." }),
+      entry({ id: 'b', errorPattern: "src/zz.ts(91,7): error TS2304: Cannot find name 'plan'." }),
+    ]);
+    expect(edges.map(e => e.kind)).toEqual(['same-error']);
+    expect(edges[0].because).toContain('same error');
+  });
+
+  it('does not connect two unrelated errors', () => {
+    const { edges } = buildGraph([
+      entry({ id: 'a', errorPattern: 'TokenExpiredError: jwt expired' }),
+      entry({ id: 'b', errorPattern: 'ECONNREFUSED 127.0.0.1:27017' }),
+    ]);
+    expect(edges).toEqual([]);
+  });
+
+  // "Exit code 1" reduces to almost nothing and would otherwise join every
+  // failure to every other one.
+  it('leaves a group too large to draw undrawn, rather than smearing the graph', () => {
+    const many = Array.from({ length: 12 }, (_, i) => entry({ id: `e${i}`, causeArchetype: 'config drift' }));
+    expect(buildGraph(many).edges).toEqual([]);
+  });
+
+  it('connects different symptoms that share a cause', () => {
+    const { edges } = buildGraph([
+      entry({ id: 'a', causeArchetype: 'Stale build artefact' }),
+      entry({ id: 'b', causeArchetype: 'stale build artefact' }),
+    ]);
+    expect(edges.map(e => e.kind)).toEqual(['same-cause']);
+  });
+
+  it('orders nodes oldest first, so the picture reads as progression', () => {
+    const late = entry({ id: 'late' });
+    const early = entry({ id: 'early', createdAt: 1 });
+    expect(buildGraph([late, early]).nodes.map(n => n.id)).toEqual(['early', 'late']);
+  });
+});
+
+describe('graphSubset', () => {
+  it('keeps the connected entries when it has to drop some', () => {
+    const linked = [entry({ id: 'bug' }), entry({ id: 'fix', type: 'fix', fixes: 'bug' })];
+    const lonely = Array.from({ length: 10 }, (_, i) => entry({ id: `lonely${i}` }));
+    const kept = graphSubset([...linked, ...lonely], 3).map(e => e.id);
+    expect(kept).toContain('bug');
+    expect(kept).toContain('fix');
+    expect(kept).toHaveLength(3);
+  });
+
+  it('leaves a small set alone', () => {
+    expect(graphSubset([entry({ id: 'a' })], 120)).toHaveLength(1);
   });
 });

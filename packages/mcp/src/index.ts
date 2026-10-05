@@ -18,6 +18,7 @@ import {
   ENTRY_TYPES, ENTRY_TYPE_NAMES, normalizeType,
   buildDossier, describeStorage, findDuplicate, findTextDuplicate, clip, measureUse,
   filterUnprocessedCommits, listCommitHashes, activeSession,
+  buildGraph, graphSubset,
 } from '@devbrain/core';
 import type { EntryCategory } from '@devbrain/core';
 import type { Entry } from '@devbrain/core';
@@ -666,6 +667,40 @@ const httpServer = createServer(async (req, res) => {
             },
           }));
           json(res, 200, { feed: mapped });
+        } catch (err) {
+          json(res, 500, { error: String(err) });
+        }
+        return;
+      }
+
+      // ── /api/graph — the entries of one project, and what connects them ───────
+      //
+      // The connecting is done in core so the dashboard draws exactly what a
+      // test asserts, and `counts` is returned alongside because a graph with
+      // few edges needs to say which kinds are missing rather than look broken.
+      if (url.startsWith('/api/graph') && req.method === 'GET') {
+        try {
+          const id = new URL(req.url ?? '', 'http://x').searchParams.get('id');
+          if (!id) { json(res, 400, { error: 'id is required' }); return; }
+          const all = (await getAllEntriesWithProjects()).filter(e => e.projectId === id);
+          const graph = buildGraph(graphSubset(all));
+          const counts: Record<string, number> = {};
+          for (const e of graph.edges) counts[e.kind] = (counts[e.kind] ?? 0) + 1;
+          json(res, 200, {
+            ...graph,
+            counts,
+            total: all.length,
+            shown: graph.nodes.length,
+            // What the inferred edges had to work with. Without this, "no
+            // connections" is indistinguishable from "nothing to connect them
+            // by yet", and only the second one is true today.
+            fields: {
+              sessionId:      all.filter(e => e.sessionId).length,
+              errorPattern:   all.filter(e => e.errorPattern).length,
+              causeArchetype: all.filter(e => e.causeArchetype).length,
+              fixes:          all.filter(e => e.fixes).length,
+            },
+          });
         } catch (err) {
           json(res, 500, { error: String(err) });
         }

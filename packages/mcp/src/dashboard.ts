@@ -129,6 +129,7 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
     .btn { background: var(--accent); border: none; color: #fff; padding: 7px 14px; border-radius: 4px; cursor: pointer; font-size: 13px; }
     .btn.ghost { background: transparent; border: 1px solid var(--border2); color: var(--text2); }
     .btn.ghost:hover { border-color: var(--accent); color: var(--text); }
+    .btn.ghost.active { border-color: var(--accent); color: var(--text); background: var(--surface2); }
     .btn:disabled { opacity: .5; cursor: default; }
 
     .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
@@ -195,6 +196,51 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
     .t-note, .t-image { background: var(--surface2); color: var(--text3); }
     .conf-confirmed { color: var(--green); }
     .conf-corroborated { color: var(--yellow); }
+
+    /* ── the graph ────────────────────────────────────────────────────────────
+       Time runs left to right and each entry type gets a lane, so a bug and the
+       fix that closed it sit in different rows with a line between them: the
+       point where it was fixed is a place on the picture rather than a date to
+       compare. A force layout was tried first and read as a hairball — it
+       showed that things connect, but never when, which is the whole question. */
+    .gwrap { border: 1px solid var(--border); border-radius: 4px; background: var(--surface); overflow-x: auto; overflow-y: hidden; }
+    .gwrap svg { display: block; }
+    .glane { fill: var(--text3); font-family: var(--mono); font-size: 10px; text-transform: uppercase; }
+    .gtick { stroke: var(--border); stroke-width: 1; }
+    .gdate { fill: var(--text3); font-family: var(--mono); font-size: 9px; }
+    .glanebg { fill: var(--surface2); opacity: .35; }
+    .gedge { fill: none; stroke: var(--border2); stroke-width: 1.2; }
+    /* Recorded edges are facts and drawn solid; inferred ones are DevBrain's
+       guess and drawn dashed, so the picture never overstates what it knows. */
+    .gedge.e-fixes { stroke: var(--green); stroke-width: 1.8; }
+    .gedge.e-supersedes { stroke: var(--red); stroke-width: 1.6; }
+    .gedge.e-sequence { stroke: var(--border2); stroke-dasharray: 2 3; }
+    .gedge.e-same-error { stroke: var(--yellow); stroke-dasharray: 4 3; opacity: .75; }
+    .gedge.e-same-cause { stroke: var(--purple); stroke-dasharray: 4 3; opacity: .75; }
+    .gedge.dim { opacity: .12; }
+    .gnode { cursor: pointer; }
+    .gnode circle { stroke: var(--bg); stroke-width: 1.5; }
+    .gnode.n-bug circle, .gnode.n-anti-pattern circle { fill: var(--red); }
+    .gnode.n-fix circle { fill: var(--green); }
+    .gnode.n-decision circle { fill: var(--purple); }
+    .gnode.n-architecture circle, .gnode.n-stack circle { fill: var(--cyan); }
+    .gnode.n-pattern circle, .gnode.n-lesson circle { fill: var(--yellow); }
+    .gnode.n-note circle, .gnode.n-image circle { fill: var(--text3); }
+    /* A retracted entry stays on the picture: a correction is only readable
+       next to the thing it corrected. */
+    .gnode.retracted circle { opacity: .3; stroke-dasharray: 2 2; }
+    .gnode.dim { opacity: .2; }
+    .gnode[data-sel="true"] circle { stroke: var(--text); stroke-width: 2.5; }
+    .glegend { display: flex; flex-wrap: wrap; gap: 12px; margin: 10px 0 0; font-family: var(--mono); font-size: 11px; color: var(--text3); }
+    .glegend b { font-weight: normal; color: var(--text2); }
+    .gkey { display: inline-flex; align-items: center; gap: 5px; }
+    .gkey i { width: 16px; height: 0; border-top-width: 2px; border-top-style: solid; display: inline-block; }
+    .gsel { margin-top: 12px; border: 1px solid var(--border); border-left: 2px solid var(--accent); border-radius: 4px; background: var(--surface); padding: 11px 13px; }
+    .gsel h3 { margin: 0 0 6px; font-size: 14px; font-weight: 600; }
+    .glinks { margin-top: 9px; display: grid; gap: 4px; }
+    .glink { font-family: var(--mono); font-size: 11px; color: var(--text3); cursor: pointer; }
+    .glink:hover { color: var(--text); }
+    .glink b { color: var(--text2); font-weight: normal; }
 
     .empty { color: var(--text3); font-family: var(--mono); font-size: 12px; padding: 22px 0; }
     .fail { color: var(--red); font-family: var(--mono); font-size: 12px; padding: 12px 0; }
@@ -291,6 +337,8 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
       // Filters apply to the loaded project, client side — the whole record is
       // already here, so narrowing it should not cost a round trip.
       q: '', sort: 'newest', category: 'all', origin: 'all', showRetracted: false,
+      // How the project is shown: the list, or the same entries as a graph.
+      pview: 'list',
     };
     var TYPES = ${JSON.stringify(ENTRY_TYPES.map(t => ({ type: t.type, hint: t.hint })))};
 
@@ -390,10 +438,17 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
           ' &middot; ' + esc(p.path) + '</div>' +
           useLine(d.use) + '</div>' +
           '<div class="actions">' +
+          '<button class="btn ghost' + (STATE.pview === 'list' ? ' active' : '') + '" data-pview="list">List</button>' +
+          '<button class="btn ghost' + (STATE.pview === 'graph' ? ' active' : '') + '" data-pview="graph">Graph</button>' +
           '<button class="btn" data-act="save-here">Save an entry here</button>' +
           '<button class="btn ghost" data-act="context">agent.md</button>' +
           '<button class="btn ghost" data-act="search-here">Search</button>' +
           '</div>';
+
+        // The graph is the same entries, drawn. Built after the dossier so the
+        // detail panel can read a node's content from what is already loaded
+        // rather than asking for it again.
+        if (STATE.pview === 'graph') { await renderGraph(head); return; }
 
         if (!d.total) {
           main.innerHTML = head + '<div class="empty">Nothing recorded for this project yet.<br><br>' +
@@ -431,6 +486,218 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
         restoreFilterFocus();
       } catch (e) {
         main.innerHTML = fail('could not load this project', e.message);
+      }
+    }
+
+    // == the graph ==============================================================
+    //
+    // Lanes by type, time left to right. The question it answers is "where did
+    // this get fixed", and that is a position on the picture: the bug sits in
+    // the bug lane, the fix in the fix lane, and the line between them lands at
+    // the moment it closed.
+
+    var LANES = ['bug', 'fix', 'decision', 'architecture', 'pattern', 'lesson', 'anti-pattern', 'stack', 'note', 'image'];
+    var EDGE_LABEL = {
+      'fixes': 'closed this bug',
+      'supersedes': 'corrects this',
+      'sequence': 'same session',
+      'same-error': 'same error',
+      'same-cause': 'same cause'
+    };
+    var LANE_X = 96, STEP = 30, LANE_H = 34, TOP = 30;
+    var MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    var GSTATE = { graph: null, sel: null };
+
+    function entryById(id) {
+      var d = STATE.dossier;
+      if (!d) return null;
+      for (var i = 0; i < d.sections.length; i++) {
+        var es = d.sections[i].entries;
+        for (var j = 0; j < es.length; j++) if (es[j].id === id) return es[j];
+      }
+      return null;
+    }
+
+    function layoutGraph(g) {
+      // Only the lanes in use. An empty row for every type the project has
+      // never recorded would be most of the picture.
+      var used = LANES.filter(function (t) {
+        return g.nodes.some(function (n) { return n.type === t; });
+      });
+      var pos = {};
+      g.nodes.forEach(function (n, i) {
+        var lane = used.indexOf(n.type);
+        pos[n.id] = { x: LANE_X + 20 + i * STEP, y: TOP + lane * LANE_H + LANE_H / 2 };
+      });
+      return {
+        used: used, pos: pos,
+        width: LANE_X + 40 + g.nodes.length * STEP,
+        height: TOP + used.length * LANE_H + 14
+      };
+    }
+
+    function edgePath(a, b) {
+      var dx = b.x - a.x;
+      // Two entries in the same lane would be a straight line drawn through
+      // every node between them, so bow it over the top where it can be followed.
+      if (Math.abs(b.y - a.y) < 1) {
+        var lift = Math.min(26, 8 + Math.abs(dx) / 6);
+        return 'M' + a.x + ' ' + a.y + ' Q' + ((a.x + b.x) / 2) + ' ' + (a.y - lift) + ' ' + b.x + ' ' + b.y;
+      }
+      var c = Math.max(14, Math.abs(dx) * 0.4);
+      return 'M' + a.x + ' ' + a.y + ' C' + (a.x + c) + ' ' + a.y + ' ' + (b.x - c) + ' ' + b.y + ' ' + b.x + ' ' + b.y;
+    }
+
+    function graphSvg(g) {
+      var L = layoutGraph(g);
+      var sel = GSTATE.sel;
+      var near = {};
+      if (sel) {
+        near[sel] = true;
+        g.edges.forEach(function (e) {
+          if (e.from === sel) near[e.to] = true;
+          if (e.to === sel) near[e.from] = true;
+        });
+      }
+
+      var out = '<svg width="' + L.width + '" height="' + L.height + '" viewBox="0 0 ' + L.width + ' ' + L.height + '">';
+
+      // Spacing is one step per entry, not per day: a week of nothing would
+      // otherwise be a week of blank picture. So the dates have to be written
+      // on, or the horizontal axis means nothing at all.
+      var lastDay = '', lastLabelX = -999;
+      g.nodes.forEach(function (n) {
+        var pt = L.pos[n.id], d = new Date(n.createdAt);
+        var day = d.getFullYear() + '-' + d.getMonth() + '-' + d.getDate();
+        if (day === lastDay) return;
+        lastDay = day;
+        out += '<line class="gtick" x1="' + pt.x + '" y1="' + (TOP - 8) + '" x2="' + pt.x + '" y2="' + (L.height - 6) + '"></line>';
+        // Only when there is room, or close days overprint each other.
+        if (pt.x - lastLabelX > 56) {
+          lastLabelX = pt.x;
+          out += '<text class="gdate" x="' + (pt.x + 3) + '" y="' + (TOP - 13) + '">' +
+            MONTHS[d.getMonth()] + ' ' + d.getDate() + '</text>';
+        }
+      });
+      L.used.forEach(function (t, i) {
+        var y = TOP + i * LANE_H;
+        if (i % 2 === 0) out += '<rect class="glanebg" x="0" y="' + y + '" width="' + L.width + '" height="' + LANE_H + '"></rect>';
+        out += '<text class="glane" x="10" y="' + (y + LANE_H / 2 + 3) + '">' + esc(t) + '</text>';
+      });
+
+      g.edges.forEach(function (e) {
+        var a = L.pos[e.from], b = L.pos[e.to];
+        if (!a || !b) return;
+        var dim = sel && e.from !== sel && e.to !== sel ? ' dim' : '';
+        out += '<path class="gedge e-' + esc(e.kind) + dim + '" d="' + edgePath(a, b) + '">' +
+          '<title>' + esc(e.because || EDGE_LABEL[e.kind] || e.kind) + '</title></path>';
+      });
+
+      g.nodes.forEach(function (n) {
+        var pt = L.pos[n.id];
+        // Size carries the one count that means the entry earned its place:
+        // times it was handed to an agent on a real failure.
+        var r = 5 + Math.min(4, n.recalls);
+        var dim = sel && !near[n.id] ? ' dim' : '';
+        out += '<g class="gnode n-' + esc(n.type) + (n.superseded ? ' retracted' : '') + dim + '"' +
+          ' data-node="' + esc(n.id) + '"' + (sel === n.id ? ' data-sel="true"' : '') + '>' +
+          '<circle cx="' + pt.x + '" cy="' + pt.y + '" r="' + r + '"></circle>' +
+          '<title>' + esc('[' + n.type + '] ' + n.title) + '</title></g>';
+      });
+      return out + '</svg>';
+    }
+
+    function graphLegend(g) {
+      var counts = g.counts || {};
+      var keys = ['fixes', 'supersedes', 'sequence', 'same-error', 'same-cause'];
+      var stroke = {
+        'fixes': 'var(--green)', 'supersedes': 'var(--red)', 'sequence': 'var(--border2)',
+        'same-error': 'var(--yellow)', 'same-cause': 'var(--purple)'
+      };
+      var parts = keys.filter(function (k) { return counts[k]; }).map(function (k) {
+        var dashed = k === 'fixes' || k === 'supersedes' ? '' : ';border-top-style:dashed';
+        return '<span class="gkey"><i style="border-top-color:' + stroke[k] + dashed + '"></i>' +
+          esc(k) + ' <b>' + counts[k] + '</b></span>';
+      });
+      if (!parts.length) return '';
+      // Solid lines were stated by the agent that did the work; dashed ones are
+      // DevBrain noticing two entries share something, and can be wrong.
+      parts.push('<span class="gkey">solid = recorded, dashed = inferred</span>');
+      return '<div class="glegend">' + parts.join('') + '</div>';
+    }
+
+    // Says what the graph had to work with. Without it, "nothing connects" and
+    // "nothing to connect them by yet" look identical, and only the second one
+    // is true of a store recorded before these links existed.
+    function graphGaps(g) {
+      var f = g.fields || {}, miss = [];
+      if (!f.fixes) miss.push('No fix has named the bug it closed yet — pass <b>fixes</b> to save_entry.');
+      if (!f.sessionId) miss.push('No entry carries a session yet; entries saved from now on will.');
+      if (f.errorPattern < g.total / 4) {
+        miss.push(f.errorPattern + ' of ' + g.total + ' entries carry an error pattern, so few can be matched on one.');
+      }
+      if (!miss.length) return '';
+      return '<div class="use none" style="margin-top:10px">' + miss.join('<br>') + '</div>';
+    }
+
+    function graphDetail() {
+      var g = GSTATE.graph, id = GSTATE.sel;
+      if (!g || !id) return '<div class="empty" style="padding:10px 0">Click a node to see what it connects to.</div>';
+      var n = g.nodes.filter(function (x) { return x.id === id; })[0];
+      if (!n) return '';
+      // Through bodyOf and esc, exactly as a card does: it trims a repeated
+      // title off the front, and the raw field must never reach markup.
+      var e = entryById(id);
+      var body = e ? bodyOf(e) : '';
+      var links = g.edges.filter(function (x) { return x.from === id || x.to === id; }).map(function (x) {
+        var other = x.from === id ? x.to : x.from;
+        var on = g.nodes.filter(function (y) { return y.id === other; })[0];
+        if (!on) return '';
+        var how = x.kind === 'fixes'
+          ? (x.from === id ? 'closed the bug' : 'was closed by')
+          : x.kind === 'supersedes'
+            ? (x.from === id ? 'corrects' : 'was corrected by')
+            : (EDGE_LABEL[x.kind] || x.kind);
+        return '<div class="glink" data-node="' + esc(other) + '"><b>' + esc(how) + '</b> &rarr; [' +
+          esc(on.type) + '] ' + esc(on.title) + '</div>';
+      }).join('');
+
+      return '<div class="gsel"><h3>' + esc(n.title) + '</h3>' +
+        '<div class="cmeta"><span class="t t-' + esc(n.type) + '">' + esc(n.type) + '</span>' +
+        (n.superseded ? '<span style="color:var(--red)">retracted</span>' : '') +
+        '<span>' + n.recalls + ' caught</span></div>' +
+        (body ? '<div class="cbody" style="margin-top:8px">' + esc(body) + '</div>' : '') +
+        (links
+          ? '<div class="glinks">' + links + '</div>'
+          : '<div class="use none" style="margin-top:8px">Nothing links to this one yet.</div>') +
+        '</div>';
+    }
+
+    function paintGraph() {
+      var host = el('graph-host');
+      if (!host || !GSTATE.graph) return;
+      host.innerHTML = '<div class="gwrap">' + graphSvg(GSTATE.graph) + '</div>' +
+        graphLegend(GSTATE.graph) + graphGaps(GSTATE.graph) + graphDetail();
+    }
+
+    async function renderGraph(head) {
+      var main = el('main');
+      main.innerHTML = head + '<div class="empty">building the graph&hellip;</div>';
+      try {
+        var g = await getJSON('/api/graph?id=' + encodeURIComponent(STATE.projectId));
+        GSTATE.graph = g; GSTATE.sel = null;
+        if (!g.nodes.length) {
+          main.innerHTML = head + '<div class="empty">Nothing recorded for this project yet.</div>';
+          return;
+        }
+        var note = g.shown < g.total
+          ? '<div class="use" style="margin-bottom:10px">Showing ' + g.shown + ' of ' + g.total +
+            ' — connected entries first.</div>'
+          : '';
+        main.innerHTML = head + note + '<div id="graph-host"></div>';
+        paintGraph();
+      } catch (e) {
+        main.innerHTML = head + fail('could not build the graph', e.message);
       }
     }
 
@@ -781,6 +1048,19 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
 
       var proj = t.closest('[data-project]');
       if (proj) { selectProject(proj.getAttribute('data-project')); return; }
+
+      var pv = t.closest('[data-pview]');
+      if (pv) { STATE.pview = pv.getAttribute('data-pview'); renderProject(); return; }
+
+      // Repainting rather than re-fetching: the selection only changes what is
+      // highlighted, and the graph is already in hand.
+      var node = t.closest('[data-node]');
+      if (node) {
+        var id = node.getAttribute('data-node');
+        GSTATE.sel = GSTATE.sel === id ? null : id;
+        paintGraph();
+        return;
+      }
 
       var chip = t.closest('[data-section]');
       if (chip) { STATE.section = chip.getAttribute('data-section'); renderProject(); return; }
