@@ -236,6 +236,23 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
     .gnode.retracted circle { opacity: .3; stroke-dasharray: 2 2; }
     .gnode.dim { opacity: .2; }
     .gnode[data-sel="true"] circle { stroke: var(--text); stroke-width: 2.5; }
+    /* The travelling light, and the type badge it lights on arrival. */
+    .gspark { fill: #ffe9b8; }
+    .gspark.dim { opacity: .08; }
+    .gbadge { font-family: var(--mono); font-size: 9px; font-weight: 700; text-anchor: middle; pointer-events: none; }
+    .gbadge.dim { opacity: .12; }
+    .gbadge.n-bug, .gbadge.n-anti-pattern { fill: var(--red); }
+    .gbadge.n-fix { fill: var(--green); }
+    .gbadge.n-decision { fill: var(--purple); }
+    .gbadge.n-architecture, .gbadge.n-stack { fill: var(--cyan); }
+    .gbadge.n-pattern, .gbadge.n-lesson { fill: var(--yellow); }
+    .gbadge.n-note, .gbadge.n-image { fill: var(--text2); }
+    /* Motion is the whole effect, so for a reader who has asked for less of it
+       there is nothing to tone down — the pulses and their badges just go. */
+    @media (prefers-reduced-motion: reduce) {
+      .gspark, .gbadge { display: none; }
+    }
+
     .glegend { display: flex; flex-wrap: wrap; gap: 12px; margin: 10px 0 0; font-family: var(--mono); font-size: 11px; color: var(--text3); }
     .glegend b { font-weight: normal; color: var(--text2); }
     .gkey { display: inline-flex; align-items: center; gap: 5px; }
@@ -885,9 +902,11 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
       'same-cause': 'same cause',
       'related': 'closest in meaning'
     };
-    var LANE_X = 96, STEP = 30, LANE_H = 34, TOP = 30;
+    var LANE_X = 104, STEP = 42, LANE_H = 46, TOP = 34;
     var MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
     var GSTATE = { graph: null, sel: null };
+    /** How long a pulse takes to cross any edge. Slow enough to follow one. */
+    var PULSE_SECONDS = 3;
 
     function entryById(id) {
       var d = STATE.dossier;
@@ -966,11 +985,12 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
         out += '<text class="glane" x="10" y="' + (y + LANE_H / 2 + 3) + '">' + esc(t) + '</text>';
       });
 
-      g.edges.forEach(function (e) {
+      // Each edge is given an id so a pulse can be told to follow it.
+      g.edges.forEach(function (e, idx) {
         var a = L.pos[e.from], b = L.pos[e.to];
         if (!a || !b) return;
         var dim = sel && e.from !== sel && e.to !== sel ? ' dim' : '';
-        out += '<path class="gedge e-' + esc(e.kind) + dim + '" d="' + edgePath(a, b) + '">' +
+        out += '<path id="ge' + idx + '" class="gedge e-' + esc(e.kind) + dim + '" d="' + edgePath(a, b) + '">' +
           '<title>' + esc(e.because || EDGE_LABEL[e.kind] || e.kind) + '</title></path>';
       });
 
@@ -985,7 +1005,56 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
           '<circle cx="' + pt.x + '" cy="' + pt.y + '" r="' + r + '"></circle>' +
           '<title>' + esc('[' + n.type + '] ' + n.title) + '</title></g>';
       });
+
+      out += pulses(g, L, sel, near);
       return out + '</svg>';
+    }
+
+    /**
+     * A light down every edge at once, lighting the type of the node it reaches.
+     *
+     * The point is not decoration: a still picture of 79 lines does not say
+     * which way anything flows, and the badge answers "what did it arrive at"
+     * without making the reader hover each dot in turn. Abbreviations only —
+     * 50 titles printed on the canvas would bury the graph underneath them.
+     *
+     * Every pulse starts together and takes the same time, however long its
+     * line, so arrivals land on one beat and the badges read as a chord rather
+     * than as scattered flickering. That also means a single repeating
+     * animation can drive every badge, instead of one timer per edge.
+     */
+    function pulses(g, L, sel, near) {
+      // The animation is SMIL rather than JS: the browser runs it off the main
+      // thread, so 200 travelling dots cost nothing per frame here and nothing
+      // keeps running when the tab is hidden.
+      var period = PULSE_SECONDS;
+      var out = '';
+      g.edges.forEach(function (e, idx) {
+        if (!L.pos[e.from] || !L.pos[e.to]) return;
+        var dim = sel && e.from !== sel && e.to !== sel ? ' dim' : '';
+        out += '<circle class="gspark' + dim + '" r="2.4">' +
+          '<animateMotion dur="' + period + 's" begin="0s" repeatCount="indefinite">' +
+          '<mpath href="#ge' + idx + '"></mpath></animateMotion></circle>';
+      });
+
+      // Only nodes something actually arrives at. A badge over a node no line
+      // reaches would be announcing an event that never happens.
+      var arrivedAt = {};
+      g.edges.forEach(function (e) { if (L.pos[e.to]) arrivedAt[e.to] = true; });
+      g.nodes.forEach(function (n) {
+        if (!arrivedAt[n.id]) return;
+        var pt = L.pos[n.id];
+        var dim = sel && !near[n.id] ? ' dim' : '';
+        // begin is one full period, because that is when the first pulse lands.
+        out += '<text class="gbadge n-' + esc(n.type) + dim + '" x="' + pt.x + '" y="' + (pt.y - 11) + '" opacity="0">' +
+          esc(TYPE_ABBR[n.type] || 'NOTE') +
+          // keyTimes must span the full 0..1 or the whole animation is discarded
+          // as invalid, which is silent: the badge simply never lights.
+          '<animate attributeName="opacity" values="0;1;1;0;0" keyTimes="0;0.05;0.3;0.55;1"' +
+          ' dur="' + period + 's" begin="' + period + 's" repeatCount="indefinite"></animate>' +
+          '</text>';
+      });
+      return out;
     }
 
     function graphLegend(g) {
