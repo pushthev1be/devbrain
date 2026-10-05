@@ -217,6 +217,11 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
     .gedge.e-sequence { stroke: var(--border2); stroke-dasharray: 2 3; }
     .gedge.e-same-error { stroke: var(--yellow); stroke-dasharray: 4 3; opacity: .75; }
     .gedge.e-same-cause { stroke: var(--purple); stroke-dasharray: 4 3; opacity: .75; }
+    /* Weaker than a recorded edge, but still a line. Drawn in border grey at
+       low opacity it was invisible against the surface, which is the same as
+       not drawing it: the picture read as loose dots when nearly every entry
+       in fact had a connection. */
+    .gedge.e-related { stroke: var(--accent); stroke-dasharray: 3 3; opacity: .5; }
     .gedge.dim { opacity: .12; }
     .gnode { cursor: pointer; }
     .gnode circle { stroke: var(--bg); stroke-width: 1.5; }
@@ -502,7 +507,8 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
       'supersedes': 'corrects this',
       'sequence': 'same session',
       'same-error': 'same error',
-      'same-cause': 'same cause'
+      'same-cause': 'same cause',
+      'related': 'closest in meaning'
     };
     var LANE_X = 96, STEP = 30, LANE_H = 34, TOP = 30;
     var MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -609,10 +615,10 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
 
     function graphLegend(g) {
       var counts = g.counts || {};
-      var keys = ['fixes', 'supersedes', 'sequence', 'same-error', 'same-cause'];
+      var keys = ['fixes', 'supersedes', 'sequence', 'same-error', 'same-cause', 'related'];
       var stroke = {
         'fixes': 'var(--green)', 'supersedes': 'var(--red)', 'sequence': 'var(--border2)',
-        'same-error': 'var(--yellow)', 'same-cause': 'var(--purple)'
+        'same-error': 'var(--yellow)', 'same-cause': 'var(--purple)', 'related': 'var(--accent)'
       };
       var parts = keys.filter(function (k) { return counts[k]; }).map(function (k) {
         var dashed = k === 'fixes' || k === 'supersedes' ? '' : ';border-top-style:dashed';
@@ -630,7 +636,13 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
     // "nothing to connect them by yet" look identical, and only the second one
     // is true of a store recorded before these links existed.
     function graphGaps(g) {
-      var f = g.fields || {}, miss = [];
+      var f = g.fields || {}, c = g.counts || {}, miss = [];
+      // With nearest-neighbour edges every entry has a line, so the honest
+      // caveat is no longer "nothing connects" but "none of this was stated".
+      var recorded = (c.fixes || 0) + (c.supersedes || 0);
+      if (!recorded) {
+        miss.push('Every line here is inferred \u2014 nothing has been recorded as closing or correcting anything yet.');
+      }
       if (!f.fixes) miss.push('No fix has named the bug it closed yet — pass <b>fixes</b> to save_entry.');
       if (!f.sessionId) miss.push('No entry carries a session yet; entries saved from now on will.');
       if (f.errorPattern < g.total / 4) {

@@ -10,6 +10,7 @@
 
 import type { Entry } from './types';
 import { normalizeType } from './types';
+import { cosineSimilarity } from './search';
 
 /** An entry named in a prompt or a graph label: just enough to identify it. */
 export interface EntryRef {
@@ -62,7 +63,9 @@ export type EdgeKind =
   /** Inferred: the same error text, which is what recall matches on. */
   | 'same-error'
   /** Inferred: different symptoms, same underlying cause. */
-  | 'same-cause';
+  | 'same-cause'
+  /** Inferred: nothing explicit in common, but closest in meaning. */
+  | 'related';
 
 export interface GraphNode {
   id: string;
@@ -145,13 +148,48 @@ function groupBy(entries: readonly Entry[], key: (e: Entry) => string | undefine
   return groups;
 }
 
+export interface GraphOptions {
+  /**
+   * Draw nearest-neighbour edges from the embeddings.
+   *
+   * On when drawing the graph, off when ranking which entries to draw: if
+   * everything is related to something, "connected" stops telling the ranking
+   * anything and the recorded links lose their priority in the cut.
+   */
+  related?: boolean;
+  /** How many neighbours one entry may name. */
+  neighbours?: number;
+  /** Below this, two entries are not related, however near they are to each other. */
+  floor?: number;
+}
+
+/**
+ * How near two entries must be to count as related.
+ *
+ * Matches the semantic threshold search already uses, so a line on the graph
+ * means roughly what a hit in search means.
+ */
+const RELATED_FLOOR = 0.62;
+
+/**
+ * Neighbours one entry may name.
+ *
+ * Nearest-k rather than everything-above-a-threshold, because the threshold
+ * answers the wrong question. Measured on a real project, a 0.5 cut produced
+ * 1171 lines through 49 entries and a 0.75 cut left 16 of them with none at
+ * all — one picture unreadable, the other still a scatter of dots. Nearest-k
+ * gives every entry a line to the thing it is most like, and the count of lines
+ * grows with the number of entries rather than with the square of it.
+ */
+const RELATED_K = 2;
+
 /**
  * Build the graph for a set of entries, oldest first.
  *
  * Pure: everything is derived from the entries handed in, so the dashboard, a
  * CLI view and a test all see the same graph for the same input.
  */
-export function buildGraph(entries: readonly Entry[]): KnowledgeGraph {
+export function buildGraph(entries: readonly Entry[], opts: GraphOptions = {}): KnowledgeGraph {
   const byId = new Map(entries.map(e => [e.id, e]));
   const ordered = [...entries].sort((a, b) => a.createdAt - b.createdAt);
 
@@ -209,6 +247,31 @@ export function buildGraph(entries: readonly Entry[]): KnowledgeGraph {
     for (const [a, b] of pairsWithin(group)) add({ from: a.id, to: b.id, kind: 'same-cause', because: `same cause: ${key}` });
   }
 
+  // Last, so every explicit link has already claimed its pair: an entry is
+  // only "related" to another when there is nothing more definite to say.
+  //
+  // This is what stops the graph being a field of dots. Every entry carries an
+  // embedding — 49 of 49 and 130 of 130 on the two real projects — where only
+  // 8 carried an explicit link, so the nearest neighbour is the one connection
+  // that always exists. It is the weakest claim on the picture and drawn as
+  // such: faint, dashed, and labelled as a guess.
+  if (opts.related !== false) {
+    const floor = opts.floor ?? RELATED_FLOOR;
+    const k = opts.neighbours ?? RELATED_K;
+    const withEmbedding = ordered.filter(e => e.embedding && e.embedding.length);
+    for (const e of withEmbedding) {
+      const near = withEmbedding
+        .filter(o => o.id !== e.id)
+        .map(o => ({ o, sim: cosineSimilarity(e.embedding!, o.embedding!) }))
+        .filter(x => x.sim >= floor)
+        .sort((a2, b2) => b2.sim - a2.sim)
+        .slice(0, k);
+      for (const n of near) {
+        add({ from: e.id, to: n.o.id, kind: 'related', because: `closest in meaning (${Math.round(n.sim * 100)}%)` });
+      }
+    }
+  }
+
   return { nodes, edges };
 }
 
@@ -219,7 +282,10 @@ export function buildGraph(entries: readonly Entry[]): KnowledgeGraph {
  * not carry better, and five hundred of them hide the handful that connect.
  */
 export function graphSubset(entries: readonly Entry[], limit = 120): Entry[] {
-  const { edges } = buildGraph(entries);
+  // Without `related`: it links nearly everything, so counting it here would
+  // make every entry equally "connected" and the cut would keep an isolated
+  // note over the fix that closed a bug.
+  const { edges } = buildGraph(entries, { related: false });
   const connected = new Set(edges.flatMap(e => [e.from, e.to]));
   const score = (e: Entry) => (connected.has(e.id) ? 1 : 0);
   return [...entries]
