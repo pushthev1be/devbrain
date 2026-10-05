@@ -32,7 +32,7 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
       --bg: #141414; --surface: #1a1a1a; --surface2: #202020;
       --border: #2b2b2b; --border2: #383838;
       --text: #e6e6e6; --text2: #a8a8a8; --text3: #6e6e6e;
-      --accent: #2f7fd4; --green: #4caf7d; --yellow: #d4a72f; --red: #d45f5f;
+      --accent: #d9a441; --blue: #5b9bd5; --green: #4caf7d; --yellow: #d4a72f; --red: #d45f5f;
       --purple: #9b7fd4; --cyan: #4aa8c0;
       --mono: 'Consolas', 'Courier New', monospace;
       --ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -44,8 +44,8 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
       --sidebar-accent: #242424;
       --sidebar-accent-foreground: #f0f0f0;
       --sidebar-border: #2b2b2b;
-      --sidebar-ring: #2f7fd4;
-      --sidebar-width: 16rem;
+      --sidebar-ring: #d9a441;
+      --sidebar-width: 13.5rem;
       --sidebar-width-icon: 3.25rem;
     }
     * { box-sizing: border-box; }
@@ -68,12 +68,12 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
        The open/collapsed state lives in a data attribute on <body>, which is
        what shadcn's SidebarProvider does with a wrapper div, so these rules
        read the way its group-data-[state=...] selectors do. */
-    .layout { display: grid; grid-template-columns: var(--sidebar-width) 1fr; min-height: calc(100vh - 41px); }
+    .layout { display: grid; grid-template-columns: var(--sidebar-width) 1fr; min-height: 100vh; }
 
     /* Sticky and exactly one viewport tall, as shadcn's panel is, so the header
        and footer stay put and only .sidebar-content scrolls. Left to stretch,
        the panel grows with the page and its footer ends up far below the fold. */
-    .sidebar { position: sticky; top: 41px; height: calc(100vh - 41px); display: flex; flex-direction: column; background: var(--sidebar); color: var(--sidebar-foreground); border-right: 1px solid var(--sidebar-border); overflow: hidden; }
+    .sidebar { position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column; background: var(--sidebar); color: var(--sidebar-foreground); border-right: 1px solid var(--sidebar-border); overflow: hidden; }
     .sidebar-header { flex: 0 0 auto; padding: 9px 12px; border-bottom: 1px solid var(--sidebar-border); }
     .sidebar-content { flex: 1 1 auto; overflow-y: auto; overflow-x: hidden; padding: 4px 0; }
     .sidebar-footer { flex: 0 0 auto; padding: 9px 12px; border-top: 1px solid var(--sidebar-border); }
@@ -247,6 +247,141 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
     .glink:hover { color: var(--text); }
     .glink b { color: var(--text2); font-weight: normal; }
 
+    /* == sidebar brand, search and footer =================================== */
+    .sidebar-brand { display: flex; align-items: center; gap: 9px; }
+    .sidebar-mark { flex: 0 0 26px; width: 26px; height: 26px; display: grid; place-items: center; border-radius: 6px; background: var(--accent); color: #241c08; font-family: var(--mono); font-size: 11px; font-weight: 700; }
+    .sidebar-brand-name { display: block; font-size: 13px; font-weight: 600; color: var(--sidebar-accent-foreground); line-height: 1.2; }
+    .sidebar-brand-sub { display: block; font-family: var(--mono); font-size: 10px; color: var(--text3); line-height: 1.3; }
+    .sidebar-search { display: flex; align-items: center; gap: 7px; width: 100%; margin-top: 10px; padding: 6px 9px; background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; color: var(--text3); font-size: 12px; font-family: inherit; cursor: pointer; text-align: left; }
+    .sidebar-search:hover { border-color: var(--border2); color: var(--text2); }
+    .sidebar-search svg { width: 13px; height: 13px; flex: 0 0 13px; }
+    .sidebar-search span { flex: 1; }
+    .sidebar-search kbd { font-family: var(--mono); font-size: 10px; color: var(--text3); border: 1px solid var(--border2); border-radius: 3px; padding: 0 4px; }
+    .sfoot { display: flex; align-items: center; gap: 7px; font-family: var(--mono); font-size: 10px; color: var(--text3); line-height: 1.7; }
+    .sfoot .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text3); flex: 0 0 6px; }
+    .sfoot.ok .dot { background: var(--green); }
+    .sfoot.bad .dot { background: var(--red); }
+
+    /* == project header ===================================================== */
+    .phead2 { display: flex; align-items: flex-start; gap: 14px; flex-wrap: wrap; margin-bottom: 14px; }
+    .phead2 h1 { margin: 0 0 7px; font-size: 21px; font-weight: 600; letter-spacing: -.01em; }
+    .pstack { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; font-family: var(--mono); font-size: 11px; color: var(--text3); }
+    .pchip { border: 1px solid var(--border2); border-radius: 4px; padding: 1px 7px; color: var(--text2); }
+    .pactions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+    .btn2 { display: inline-flex; align-items: center; gap: 6px; background: var(--surface2); border: 1px solid var(--border2); color: var(--text2); padding: 6px 12px; border-radius: 6px; font-size: 12px; font-family: inherit; cursor: pointer; }
+    .btn2:hover { border-color: var(--text3); color: var(--text); }
+    .btn2 svg { width: 13px; height: 13px; }
+    .btn2.primary { background: var(--accent); border-color: var(--accent); color: #241c08; font-weight: 600; }
+    .btn2.primary:hover { filter: brightness(1.08); color: #241c08; }
+
+    /* == the four cards ======================================================
+       Side by side on purpose. "39 entries" is only good news next to "1 has
+       ever caught a failure", and apart they read as four unrelated numbers. */
+    .cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 11px; margin-bottom: 18px; }
+    .card2 { border: 1px solid var(--border); border-radius: 7px; background: var(--surface); padding: 11px 13px; }
+    /* The one that should bother you if it is large. */
+    .card2.warn { border-color: #5a4616; background: #221b0c; }
+    .card2 .k { font-size: 11px; color: var(--text3); margin-bottom: 6px; }
+    .card2.warn .k { color: var(--accent); }
+    .card2 .v { font-size: 22px; font-weight: 600; line-height: 1.1; }
+    .card2 .v small { font-size: 11px; font-weight: 400; color: var(--text3); margin-left: 6px; }
+    .card2.warn .v { color: var(--accent); font-family: var(--mono); }
+
+    /* == tabs ================================================================ */
+    .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin-bottom: 14px; overflow-x: auto; }
+    .tab { background: none; border: none; border-bottom: 2px solid transparent; color: var(--text3); padding: 8px 11px; font-size: 13px; font-family: inherit; cursor: pointer; white-space: nowrap; margin-bottom: -1px; }
+    .tab:hover { color: var(--text2); }
+    .tab.active { color: var(--text); border-bottom-color: var(--accent); }
+    .tab .n { font-family: var(--mono); font-size: 11px; color: var(--text3); margin-left: 5px; }
+
+    /* == filter toolbar ====================================================== */
+    .tb2 { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+    .fwrap { position: relative; flex: 1 1 260px; min-width: 190px; display: flex; align-items: center; }
+    .fwrap > svg { position: absolute; left: 10px; width: 13px; height: 13px; color: var(--text3); pointer-events: none; }
+    .fin { width: 100%; background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 7px 30px 7px 29px; border-radius: 6px; font-size: 12.5px; font-family: inherit; }
+    .fin:focus { outline: none; border-color: var(--accent); }
+    .fwrap kbd { position: absolute; right: 8px; font-family: var(--mono); font-size: 10px; color: var(--text3); border: 1px solid var(--border2); border-radius: 3px; padding: 0 4px; pointer-events: none; }
+    .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+    .seg button { background: var(--surface2); border: none; border-right: 1px solid var(--border); color: var(--text3); padding: 6px 13px; font-size: 12px; font-family: inherit; cursor: pointer; }
+    .seg button:last-child { border-right: none; }
+    .seg button.on { background: var(--border); color: var(--text); }
+    .tgl { display: inline-flex; align-items: center; gap: 6px; background: var(--surface2); border: 1px solid var(--border); color: var(--text3); padding: 6px 12px; border-radius: 6px; font-size: 12px; font-family: inherit; cursor: pointer; }
+    .tgl:hover { border-color: var(--border2); }
+    .tgl.on { border-color: var(--accent); color: var(--accent); }
+    .tgl svg { width: 12px; height: 12px; }
+    .sel2 { background: var(--surface2); border: 1px solid var(--border); color: var(--text2); padding: 6px 10px; border-radius: 6px; font-size: 12px; font-family: inherit; cursor: pointer; }
+    .sel2:focus { outline: none; border-color: var(--accent); }
+
+    /* == master-detail =======================================================
+       The list stays on screen while an entry is read. Collapsible cards made
+       that impossible: opening one pushed every other row down the page, so
+       comparing two entries meant losing your place in the list. */
+    .md { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 0; border-top: 1px solid var(--border); }
+    .mdlist { min-width: 0; padding-right: 14px; }
+    .lhead { display: flex; align-items: center; gap: 10px; padding: 8px 2px; font-family: var(--mono); font-size: 10.5px; color: var(--text3); border-bottom: 1px solid var(--border); text-transform: lowercase; }
+    .lhead .lh-t { flex: 1; }
+    .lhead .lh-s { flex: 0 0 118px; }
+    .lhead .lh-a { flex: 0 0 42px; text-align: right; }
+    .lhead .lh-c { flex: 0 0 56px; text-align: right; }
+
+    .erow { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 8px 8px 7px; background: none; border: none; border-left: 2px solid transparent; border-radius: 5px; color: inherit; font-family: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+    .erow:hover { background: var(--surface); }
+    .erow[data-sel="true"] { background: var(--surface2); border-left-color: var(--accent); }
+    .erow .et { flex: 0 0 38px; font-family: var(--mono); font-size: 9.5px; font-weight: 700; letter-spacing: .05em; }
+    .erow .eti { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+    .erow[data-retracted="true"] .eti { color: var(--text3); text-decoration: line-through; }
+    .erow .esrc { flex: 0 0 118px; display: flex; gap: 7px; font-family: var(--mono); font-size: 10.5px; color: var(--text3); }
+    .erow .eage { flex: 0 0 42px; white-space: nowrap; text-align: right; font-family: var(--mono); font-size: 10.5px; color: var(--text3); }
+    .erow .ecnt { flex: 0 0 56px; text-align: right; font-family: var(--mono); font-size: 10.5px; color: var(--text3); }
+    .erow .ecnt b { font-weight: 400; }
+    .erow .ecnt .hit { color: var(--green); }
+    .et-bug, .et-anti-pattern { color: var(--red); }
+    .et-fix { color: var(--blue); }
+    .et-decision { color: var(--purple); }
+    .et-architecture, .et-stack { color: var(--cyan); }
+    .et-pattern, .et-lesson { color: var(--yellow); }
+    .et-note, .et-image { color: var(--text3); }
+
+    .keys { display: flex; gap: 14px; flex-wrap: wrap; padding: 11px 2px 0; margin-top: 8px; border-top: 1px solid var(--border); font-family: var(--mono); font-size: 10.5px; color: var(--text3); }
+    .keys b { color: var(--text2); font-weight: 400; border: 1px solid var(--border2); border-radius: 3px; padding: 0 4px; margin-right: 4px; }
+
+    /* == detail pane ========================================================= */
+    .mddet { border-left: 1px solid var(--border); padding: 0 0 0 16px; min-width: 0; }
+    .mdsticky { position: sticky; top: 14px; display: flex; flex-direction: column; max-height: calc(100vh - 40px); }
+    .dbadges { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-family: var(--mono); font-size: 10.5px; color: var(--text3); padding-top: 10px; }
+    .dpill { border-radius: 3px; padding: 1px 6px; font-weight: 700; letter-spacing: .05em; }
+    .dvia { border: 1px solid var(--border2); border-radius: 3px; padding: 1px 6px; color: var(--text2); }
+    .dtitle { margin: 9px 0 0; font-size: 16px; font-weight: 600; line-height: 1.35; }
+    .dtabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin: 12px 0 0; }
+    .dtab { background: none; border: none; border-bottom: 2px solid transparent; color: var(--text3); padding: 7px 9px; font-size: 12px; font-family: inherit; cursor: pointer; margin-bottom: -1px; white-space: nowrap; }
+    .dtab:hover { color: var(--text2); }
+    .dtab.active { color: var(--text); border-bottom-color: var(--accent); }
+    .dbody { flex: 1; overflow-y: auto; padding: 14px 2px 14px 0; }
+    .dsec { font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: .09em; color: var(--text3); margin: 0 0 6px; }
+    .dsec + .dtext { margin: 0 0 15px; }
+    .dtext { color: var(--text2); font-size: 13px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
+    .derr { font-family: var(--mono); font-size: 11px; background: #0f0f0f; border: 1px solid var(--border); border-radius: 5px; padding: 8px 10px; color: var(--yellow); margin: 0 0 15px; overflow-x: auto; white-space: pre-wrap; word-break: break-word; }
+    .dtags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 4px; }
+    .dtag { font-family: var(--mono); font-size: 10px; color: var(--text3); }
+    .dfoot { flex: 0 0 auto; display: flex; gap: 7px; flex-wrap: wrap; padding: 11px 0 2px; border-top: 1px solid var(--border); }
+    .dfoot .btn2 { padding: 5px 11px; font-size: 11.5px; }
+    .dfoot .danger:hover { border-color: var(--red); color: var(--red); }
+    .dnone { color: var(--text3); font-family: var(--mono); font-size: 12px; padding: 40px 0; text-align: center; }
+
+    /* == recall log ========================================================== */
+    .rlog { display: grid; gap: 8px; }
+    .rrow { border: 1px solid var(--border); border-left: 2px solid var(--green); border-radius: 5px; padding: 7px 9px; background: var(--surface); }
+    .rrow .rwhen { font-family: var(--mono); font-size: 10px; color: var(--text3); margin-bottom: 3px; }
+    .rrow .rq { font-family: var(--mono); font-size: 11px; color: var(--text2); word-break: break-word; }
+
+    /* == recall tester ======================================================= */
+    .rt { max-width: 720px; }
+    .rt textarea.in { width: 100%; min-height: 96px; }
+    .rthits { display: grid; gap: 8px; margin-top: 14px; }
+    .rthit { border: 1px solid var(--border); border-left: 2px solid var(--accent); border-radius: 6px; background: var(--surface); padding: 10px 12px; }
+    .rthit .rth { display: flex; align-items: baseline; gap: 8px; font-family: var(--mono); font-size: 10.5px; color: var(--text3); margin-bottom: 4px; }
+    .rthit .rtt { font-size: 13px; color: var(--text); }
+
     .empty { color: var(--text3); font-family: var(--mono); font-size: 12px; padding: 22px 0; }
     .fail { color: var(--red); font-family: var(--mono); font-size: 12px; padding: 12px 0; }
     .row { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
@@ -266,62 +401,70 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
        taking a column from it, and a backdrop closes it. */
     @media (max-width: 860px) {
       .layout { grid-template-columns: 1fr; }
-      .sidebar { position: fixed; top: 41px; bottom: 0; left: 0; width: var(--sidebar-width); z-index: 40; transform: translateX(-100%); transition: transform .18s ease; }
+      .sidebar { position: fixed; top: 0; bottom: 0; left: 0; width: var(--sidebar-width); z-index: 40; transform: translateX(-100%); transition: transform .18s ease; }
       .sidebar.open { transform: translateX(0); }
       .sidebar-rail { display: none; }
       .sidebar-backdrop.open { display: block; }
       .main { padding: 14px 14px 60px; }
       .grid2 { grid-template-columns: 1fr; }
+      .cards { grid-template-columns: 1fr 1fr; }
+      /* Stacked, with the detail above the list: a pane 360px wide has nowhere
+         to go on a phone, and the entry just chosen is what you want to read. */
+      .md { grid-template-columns: 1fr; }
+      .mdlist { padding-right: 0; }
+      .mddet { border-left: none; border-bottom: 1px solid var(--border); padding: 0 0 14px; margin-bottom: 14px; order: -1; }
+      .mdsticky { position: static; max-height: none; }
     }
   </style>
 </head>
 <body>
-  <div class="topbar">
-    <button class="sidebar-trigger" data-act="toggle-sidebar" title="Toggle sidebar (Ctrl+B)" aria-label="Toggle sidebar">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M9 3v18"></path></svg>
-    </button>
-    <span class="brand">devbrain &mdash; developer memory</span>
-    <span class="spacer"></span>
-  </div>
-
   <div class="layout">
     <aside class="sidebar" id="sidebar" data-collapsible="icon">
       <div class="sidebar-header">
         <div class="sidebar-brand">
-          <span class="sidebar-icon">db</span>
-          <span class="sidebar-menu-label">devbrain</span>
+          <span class="sidebar-mark">db</span>
+          <span class="sidebar-collapse-hide">
+            <span class="sidebar-brand-name">devbrain</span>
+            <span class="sidebar-brand-sub">developer memory</span>
+          </span>
         </div>
+        <button class="sidebar-search" data-view="search" title="Search all projects">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.6-3.6"></path></svg>
+          <span class="sidebar-collapse-hide">Search all projects</span>
+          <kbd class="sidebar-collapse-hide">&#8984;K</kbd>
+        </button>
       </div>
 
       <div class="sidebar-content">
+        <div class="sidebar-group">
+          <div class="sidebar-group-label">Workspace</div>
+          <ul class="sidebar-menu">
+            <li class="sidebar-menu-item">
+              <button class="sidebar-menu-button" data-view="entries" data-active="true" title="Entries">
+                <span class="sidebar-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16"></path><path d="M4 12h16"></path><path d="M4 18h10"></path></svg></span>
+                <span class="sidebar-menu-label">Entries</span>
+              </button>
+            </li>
+            <li class="sidebar-menu-item">
+              <button class="sidebar-menu-button" data-view="recall" title="Test what memory answers for a failure">
+                <span class="sidebar-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg></span>
+                <span class="sidebar-menu-label">Recall tester</span>
+              </button>
+            </li>
+          </ul>
+        </div>
+
         <div class="sidebar-group">
           <div class="sidebar-group-label">Projects</div>
           <ul class="sidebar-menu" id="project-list">
             <li class="sidebar-menu-item"><div class="empty sidebar-collapse-hide" style="padding:8px 14px">loading&hellip;</div></li>
           </ul>
         </div>
-
-        <div class="sidebar-group">
-          <div class="sidebar-group-label">All projects</div>
-          <ul class="sidebar-menu">
-            <li class="sidebar-menu-item">
-              <button class="sidebar-menu-button" data-view="search" title="Search everything">
-                <span class="sidebar-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.6-3.6"></path></svg></span>
-                <span class="sidebar-menu-label">Search everything</span>
-              </button>
-            </li>
-            <li class="sidebar-menu-item">
-              <button class="sidebar-menu-button" data-view="save" title="Save an entry">
-                <span class="sidebar-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg></span>
-                <span class="sidebar-menu-label">Save an entry</span>
-              </button>
-            </li>
-          </ul>
-        </div>
       </div>
 
       <div class="sidebar-footer">
-        <span class="badge" id="storage-badge">checking&hellip;</span>
+        <div class="sfoot" id="storage-badge"><i class="dot"></i><span>checking&hellip;</span></div>
+        <div class="sfoot" id="search-badge"><i class="dot"></i><span>search</span></div>
       </div>
 
       <button class="sidebar-rail" data-act="toggle-sidebar" title="Toggle sidebar (Ctrl+B)" aria-label="Toggle sidebar"></button>
@@ -341,9 +484,9 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
       projects: [], projectId: null, view: 'project', section: 'all', dossier: null,
       // Filters apply to the loaded project, client side — the whole record is
       // already here, so narrowing it should not cost a round trip.
-      q: '', sort: 'newest', category: 'all', origin: 'all', showRetracted: false,
-      // How the project is shown: the list, or the same entries as a graph.
-      pview: 'list',
+      q: '', sort: 'newest', origin: 'all', kind: 'all', neverOnly: false,
+      // The row open in the detail pane, and which of its tabs is showing.
+      sel: null, dtab: 'entry',
     };
     var TYPES = ${JSON.stringify(ENTRY_TYPES.map(t => ({ type: t.type, hint: t.hint })))};
 
@@ -369,15 +512,24 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
     }
 
     // ── storage badge: report what is really configured, not a fixed label ──
+    function setFoot(id, cls, text) {
+      var n = el(id);
+      if (!n) return;
+      n.className = 'sfoot ' + cls;
+      n.lastChild.textContent = text;
+    }
+
     async function loadStorage() {
-      var b = el('storage-badge');
       try {
         var d = await getJSON('/api/health');
-        b.textContent = d.storage === 'local' ? 'local storage' : 'mongodb';
-        b.className = 'badge ok';
+        setFoot('storage-badge', 'ok', (d.storage === 'local' ? 'local' : 'mongodb') + ' · connected');
+        // Which retrieval is actually running. Keyword-only still works, but it
+        // answers differently, and that belongs on screen rather than in a doc.
+        setFoot('search-badge', d.gemini === false ? '' : 'ok',
+          d.gemini === false ? 'search · keyword only' : 'search · semantic (gemini)');
       } catch (e) {
-        b.textContent = 'disconnected';
-        b.className = 'badge bad';
+        setFoot('storage-badge', 'bad', 'disconnected');
+        setFoot('search-badge', 'bad', 'search · unavailable');
       }
     }
 
@@ -426,7 +578,132 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
       renderProject();
     }
 
-    // ── the project record: everything saved about one project ──
+    // == the project record ====================================================
+    //
+    // Master-detail: the list stays put while an entry is read beside it.
+    // Collapsible cards could not do that — opening one pushed every row below
+    // it down the page, so comparing two entries meant losing your place.
+
+    function icon(d) {
+      return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+        'stroke-linecap="round" stroke-linejoin="round">' + d + '</svg>';
+    }
+    var I_WARN = '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path>';
+    var I_DOC = '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path>';
+    var I_PLUS = '<path d="M12 5v14"></path><path d="M5 12h14"></path>';
+    var I_EYE = '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"></path><circle cx="12" cy="12" r="3"></circle>';
+    var I_GLOBE = '<circle cx="12" cy="12" r="9"></circle><path d="M3 12h18"></path><path d="M12 3a15 15 0 0 1 0 18a15 15 0 0 1 0-18"></path>';
+
+    /** Every entry of the project in one list, section tagged onto each. */
+    function allEntries() {
+      var d = STATE.dossier;
+      if (!d) return [];
+      var out = [];
+      d.sections.forEach(function (s) {
+        s.entries.forEach(function (e) { out.push(Object.assign({ section: s.section }, e)); });
+      });
+      return out;
+    }
+
+    /** The entries the current tab and filters leave. */
+    function visibleEntries() {
+      var tab = STATE.section;
+      return sortEntries(allEntries().filter(function (e) {
+        if (tab === 'retracted') return !!e.supersededBy && keepEntry(e, true);
+        if (e.supersededBy) return false;
+        if (tab !== 'all' && e.section !== tab) return false;
+        return keepEntry(e);
+      }));
+    }
+
+    function statCards(d) {
+      var entries = allEntries();
+      var active = entries.filter(function (e) { return !e.supersededBy; });
+      var caught = active.filter(function (e) { return e.recallCount > 0; }).length;
+      var never = active.filter(function (e) { return !e.retrievalCount; }).length;
+      var pct = active.length ? Math.round((caught / active.length) * 100) : 0;
+      // "Never surfaced" is the card that should bother you, so it is the one
+      // drawn as a warning: an entry nothing has ever read back is a write to
+      // a file nobody opens.
+      return '<div class="cards">' +
+        '<div class="card2"><div class="k">Active entries</div><div class="v">' + active.length + '</div></div>' +
+        '<div class="card2"><div class="k">Caught a failure</div><div class="v">' + caught +
+          '<small>&middot; ' + pct + '%</small></div></div>' +
+        '<div class="card2' + (never ? ' warn' : '') + '"><div class="k">Never surfaced</div>' +
+          '<div class="v">' + never + '</div></div>' +
+        '<div class="card2"><div class="k">Retracted</div><div class="v">' + (d.supersededCount || 0) + '</div></div>' +
+        '</div>';
+    }
+
+    function tabsFor(d) {
+      var entries = allEntries();
+      var active = entries.filter(function (e) { return !e.supersededBy; });
+      var tabs = [['all', 'Everything', active.length]];
+      d.sections.forEach(function (s) {
+        var n = s.entries.filter(function (e) { return !e.supersededBy; }).length;
+        if (n) tabs.push([s.section, s.heading, n]);
+      });
+      if (d.supersededCount) tabs.push(['retracted', 'Retracted', d.supersededCount]);
+      tabs.push(['graph', 'Graph', null]);
+      return '<div class="tabs">' + tabs.map(function (t) {
+        return '<button class="tab' + (STATE.section === t[0] ? ' active' : '') + '" data-section="' + esc(t[0]) + '">' +
+          esc(t[1]) + (t[2] === null ? '' : '<span class="n">' + t[2] + '</span>') + '</button>';
+      }).join('') + '</div>';
+    }
+
+    function filterBar() {
+      var kinds = [['all', 'All'], ['bug', 'Bugs'], ['fix', 'Fixes']];
+      return '<div class="tb2">' +
+        '<span class="fwrap">' +
+          icon('<circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.6-3.6"></path>') +
+          '<input class="fin" id="f-q" placeholder="Filter by title, tag, error pattern&hellip;" value="' + esc(STATE.q) + '">' +
+          '<kbd>/</kbd>' +
+        '</span>' +
+        '<span class="seg">' + kinds.map(function (k) {
+          return '<button data-kind="' + k[0] + '" class="' + (STATE.kind === k[0] ? 'on' : '') + '">' + k[1] + '</button>';
+        }).join('') + '</span>' +
+        '<button class="tgl' + (STATE.neverOnly ? ' on' : '') + '" data-act="toggle-never">' +
+          icon(I_EYE) + 'Never surfaced</button>' +
+        '<select class="sel2" id="f-origin">' +
+          opts([['all', 'All sources'], ['hook', 'Via hook'], ['agent', 'By the agent'],
+                ['manual', 'Typed by hand'], ['indexed', 'From a file']], STATE.origin) +
+        '</select>' +
+        '<select class="sel2" id="f-sort">' + opts(SORTS, STATE.sort) + '</select>' +
+        '</div>';
+    }
+
+    var TYPE_ABBR = {
+      'bug': 'BUG', 'fix': 'FIX', 'solution': 'FIX', 'decision': 'DEC',
+      'architecture': 'ARCH', 'pattern': 'PAT', 'lesson': 'LESS',
+      'anti-pattern': 'ANTI', 'stack': 'ENV', 'note': 'NOTE', 'image': 'IMG'
+    };
+
+    function entryRow(e) {
+      var caught = e.recallCount > 0;
+      return '<button class="erow" data-entry="' + esc(e.id) + '"' +
+        (STATE.sel === e.id ? ' data-sel="true"' : '') +
+        (e.supersededBy ? ' data-retracted="true"' : '') + '>' +
+        '<span class="et et-' + esc(e.type) + '">' + esc(TYPE_ABBR[e.type] || 'NOTE') + '</span>' +
+        '<span class="eti">' + esc(e.title) + '</span>' +
+        '<span class="esrc"><span>' + esc(e.category || 'general') + '</span>' +
+          '<span>' + esc(originOf(e)) + '</span></span>' +
+        '<span class="eage">' + esc(shortAge(e.timeAgo)) + '</span>' +
+        '<span class="ecnt"><b>' + (e.retrievalCount || 0) + '</b> &middot; ' +
+          '<b class="' + (caught ? 'hit' : '') + '">' + (e.recallCount || 0) + '</b></span>' +
+        '</button>';
+    }
+
+    /** An entry written before the field existed still has a knowable origin. */
+    function originOf(e) {
+      if (e.origin) return e.origin;
+      return e.sourceFile ? 'indexed' : 'agent';
+    }
+
+    /** "34m ago" is twice the column's width; "34m" is not. */
+    function shortAge(t) {
+      return String(t || '').replace(' ago', '').replace('just now', 'now');
+    }
+
     async function renderProject() {
       var main = el('main');
       main.innerHTML = '<div class="empty">loading project&hellip;</div>';
@@ -435,25 +712,16 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
         STATE.dossier = d;
         var p = d.project;
 
-        var head = '<div class="phead"><h1>' + esc(p.name) + '</h1>' +
-          // Escape each value, then join with markup. Escaping a string that
-          // already contains an entity renders the entity as literal text.
-          '<div class="pmeta">' +
-          ((p.stack || []).length ? (p.stack).map(esc).join(' &middot; ') : 'stack not detected') +
-          ' &middot; ' + esc(p.path) + '</div>' +
-          useLine(d.use) + '</div>' +
-          '<div class="actions">' +
-          '<button class="btn ghost' + (STATE.pview === 'list' ? ' active' : '') + '" data-pview="list">List</button>' +
-          '<button class="btn ghost' + (STATE.pview === 'graph' ? ' active' : '') + '" data-pview="graph">Graph</button>' +
-          '<button class="btn" data-act="save-here">Save an entry here</button>' +
-          '<button class="btn ghost" data-act="context">agent.md</button>' +
-          '<button class="btn ghost" data-act="search-here">Search</button>' +
-          '</div>';
-
-        // The graph is the same entries, drawn. Built after the dossier so the
-        // detail panel can read a node's content from what is already loaded
-        // rather than asking for it again.
-        if (STATE.pview === 'graph') { await renderGraph(head); return; }
+        var head = '<div class="phead2"><div>' +
+          '<h1>' + esc(p.name) + '</h1>' +
+          '<div class="pstack">' +
+          (p.stack || []).map(function (x) { return '<span class="pchip">' + esc(x) + '</span>'; }).join('') +
+          '<span>' + esc(p.path) + '</span></div></div>' +
+          '<div class="pactions">' +
+          '<button class="btn2" data-view="recall">' + icon(I_WARN) + 'Test recall</button>' +
+          '<button class="btn2" data-act="context">' + icon(I_DOC) + 'agent.md</button>' +
+          '<button class="btn2 primary" data-act="save-here">' + icon(I_PLUS) + 'Save entry</button>' +
+          '</div></div>';
 
         if (!d.total) {
           main.innerHTML = head + '<div class="empty">Nothing recorded for this project yet.<br><br>' +
@@ -461,37 +729,144 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
           return;
         }
 
-        var total = d.sections.reduce(function (a, s) { return a + s.entries.length; }, 0);
-        var chips = '<div class="chips"><button class="chip' + (STATE.section === 'all' ? ' active' : '') +
-          '" data-section="all">Everything<span class="n">' + total + '</span></button>' +
-          d.sections.map(function (s) {
-            return '<button class="chip' + (STATE.section === s.section ? ' active' : '') +
-              '" data-section="' + esc(s.section) + '">' + esc(s.heading) +
-              '<span class="n">' + s.entries.length + '</span></button>';
-          }).join('') + '</div>';
+        if (STATE.section === 'graph') {
+          await renderGraph(head + statCards(d) + tabsFor(d));
+          return;
+        }
 
-        var shown = d.sections
-          .filter(function (s) { return STATE.section === 'all' || s.section === STATE.section; })
-          .map(function (s) {
-            return { section: s, entries: sortEntries(s.entries.filter(keepEntry)) };
-          })
-          .filter(function (s) { return s.entries.length > 0; });
+        var list = visibleEntries();
+        // The selection must survive a filter change, but not point at a row
+        // that is no longer on screen.
+        if (STATE.sel && !list.some(function (e) { return e.id === STATE.sel; })) STATE.sel = null;
+        if (!STATE.sel && list.length) STATE.sel = list[0].id;
 
-        var kept = shown.reduce(function (a, s) { return a + s.entries.length; }, 0);
-        var body = shown.length
-          ? shown.map(function (s) {
-              return '<div class="sec"><h2>' + esc(s.section.heading) + '</h2>' +
-                '<div class="blurb">' + esc(s.section.blurb) + '</div>' +
-                s.entries.map(renderCard).join('') + '</div>';
-            }).join('')
-          : '<div class="empty">// nothing matches these filters &mdash; ' +
-            '<a href="#" data-act="clear-filters" style="color:var(--accent)">clear them</a></div>';
-
-        main.innerHTML = head + chips + toolbar(kept, total) + body;
+        main.innerHTML = head + statCards(d) + tabsFor(d) + filterBar() +
+          '<div class="md"><div class="mdlist" id="mdlist">' + listBody(list) + '</div>' +
+          '<div class="mddet" id="mddet">' + detailPane() + '</div></div>';
         restoreFilterFocus();
       } catch (e) {
         main.innerHTML = fail('could not load this project', e.message);
       }
+    }
+
+    function listBody(list) {
+      if (!list.length) {
+        return '<div class="empty">Nothing matches these filters &mdash; ' +
+          '<a href="#" data-act="clear-filters" style="color:var(--accent)">clear them</a></div>';
+      }
+      return '<div class="lhead"><span class="lh-t">' + list.length + ' entries</span>' +
+        '<span class="lh-s">source</span><span class="lh-a">age</span>' +
+        '<span class="lh-c">shown&middot;caught</span></div>' +
+        list.map(entryRow).join('') +
+        '<div class="keys"><span><b>j</b><b>k</b>move</span><span><b>e</b>edit</span>' +
+        '<span><b>r</b>retract</span><span><b>t</b>test recall</span><span><b>/</b>filter</span></div>';
+    }
+
+    /** Repaint only the two panes, so filtering does not scroll the page. */
+    function paintList() {
+      var list = visibleEntries();
+      if (STATE.sel && !list.some(function (e) { return e.id === STATE.sel; })) STATE.sel = null;
+      if (!STATE.sel && list.length) STATE.sel = list[0].id;
+      var host = el('mdlist');
+      if (host) host.innerHTML = listBody(list);
+      paintDetail();
+    }
+
+    function paintDetail() {
+      var host = el('mddet');
+      if (host) host.innerHTML = detailPane();
+    }
+
+    function selectedEntry() {
+      if (!STATE.sel) return null;
+      var hit = allEntries().filter(function (e) { return e.id === STATE.sel; });
+      return hit.length ? hit[0] : null;
+    }
+
+    // ── the detail pane ──
+    //
+    // Headed WHAT BROKE / WHAT FIXED IT rather than just printing the content,
+    // because that is the question the entry was written to answer and a wall
+    // of prose makes the reader find it themselves.
+    function detailPane() {
+      var e = selectedEntry();
+      if (!e) return '<div class="mdsticky"><div class="dnone">Select an entry.</div></div>';
+
+      var tab = STATE.dtab || 'entry';
+      var body = tab === 'recalls' ? recallLog(e) : tab === 'agent' ? agentView(e) : entryView(e);
+
+      return '<div class="mdsticky">' +
+        '<div class="dbadges">' +
+        '<span class="dpill et-' + esc(e.type) + '" style="background:var(--surface2)">' +
+          esc(e.type.toUpperCase()) + '</span>' +
+        '<span class="dvia">via ' + esc(originOf(e)) + '</span>' +
+        '<span>' + esc(e.category || 'general') + ' &middot; saved ' + esc(e.timeAgo) + '</span>' +
+        (e.supersededBy ? '<span style="color:var(--red)">retracted</span>' : '') +
+        '</div>' +
+        '<h2 class="dtitle">' + esc(e.title) + '</h2>' +
+        '<div class="dtabs">' +
+        '<button class="dtab' + (tab === 'entry' ? ' active' : '') + '" data-dtab="entry">Entry</button>' +
+        '<button class="dtab' + (tab === 'recalls' ? ' active' : '') + '" data-dtab="recalls">Recall log' +
+          '<span class="n"> &middot; ' + (e.recallCount || 0) + '</span></button>' +
+        '<button class="dtab' + (tab === 'agent' ? ' active' : '') + '" data-dtab="agent">agent.md</button>' +
+        '</div>' +
+        '<div class="dbody">' + body + '</div>' +
+        '<div class="dfoot">' +
+        '<button class="btn2" data-act="edit-entry">Edit</button>' +
+        '<button class="btn2" data-act="promote">' + icon(I_GLOBE) + 'Promote to all projects</button>' +
+        (e.supersededBy ? '' : '<button class="btn2 danger" data-act="retract">Retract</button>') +
+        '</div></div>';
+    }
+
+    function entryView(e) {
+      var out = '';
+      if (e.errorPattern) {
+        out += '<div class="dsec">Error pattern</div><div class="derr">' + esc(e.errorPattern) + '</div>';
+      }
+      var body = bodyOf(e);
+      // A bug says what broke; a fix says what fixed it. The same field, named
+      // for what the reader is actually looking for.
+      var isFix = e.type === 'fix' || e.type === 'solution';
+      out += '<div class="dsec">' + (isFix ? 'What fixed it' : 'What broke') + '</div>' +
+        '<div class="dtext">' + (body ? esc(body) : '<span style="color:var(--text3)">no detail recorded</span>') + '</div>';
+      if (e.causeArchetype) {
+        out += '<div class="dsec">Root-cause pattern</div><div class="dtext">' + esc(e.causeArchetype) + '</div>';
+      }
+      if (e.tags && e.tags.length) {
+        out += '<div class="dtags">' + e.tags.map(function (t) {
+          return '<span class="dtag">#' + esc(t) + '</span>';
+        }).join('') + '</div>';
+      }
+      return out;
+    }
+
+    // The log is the honest answer to "has this ever helped". An entry with a
+    // high count and no rows matched before the log existed; one with no count
+    // has simply never fired.
+    function recallLog(e) {
+      var rows = (e.recalls || []).slice().reverse();
+      if (!rows.length) {
+        return '<div class="dtext" style="color:var(--text3)">' +
+          (e.recallCount
+            ? 'Recalled ' + e.recallCount + ' times, but before DevBrain kept the matching text. New recalls will be listed here.'
+            : 'Never recalled. This entry has not yet matched a real failure.') +
+          '</div>';
+      }
+      return '<div class="rlog">' + rows.map(function (r) {
+        return '<div class="rrow"><div class="rwhen">' + esc(new Date(r.at).toLocaleString()) +
+          (r.sessionId ? ' &middot; ' + esc(String(r.sessionId).slice(0, 8)) : '') + '</div>' +
+          '<div class="rq">' + esc(r.query) + '</div></div>';
+      }).join('') + '</div>';
+    }
+
+    /** Exactly what an agent is handed for this one entry. */
+    function agentView(e) {
+      var lines = ['## [' + e.type + '] ' + e.title, ''];
+      if (e.errorPattern) lines.push('error: ' + e.errorPattern, '');
+      lines.push(bodyOf(e) || e.content || '');
+      if (e.causeArchetype) lines.push('', 'root cause: ' + e.causeArchetype);
+      if (e.tags && e.tags.length) lines.push('', 'tags: ' + e.tags.join(', '));
+      return '<pre class="ctx" style="max-height:none">' + esc(lines.join('\\n')) + '</pre>';
     }
 
     // == the graph ==============================================================
@@ -723,13 +1098,22 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
       ['title',      'Title A-Z'],
     ];
 
-    function keepEntry(e) {
-      // Retracted entries are kept for history but are not current guidance, so
-      // they stay hidden unless asked for.
-      if (e.supersededBy && !STATE.showRetracted) return false;
-      if (STATE.category !== 'all' && (e.category || 'other') !== STATE.category) return false;
-      if (STATE.origin === 'indexed' && !e.sourceFile) return false;
-      if (STATE.origin === 'captured' && e.sourceFile) return false;
+    /**
+     * Whether an entry survives the filters. The Retracted tab passes
+     * allowRetracted, because there retraction is the point rather than a
+     * reason to hide it.
+     */
+    function keepEntry(e, allowRetracted) {
+      if (e.supersededBy && !allowRetracted) return false;
+      if (STATE.kind !== 'all') {
+        var isFix = e.type === 'fix' || e.type === 'solution';
+        if (STATE.kind === 'fix' && !isFix) return false;
+        if (STATE.kind === 'bug' && e.type !== 'bug') return false;
+      }
+      // An entry nothing has ever read back is the one worth isolating: it is
+      // a write to a file nobody opens.
+      if (STATE.neverOnly && (e.retrievalCount || 0) > 0) return false;
+      if (STATE.origin !== 'all' && originOf(e) !== STATE.origin) return false;
       if (STATE.q) {
         var hay = (e.title + ' ' + e.content + ' ' + (e.tags || []).join(' ') + ' ' +
                    (e.errorPattern || '') + ' ' + (e.causeArchetype || '')).toLowerCase();
@@ -760,43 +1144,15 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
       return copy;
     }
 
-    function categoriesInDossier() {
-      var seen = {};
-      (STATE.dossier ? STATE.dossier.sections : []).forEach(function (s) {
-        s.entries.forEach(function (e) { seen[e.category || 'other'] = true; });
-      });
-      return Object.keys(seen).sort();
+    /** <option> markup for a select, marking the current value. */
+    function opts(list, current) {
+      return list.map(function (o) {
+        var v = Array.isArray(o) ? o[0] : o, label = Array.isArray(o) ? o[1] : o;
+        return '<option value="' + esc(v) + '"' + (v === current ? ' selected' : '') + '>' + esc(label) + '</option>';
+      }).join('');
     }
 
-    function toolbar(kept, total) {
-      var opts = function (list, current) {
-        return list.map(function (o) {
-          var v = Array.isArray(o) ? o[0] : o, label = Array.isArray(o) ? o[1] : o;
-          return '<option value="' + esc(v) + '"' + (v === current ? ' selected' : '') + '>' + esc(label) + '</option>';
-        }).join('');
-      };
-      var retractedCount = 0;
-      (STATE.dossier ? STATE.dossier.sections : []).forEach(function (s) {
-        s.entries.forEach(function (e) { if (e.supersededBy) retractedCount++; });
-      });
 
-      return '<div class="toolbar">' +
-        '<input class="in tb-q" id="f-q" placeholder="Filter these entries&hellip;" value="' + esc(STATE.q) + '">' +
-        '<select class="in tb-sel" id="f-sort">' + opts(SORTS, STATE.sort) + '</select>' +
-        '<select class="in tb-sel" id="f-cat">' +
-          opts([['all', 'All categories']].concat(categoriesInDossier().map(function (c) { return [c, c]; })), STATE.category) +
-        '</select>' +
-        '<select class="in tb-sel" id="f-origin">' +
-          opts([['all', 'All sources'], ['captured', 'From my work'], ['indexed', 'From a file']], STATE.origin) +
-        '</select>' +
-        (retractedCount
-          ? '<label class="tb-check"><input type="checkbox" id="f-retracted"' + (STATE.showRetracted ? ' checked' : '') + '> ' +
-            'retracted (' + retractedCount + ')</label>'
-          : '') +
-        '<button class="chip" data-act="toggle-all">expand all</button>' +
-        '<span class="tb-count">' + kept + ' of ' + total + '</span>' +
-        '</div>';
-    }
 
     // Re-rendering replaces the input, so put the caret back where it was —
     // otherwise typing a filter drops focus after the first character.
@@ -836,68 +1192,7 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
     // Said plainly when the answer is none, rather than printed as a 0 that
     // reads like a rounding error. A store nothing has recalled from is a
     // diary, and the line should say so for as long as that is true.
-    function useLine(use) {
-      if (!use || !use.entries) return '';
-      if (!use.recalls) {
-        return '<div class="use none">no entry has caught a failure yet &mdash; ' +
-          'the count moves when a command fails and a stored error matches it</div>';
-      }
-      var pct = Math.round((use.earned / use.entries) * 100);
-      var txt = use.earned + ' of ' + use.entries + ' entries (' + pct + '%) have caught a failure &middot; ' +
-        use.recalls + (use.recalls === 1 ? ' catch' : ' catches') + ' in total';
-      if (use.revised) txt += ' &middot; ' + use.revised + ' revised';
-      return '<div class="use">' + txt + '</div>';
-    }
 
-    function renderCard(e) {
-      var type = esc(e.type);
-      var meta = '';
-      if (e.category) meta += '<span>' + esc(e.category) + '</span>';
-      meta += '<span>' + esc(e.timeAgo) + '</span>';
-      if (e.confidence && e.confidence !== 'observation') {
-        meta += '<span class="conf-' + esc(e.confidence) + '">' + esc(e.confidence) + '</span>';
-      }
-      if (e.seenInProjects >= 2) meta += '<span>seen in ' + e.seenInProjects + ' projects</span>';
-      if (e.revisionCount > 0) meta += '<span>revised ' + e.revisionCount + 'x</span>';
-      if (e.supersededBy) meta += '<span style="color:var(--red)">superseded</span>';
-
-      // Shown on every row, including at zero. Hidden when zero it was
-      // invisible on a store where nothing had fired yet, which is exactly the
-      // store you most need to be able to see. Both halves are here because
-      // together they say which of three states an entry is in: never surfaced,
-      // surfaced but never useful, or earning its place.
-      var stat = '<span class="cstat" title="surfaced ' + e.retrievalCount +
-        ' times, caught ' + e.recallCount + ' real failures">' +
-        '<span class="shown">' + e.retrievalCount + ' shown</span>' +
-        '<span class="sep"> &middot; </span>' +
-        '<span class="' + (e.recallCount > 0 ? 'caught' : 'caught zero') + '">' +
-        e.recallCount + ' caught</span></span>';
-
-      var body = bodyOf(e);
-      var detail = '';
-      if (body) detail += '<div class="cbody">' + esc(body) + '</div>';
-      if (e.errorPattern) detail += '<div class="err">' + esc(e.errorPattern) + '</div>';
-      if (e.causeArchetype) detail += '<div class="arch">root-cause pattern: ' + esc(e.causeArchetype) + '</div>';
-      if (e.tags && e.tags.length) {
-        detail += '<div class="tags">' + e.tags.map(function (t) {
-          return '<span class="tag">' + esc(t) + '</span>';
-        }).join('') + '</div>';
-      }
-      if (e.type === 'decision' && !e.supersededBy) {
-        detail += '<button class="supersede-btn" data-supersede="' + esc(e.id) + '">supersede</button>';
-      }
-
-      var head = '<span class="t t-' + type + '">' + type + '</span>' +
-        '<span class="ctitle">' + esc(e.title) + '</span>' +
-        '<div class="cmeta">' + meta + '</div>' + stat;
-      var cls = 'card k-' + type + (e.supersededBy ? ' superseded' : '');
-
-      // A title with nothing behind it is a plain row, not an empty disclosure
-      // that opens onto nothing.
-      if (!detail) return '<div class="' + cls + '"><div class="chead">' + head + '</div></div>';
-      return '<details class="' + cls + '"><summary>' + head + '<span class="cmark"></span></summary>' +
-        '<div class="cdetail">' + detail + '</div></details>';
-    }
 
     // ── search across every project ──
     function renderSearch(prefill) {
@@ -1041,16 +1336,14 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
     document.addEventListener('input', function (ev) {
       var t = ev.target;
       if (!t || !t.id) return;
-      if (t.id === 'f-q') { FILTER_CARET = t.selectionStart; STATE.q = t.value; renderProject(); }
+      if (t.id === 'f-q') { FILTER_CARET = t.selectionStart; STATE.q = t.value; paintList(); restoreFilterFocus(); }
     });
 
     document.addEventListener('change', function (ev) {
       var t = ev.target;
       if (!t || !t.id) return;
-      if (t.id === 'f-sort')           { STATE.sort = t.value; renderProject(); }
-      else if (t.id === 'f-cat')       { STATE.category = t.value; renderProject(); }
-      else if (t.id === 'f-origin')    { STATE.origin = t.value; renderProject(); }
-      else if (t.id === 'f-retracted') { STATE.showRetracted = t.checked; renderProject(); }
+      if (t.id === 'f-sort')        { STATE.sort = t.value; paintList(); }
+      else if (t.id === 'f-origin') { STATE.origin = t.value; paintList(); }
     });
 
     // ── one delegated click handler; no inline handlers anywhere ──
@@ -1061,8 +1354,20 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
       var proj = t.closest('[data-project]');
       if (proj) { selectProject(proj.getAttribute('data-project')); return; }
 
-      var pv = t.closest('[data-pview]');
-      if (pv) { STATE.pview = pv.getAttribute('data-pview'); renderProject(); return; }
+      // Choosing a row only changes which entry is open, so the two panes are
+      // repainted and the list keeps its scroll position.
+      var row = t.closest('[data-entry]');
+      if (row) { STATE.sel = row.getAttribute('data-entry'); STATE.dtab = 'entry'; paintList(); return; }
+
+      var dt = t.closest('[data-dtab]');
+      if (dt) { STATE.dtab = dt.getAttribute('data-dtab'); paintDetail(); return; }
+
+      var kind = t.closest('[data-kind]');
+      if (kind) {
+        STATE.kind = kind.getAttribute('data-kind');
+        renderProject();
+        return;
+      }
 
       // Repainting rather than re-fetching: the selection only changes what is
       // highlighted, and the graph is already in hand.
@@ -1075,15 +1380,17 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
       }
 
       var chip = t.closest('[data-section]');
-      if (chip) { STATE.section = chip.getAttribute('data-section'); renderProject(); return; }
+      // A different tab is a different set of rows, so the old selection is
+      // dropped rather than carried to a list that no longer contains it.
+      if (chip) { STATE.section = chip.getAttribute('data-section'); STATE.sel = null; renderProject(); return; }
 
       var nav = t.closest('[data-view]');
       if (nav) {
-        document.querySelectorAll('[data-view]').forEach(function (n) { n.removeAttribute('data-active'); });
-        document.querySelectorAll('[data-project]').forEach(function (n) { n.removeAttribute('data-active'); });
-        nav.setAttribute('data-active', 'true');
-        if (nav.getAttribute('data-view') === 'search') renderSearch();
-        else renderSave();
+        var v = nav.getAttribute('data-view');
+        if (v === 'entries') { renderProject(); markNav(nav); return; }
+        if (v === 'recall')  { renderRecall(); markNav(nav); return; }
+        if (v === 'search')  { renderSearch(); markNav(nav); return; }
+        renderSave(); markNav(nav);
         return;
       }
 
@@ -1095,16 +1402,14 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
       var a = act.getAttribute('data-act');
       if (a === 'clear-filters') {
         ev.preventDefault();
-        STATE.q = ''; STATE.category = 'all'; STATE.origin = 'all'; STATE.showRetracted = false;
+        STATE.q = ''; STATE.origin = 'all'; STATE.kind = 'all'; STATE.neverOnly = false;
         renderProject();
       }
-      else if (a === 'toggle-all') {
-        var cards = el('main').querySelectorAll('details.card');
-        var opening = false;
-        cards.forEach(function (c) { if (!c.open) opening = true; });
-        cards.forEach(function (c) { c.open = opening; });
-        act.textContent = opening ? 'collapse all' : 'expand all';
-      }
+      else if (a === 'toggle-never') { STATE.neverOnly = !STATE.neverOnly; renderProject(); }
+      else if (a === 'retract')      { retractSelected(); }
+      else if (a === 'promote')      { promoteSelected(); }
+      else if (a === 'edit-entry')   { toast('Editing is not wired up yet'); }
+      else if (a === 'do-recall')    { runRecall(); }
       else if (a === 'toggle-sidebar') toggleSidebar();
       else if (a === 'close-sidebar') closeSidebarOverlay();
       else if (a === 'save-here' || a === 'do-save-nav') renderSave();
@@ -1128,6 +1433,108 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
         toast('agent.md downloaded');
       }
     });
+
+    /** Light up the sidebar item just used, and clear the others. */
+    function markNav(node) {
+      document.querySelectorAll('[data-view]').forEach(function (n) { n.removeAttribute('data-active'); });
+      document.querySelectorAll('[data-project]').forEach(function (n) { n.removeAttribute('data-active'); });
+      if (node) node.setAttribute('data-active', 'true');
+    }
+
+    // ── keyboard ──
+    //
+    // A list you can only reach with the mouse is a list you stop reading. The
+    // hints are printed under it, so they have to work.
+    function moveSel(step) {
+      var list = visibleEntries();
+      if (!list.length) return;
+      var at = list.findIndex(function (e) { return e.id === STATE.sel; });
+      var next = at < 0 ? 0 : Math.min(list.length - 1, Math.max(0, at + step));
+      STATE.sel = list[next].id;
+      STATE.dtab = 'entry';
+      paintList();
+      var node = document.querySelector('[data-entry="' + STATE.sel + '"]');
+      if (node && node.scrollIntoView) node.scrollIntoView({ block: 'nearest' });
+    }
+
+    async function retractSelected() {
+      var e = selectedEntry();
+      if (!e) return;
+      if (!window.confirm('Retract "' + e.title + '"? It stops being recalled as true.')) return;
+      try {
+        await getJSON('/api/decisions/' + encodeURIComponent(e.id) + '/supersede', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reason: 'Retracted from the dashboard' }),
+        });
+        toast('retracted');
+        STATE.sel = null;
+        renderProject();
+      } catch (err) { toast('could not retract: ' + err.message); }
+    }
+
+    function promoteSelected() {
+      var e = selectedEntry();
+      if (!e) return;
+      // Deliberately not silently doing nothing: the button is in the mockup,
+      // the backing endpoint is not built, and a button that appears to work
+      // is worse than one that says it does not.
+      toast('Promoting to all projects is not wired up yet');
+    }
+
+    // ── recall tester ──
+    //
+    // The one question the dashboard could not answer: paste a failure and see
+    // what DevBrain would hand an agent. Reading the entries tells you what is
+    // stored; this tells you what comes back, which is the thing that matters
+    // and the thing that was quietly broken for months.
+    function renderRecall(prefill) {
+      STATE.view = 'recall';
+      el('main').innerHTML =
+        '<div class="phead2"><div><h1>Recall tester</h1>' +
+        '<div class="pstack"><span>Paste a failure. See what memory would hand the agent.</span></div>' +
+        '</div><div class="pactions">' +
+        '<button class="btn2" data-act="back">Back to entries</button></div></div>' +
+        '<div class="rt">' +
+        '<textarea class="in" id="rt-q" placeholder="Paste an error, or any line a command failed with&hellip;">' +
+        esc(prefill || '') + '</textarea>' +
+        '<div class="row" style="margin-top:10px"><button class="btn2 primary" data-act="do-recall">Test recall</button></div>' +
+        '<div id="rt-out"></div></div>';
+      var f = el('rt-q');
+      if (f) f.focus();
+    }
+
+    async function runRecall() {
+      var q = (el('rt-q').value || '').trim();
+      var out = el('rt-out');
+      if (!q) { out.innerHTML = '<div class="empty">Nothing to look up.</div>'; return; }
+      out.innerHTML = '<div class="empty">searching&hellip;</div>';
+      try {
+        var r = await getJSON('/api/search', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query: q, limit: 5 }),
+        });
+        var hits = r.results || [];
+        if (!hits.length) {
+          // The useful negative. An agent hitting this failure would be told
+          // nothing, and that is worth seeing plainly.
+          out.innerHTML = '<div class="empty">No match. An agent hitting this failure would get nothing from memory.</div>';
+          return;
+        }
+        out.innerHTML = '<div class="rthits">' + hits.map(function (h) {
+          return '<div class="rthit"><div class="rth">' +
+            '<span class="et-' + esc(h.type) + '">' + esc(String(h.type).toUpperCase()) + '</span>' +
+            '<span>' + esc(h.project || '') + '</span>' +
+            '<span>' + esc(h.match || '') + '</span>' +
+            (h.matchType === 'pattern' ? '<span style="color:var(--green)">error pattern</span>' : '') +
+            '</div>' +
+            '<div class="rtt">' + esc(h.title) + '</div></div>';
+        }).join('') + '</div>';
+      } catch (e) {
+        out.innerHTML = fail('could not run the lookup', e.message);
+      }
+    }
 
     // ── sidebar state ──
     //
@@ -1158,12 +1565,47 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
     }
 
     // The shortcut shadcn's Sidebar uses, on both platforms.
+    /** Typing in a field is typing, not a shortcut. */
+    function inField(t) {
+      if (!t || !t.tagName) return false;
+      var tag = t.tagName.toLowerCase();
+      return tag === 'input' || tag === 'textarea' || tag === 'select' || t.isContentEditable;
+    }
+
     document.addEventListener('keydown', function (ev) {
       if ((ev.ctrlKey || ev.metaKey) && !ev.altKey && (ev.key === 'b' || ev.key === 'B')) {
         ev.preventDefault();
         toggleSidebar();
-      } else if (ev.key === 'Escape' && isNarrow()) {
-        closeSidebarOverlay();
+        return;
+      }
+      if ((ev.ctrlKey || ev.metaKey) && !ev.altKey && (ev.key === 'k' || ev.key === 'K')) {
+        ev.preventDefault();
+        renderSearch();
+        return;
+      }
+      if (ev.key === 'Escape') {
+        if (inField(ev.target)) { ev.target.blur(); return; }
+        if (isNarrow()) closeSidebarOverlay();
+        return;
+      }
+      if (inField(ev.target) || ev.ctrlKey || ev.metaKey || ev.altKey) return;
+      // Only where there is a list to move through.
+      if (!el('mdlist')) return;
+      if (ev.key === 'j')      { ev.preventDefault(); moveSel(1); }
+      else if (ev.key === 'k') { ev.preventDefault(); moveSel(-1); }
+      else if (ev.key === 'r') { ev.preventDefault(); retractSelected(); }
+      else if (ev.key === 'e') { ev.preventDefault(); toast('Editing is not wired up yet'); }
+      else if (ev.key === 't') {
+        ev.preventDefault();
+        var sel = selectedEntry();
+        // Seeded with the entry's own error text: the question the tester
+        // answers is whether this entry comes back for that failure.
+        renderRecall(sel ? (sel.errorPattern || sel.title) : '');
+      }
+      else if (ev.key === '/') {
+        ev.preventDefault();
+        var f = el('f-q');
+        if (f) f.focus();
       }
     });
 

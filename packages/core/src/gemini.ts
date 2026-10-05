@@ -89,7 +89,7 @@ async function generateText(prompt: string): Promise<string> {
 }
 
 /** True when a Gemini backend is configured (either Vertex AI or the Developer API). */
-function hasGeminiCreds(): boolean {
+export function hasGeminiCreds(): boolean {
   if (useVertex()) return Boolean(process.env.GOOGLE_CLOUD_PROJECT);
   return Boolean(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
 }

@@ -11,7 +11,7 @@ import {
   getProjectByPath, upsertProject, insertEntry,
   getEntriesByProject, getAllEntriesWithProjects, getAllProjects,
   getRepoRoot, getProjectName, detectStack,
-  getEmbedding, similarityLabel, timeAgo,
+  getEmbedding, similarityLabel, timeAgo, hasGeminiCreds,
   buildContext, compressContext, formatContext,
   bumpRetrievalCounts, preciseSearch, vectorSearch,
   autoArchetype, supersedeEntry,
@@ -561,7 +561,9 @@ const httpServer = createServer(async (req, res) => {
         try {
           const storage = describeStorage();
           await getAllProjects();
-          json(res, 200, { status: 'ok', storage: storage.kind });
+          // Whether embeddings are available decides which retrieval runs, and
+          // the two answer differently, so the dashboard says which is live.
+          json(res, 200, { status: 'ok', storage: storage.kind, gemini: hasGeminiCreds() });
         } catch (err) {
           json(res, 503, { status: 'error', error: String(err) });
         }
@@ -625,6 +627,13 @@ const httpServer = createServer(async (req, res) => {
                 recallCount: e.recallCount ?? 0,
                 revisionCount: e.revisionCount ?? 0,
                 sourceFile: e.source?.file,
+                // How this was captured, and what each recall actually matched.
+                // An entry indexed from a file is `indexed` whether or not it
+                // was written before the field existed, so an older store does
+                // not read as a wall of unknowns.
+                origin: e.origin ?? (e.source ? 'indexed' : undefined),
+                recalls: e.recalls ?? [],
+                lastRecalledAt: e.lastRecalledAt,
               })),
             })),
           });
