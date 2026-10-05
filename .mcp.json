@@ -1,7 +1,9 @@
 {
   "mcpServers": {
     "devbrain": {
-      "url": "https://devbrain-715714057208.us-central1.run.app/mcp"
+      "type": "stdio",
+      "command": "node",
+      "args": ["packages/mcp/dist/index.js"]
     }
   }
 }

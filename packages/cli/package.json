@@ -12,13 +12,11 @@
   },
   "dependencies": {
     "@devbrain/core": "*",
-    "adm-zip": "^0.5.17",
     "dotenv": "^16.0.0",
     "inquirer": "^9.3.8",
     "inquirer-autocomplete-prompt": "^3.0.1"
   },
   "devDependencies": {
-    "@types/adm-zip": "^0.5.8",
     "@types/node": "^20.0.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"

@@ -1,18 +1,28 @@
 #!/usr/bin/env node
 import 'dotenv/config';
-import { join } from 'path';
-import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync } from 'fs';
+import { join, dirname, basename } from 'path';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync, appendFileSync, readdirSync, statSync } from 'fs';
 import {
   getProjectByPath, upsertProject, insertEntry,
   getEntriesByProject, getAllEntriesWithProjects,
-  isCommitProcessed, markCommitProcessed,
+  markCommitProcessed, filterUnprocessedCommits,
   detectStack, getProjectName, isGitRepo, getRepoRoot,
-  getLastCommit, installGitHook, isHookInstalled,
-  extractKnowledge, getEmbedding, summarizeProjectHistory,
-  findSimilar, similarityLabel, timeAgo, RateLimitError,
+  listCommitHashes, getCommit, removeGitHook,
+  getEmbedding,
+  findSimilar, similarityLabel, timeAgo,
   buildContext, formatContext,
-  reinforceEntry, bumpRetrievalCounts, supersedeEntry,
-  preciseSearch, classifyQuery, recapSession, deleteEntry,
+  reinforceEntry, bumpRetrievalCounts, bumpRecallCounts, supersedeEntry,
+  preciseSearch, classifyQuery, deleteEntry,
+  describeStorage, getLocalDbPath, closeDb,
+  ENTRY_TYPES, ENTRY_CATEGORIES, normalizeType, getAllProjects,
+  buildDossier, formatDossierMarkdown, dossierFiles, measureUse, describeUse,
+  isDuplicateEntry, findTextDuplicate, clip,
+  parseMarkdownSource, planIndex, entryForSection,
+  formatSessionBriefing, briefingEntries, isAlreadyInAgentContext,
+  readCursor, writeCursor, markSurfaced, markWarned, reviewTurn, formatStepBack,
+  looksLikeError, isReadOnlyCommand, isEchoedOutput, recallForFailure, formatRecallForAgent,
+  withDevbrainHooks, withoutDevbrainHooks, installedDevbrainHooks,
+  nextSessionChunk, formatBackfillBatch, commitExcerpt, BACKFILL_BATCH_BUDGET,
 } from '@devbrain/core';
 import type { Entry, Project, EntryCategory } from '@devbrain/core';
 import { nanoid } from 'nanoid';
@@ -46,6 +56,59 @@ function isOnboarded(): boolean {
 function markOnboarded(): void {
   if (!existsSync(devbrainDir)) mkdirSync(devbrainDir, { recursive: true });
   writeFileSync(setupPath, JSON.stringify({ onboarded: true, setupAt: Date.now() }), 'utf-8');
+}
+
+// ─── credentials ──────────────────────────────────────────────────────────────
+
+const envFilePath = join(devbrainDir, '.env');
+
+// Merge keys into ~/.devbrain/.env in place. Never rewrites the whole file —
+// writing one credential must not wipe out the others already stored there.
+function writeEnvVars(vars: Record<string, string>): void {
+  if (!existsSync(devbrainDir)) mkdirSync(devbrainDir, { recursive: true });
+  const lines = existsSync(envFilePath)
+    ? readFileSync(envFilePath, 'utf-8').replace(/^﻿/, '').split('\n')
+    : [];
+  for (const [key, value] of Object.entries(vars)) {
+    const idx = lines.findIndex(l => l.trim().startsWith(`${key}=`));
+    if (idx === -1) lines.push(`${key}=${value}`);
+    else lines[idx] = `${key}=${value}`;
+  }
+  writeFileSync(envFilePath, `${lines.join('\n').replace(/\n+$/, '')}\n`, 'utf-8');
+}
+
+function isMockMode(): boolean { return process.env.DEVBRAIN_MOCK === 'true'; }
+
+function hasVertexCreds(): boolean {
+  return ['true', '1'].includes((process.env.GOOGLE_GENAI_USE_VERTEXAI ?? '').toLowerCase())
+    && !!process.env.GOOGLE_CLOUD_PROJECT;
+}
+
+function hasGeminiCreds(): boolean {
+  return isMockMode() || hasVertexCreds()
+    || !!process.env.GEMINI_API_KEY || !!process.env.GOOGLE_API_KEY;
+}
+
+function hasMongoUri(): boolean { return !!process.env.MONGODB_URI?.trim(); }
+
+// Map a raw error onto something a user can act on. Driver and SDK messages are
+// accurate but unreadable; the common config failures get a next step instead.
+function explainError(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (/No Gemini credentials|GOOGLE_CLOUD_PROJECT is not set/i.test(msg))
+    return `No Gemini credentials — run ${CYAN}devbrain setup${RESET}, or add GEMINI_API_KEY to ${envFilePath}`;
+  if (/bad auth|[Aa]uthentication failed/.test(msg))
+    return `The database rejected the credentials in MONGODB_URI — check the username and password.`;
+  if (/ENOTFOUND|ECONNREFUSED|ETIMEDOUT|querySrv|[Ss]erver selection/.test(msg))
+    return `Can't reach the database — check MONGODB_URI and your network connection.`;
+  return msg;
+}
+
+function reportError(err: unknown, label = 'Error'): void {
+  console.error(`\n  ${RED}${label}:${RESET} ${explainError(err)}\n`);
+  if (process.env.DEVBRAIN_DEBUG && err instanceof Error && err.stack) {
+    console.error(`${DIM}${err.stack}${RESET}\n`);
+  }
 }
 
 const BOLD    = '\x1b[1m';
@@ -124,12 +187,12 @@ async function printProjectContext(): Promise<void> {
   const bugs  = entries.filter(e => e.type === 'bug').length;
   const fixes = entries.filter(e => e.type === 'fix').length;
   const notes = entries.filter(e => e.type === 'note').length;
-  const hookOk = isHookInstalled(repoRoot);
+  const hooksOn = agentHooksInstalled(repoRoot);
 
   console.log(`  ${bold('Project')}  ${project.name}`);
   console.log(`  ${bold('Stack')}    ${project.stack.join(', ') || 'Unknown'}`);
-  console.log(`  ${bold('Hook')}     ${hookOk ? `${GREEN}✓ active${RESET}` : `${YELLOW}✗ not installed${RESET}`}`);
-  console.log(`  ${bold('Memory')}   ${entries.length} entries  ${dim(`${bugs} bugs · ${fixes} fixes · ${notes} notes`)}`);
+  console.log(`  ${bold('Hooks')}    ${hooksOn ? `${GREEN}✓ Claude Code${RESET}` : `${YELLOW}✗ not installed${RESET}  ${DIM}devbrain hooks install${RESET}`}`);
+  console.log(`  ${bold('Memory')}   ${entries.length} entries  ${dim(`${bugs} bugs · ${fixes} fixes · ${notes} notes`)}  ${dim(`· ${describeStorage().kind === 'local' ? 'local' : 'MongoDB'}`)}`);
 
   if (entries.length > 0) {
     console.log(`\n  ${CYAN}Recent knowledge${RESET}`);
@@ -145,9 +208,39 @@ async function printProjectContext(): Promise<void> {
 
 // ─── handlers ─────────────────────────────────────────────────────────────────
 
+// Delimiters around the generated block in DEV_CONTEXT.md, so `init` can refresh
+// its own instructions in place instead of leaving stale guidance forever.
+const DEVCONTEXT_BEGIN = '<!-- devbrain:begin — generated by `devbrain init`; edits inside are overwritten -->';
+const DEVCONTEXT_END   = '<!-- devbrain:end -->';
+
+/**
+ * Swap the DevBrain block in an existing DEV_CONTEXT.md for a fresh one.
+ *
+ * Returns the updated document, or null when there's no block to replace (the
+ * caller then appends). Delimited blocks are replaced exactly. A legacy block
+ * written before the delimiters existed is replaced from its heading to the end
+ * of the file — safe because the block was only ever appended last.
+ */
+function replaceDevbrainBlock(doc: string, block: string): string | null {
+  const begin = doc.indexOf(DEVCONTEXT_BEGIN);
+  if (begin !== -1) {
+    const end = doc.indexOf(DEVCONTEXT_END, begin);
+    if (end !== -1) {
+      const tail = doc.slice(end + DEVCONTEXT_END.length);
+      return doc.slice(0, begin) + block.trimEnd() + (tail.trim() ? tail : '\n');
+    }
+  }
+
+  const legacy = doc.indexOf('## DevBrain Memory');
+  if (legacy === -1) return null;
+  const head = doc.slice(0, legacy).trimEnd();
+  return (head ? `${head}\n\n` : '') + block;
+}
+
 async function handleInit(): Promise<void> {
   const cwd = process.cwd();
   const repoRoot = getRepoRoot(cwd) ?? cwd;
+  let unreviewed = 0;
   const s = spin('Detecting project...');
   try {
     const stack    = detectStack(repoRoot);
@@ -163,15 +256,37 @@ async function handleInit(): Promise<void> {
     s.succeed(`Registered: ${BOLD}${name}${RESET}`);
     console.log(`  Stack: ${stack.join(', ') || 'Unknown'}`);
     if (isGitRepo(repoRoot)) {
-      installGitHook(repoRoot);
-      console.log(`  ${GREEN}✓${RESET} Git hook installed — commits captured automatically`);
+      // Earlier versions installed a post-commit hook that had a model read each
+      // commit. Commits are now reviewed through the agent (devbrain backfill).
+      if (removeGitHook(repoRoot)) {
+        console.log(`  ${GREEN}✓${RESET} Removed the old post-commit hook — your agent reviews commits now`);
+      }
+      // That hook ran `devbrain capture`, which no longer exists, so it fails
+      // silently on every commit in any repo still carrying it. They are
+      // registered here, so they can be cleaned without visiting each one.
+      const alsoCleaned = await cleanStaleGitHooks(repoRoot);
+      if (alsoCleaned.length) {
+        console.log(`  ${GREEN}✓${RESET} Removed the same dead hook from ${alsoCleaned.join(', ')}`);
+      }
+      unreviewed = (await unreviewedCommits(repoRoot)).length;
     } else {
-      console.log(`  ${YELLOW}⚠${RESET}  Not a git repo — add notes manually`);
+      console.log(`  ${YELLOW}⚠${RESET}  Not a git repo — knowledge comes from agent sessions and notes`);
+    }
+
+    // Commits are only half of it: the reasoning lives in the agent session.
+    // Local settings, so teammates without DevBrain installed are unaffected.
+    try {
+      const path = agentSettingsPath(repoRoot, false);
+      writeAgentSettings(path, withDevbrainHooks(readAgentSettings(path)));
+      console.log(`  ${GREEN}✓${RESET} Claude Code hooks installed — sessions start briefed, and your agent is asked to record what it fixes`);
+    } catch (err) {
+      console.log(`  ${YELLOW}⚠${RESET}  Could not install Claude Code hooks: ${explainError(err)}`);
     }
 
     // Write DEV_CONTEXT.md so AI agents call DevBrain tools automatically
     const devContextMdPath = join(repoRoot, 'DEV_CONTEXT.md');
     const devbrainBlock = [
+      DEVCONTEXT_BEGIN,
       '## DevBrain Memory',
       '',
       '> DevBrain is an **installed CLI tool** (`devbrain` npm package). DO NOT reimplement',
@@ -182,63 +297,87 @@ async function handleInit(): Promise<void> {
       '',
       '### Before every task',
       '```',
-      '# Load ranked engineering history before writing any code:',
-      'devbrain context',
+      '# Load what broke before, what was decided, what to avoid:',
+      'devbrain context "<the task>"            # MCP: get_context',
       '',
-      '# Before debugging — search with the EXACT error text or symptom:',
-      'devbrain search "<paste exact error message>"',
+      '# Before debugging — search with the EXACT error text:',
+      'devbrain search "<exact error message>"  # MCP: search_knowledge',
       '```',
       '',
-      '### Save to DevBrain when you notice any of these signals',
+      '### You write the record — DevBrain stores it',
       '',
-      'Do not wait to be asked. Save immediately when you think any of these:',
+      'DevBrain runs no model of its own: you did the work, so you write the entry.',
+      'Do not wait to be asked. Save as soon as you think any of these:',
       '',
       '- "That was non-obvious — I would not have known that without digging"',
       '- "This fix took longer than it should have — future me should know this"',
       '- "This behavior is counterintuitive — it looks like X but actually does Y"',
-      '- "This pattern would apply to other parts of the codebase too"',
-      '- "If I had known this upfront I would have designed it differently"',
-      '- "This is a gotcha specific to this stack/environment/version"',
       '- "We decided against the obvious approach — here is why"',
       '- "This error message is misleading — the real cause is something else"',
       '- "This works in dev but will break in production for this exact reason"',
       '',
       '```',
-      '# Save anything matching the above signals:',
-      'devbrain note "fix: <non-obvious fix + what the root cause actually was>"',
-      'devbrain note "lesson: <what looked right but was wrong, and why>"',
-      'devbrain note "decision: <what was chosen, what was rejected, and why>"',
-      'devbrain note "pattern: <reusable approach that applies beyond this file>"',
-      'devbrain note "anti-pattern: <what to never do here and the consequence>"',
-      'devbrain note "bug: <the symptom, the misleading surface error, the real cause>"',
+      '# MCP: save_entry (type, title, content, error_pattern). Or from the shell:',
+      'devbrain note "fix: <symptom> — <root cause, then the exact fix>"',
+      'devbrain note "decision: <what was chosen> — <what was rejected, and why>"',
+      'devbrain note "lesson: <what looked right> — <why it was wrong>"',
+      'devbrain note "anti-pattern: <what never to do> — <the consequence>"',
       '```',
       '',
-      '### What makes a good DevBrain entry',
-      '- **Title**: specific and searchable, not generic ("JWT expiry fails in prod" not "auth bug")',
-      '- **Body**: include the symptom, the root cause, and the exact fix — not just the fix',
-      '- **Error pattern**: if there is an exact error message, always include it verbatim',
-      '- **Cause archetype**: name the abstract pattern ("environment config divergence", "missing cleanup in teardown")',
+      '### What makes a good entry',
+      '- **Title**: the symptom or the decision, specific and searchable ("JWT expiry fails in prod", not "auth bug")',
+      '- **Content**: the root cause, then the exact fix — not just the fix',
+      '- **Error pattern**: the exact error message, verbatim, whenever there is one',
+      '- **Wrong entry?** Save what is true with `save_entry` and pass the wrong entry\'s id as `supersedes`',
+      '',
+      '### What DevBrain does for you (Claude Code, with `devbrain hooks install`)',
+      '',
+      '- At session start, this project\'s memory is put in your context.',
+      '- When a shell command fails and memory holds the same error, the past fix is handed to you',
+      '  unasked. You do not have to remember to search — but searching still finds more.',
+      '- When a stretch of work fixes or decides something and you saved nothing,',
+      '  DevBrain asks you to record it before you finish. Saving earlier means it never has to ask.',
+      '- If it mentions unreviewed commits, run `devbrain backfill` when there is a pause,',
+      '  save what matters from it, and repeat until it says history is fully reviewed.',
       '',
       '### Rules',
-      '- Run `devbrain context` before starting any non-trivial task — no exceptions.',
-      '- Run `devbrain search` before debugging any error you have not seen before.',
-      '- Save proactively — if you had to think to solve it, save it.',
-      '- **Never reimplement devbrain** — if the binary is missing, run `npm install -g devbrain`.',
+      '- Run `devbrain context` before any non-trivial task.',
+      '- Run `devbrain search` before debugging an error you have not seen before.',
+      '- If you had to think to solve it, save it.',
+      '- **Never reimplement devbrain** — run `devbrain --help` to confirm it is installed.',
+      '',
+      DEVCONTEXT_END,
       '',
     ].join('\n');
 
-    const marker = '## DevBrain Memory';
     if (!existsSync(devContextMdPath)) {
       writeFileSync(devContextMdPath, devbrainBlock, 'utf-8');
       console.log(`  ${GREEN}✓${RESET} Created DEV_CONTEXT.md — AI Agent will call DevBrain automatically`);
     } else {
       const existing = readFileSync(devContextMdPath, 'utf-8');
-      if (!existing.includes(marker)) {
+      const updated  = replaceDevbrainBlock(existing, devbrainBlock);
+      if (updated === null) {
         writeFileSync(devContextMdPath, existing.trimEnd() + '\n\n' + devbrainBlock, 'utf-8');
         console.log(`  ${GREEN}✓${RESET} Updated DEV_CONTEXT.md — DevBrain block appended`);
+      } else if (updated === existing) {
+        console.log(`  ${DIM}DEV_CONTEXT.md already up to date${RESET}`);
       } else {
-        console.log(`  ${DIM}DEV_CONTEXT.md already has DevBrain block — skipped${RESET}`);
+        writeFileSync(devContextMdPath, updated, 'utf-8');
+        console.log(`  ${GREEN}✓${RESET} Refreshed DEV_CONTEXT.md — DevBrain instructions updated`);
       }
+    }
+
+    // Index CLAUDE.md if there is one, rather than competing with it.
+    //
+    // CLAUDE.md is usually the project's real knowledge base: in the repo,
+    // reviewed in PRs, and loaded into the agent automatically. A second store
+    // beside it is a duplicate nobody reads. Indexing makes DevBrain a
+    // searchable layer over it — findable by a pasted error, and reusable from
+    // other repos — while the file stays the source of truth.
+    if (DEFAULT_SOURCE_FILES.some(f => existsSync(join(repoRoot, f)))) {
+      await handleIndex().catch(err => {
+        console.log(`  ${YELLOW}⚠${RESET}  Could not index: ${explainError(err)}`);
+      });
     }
 
     // Print MCP server config so standard AI tools see devbrain tools natively
@@ -252,132 +391,632 @@ async function handleInit(): Promise<void> {
     console.log(`  ${DIM}{${RESET}`);
     console.log(`    ${DIM}"mcpServers": {${RESET}`);
     console.log(`      ${CYAN}"devbrain"${RESET}${DIM}: {${RESET}`);
-    console.log(`        ${CYAN}"type"${RESET}${DIM}: ${RESET}${GREEN}"http"${RESET}${DIM},${RESET}`);
-    console.log(`        ${CYAN}"url"${RESET}${DIM}: ${RESET}${GREEN}"https://devbrain-715714057208.us-central1.run.app/mcp"${RESET}`);
+    console.log(`        ${CYAN}"type"${RESET}${DIM}: ${RESET}${GREEN}"stdio"${RESET}${DIM},${RESET}`);
+    console.log(`        ${CYAN}"command"${RESET}${DIM}: ${RESET}${GREEN}"npx"${RESET}${DIM},${RESET}`);
+    console.log(`        ${CYAN}"args"${RESET}${DIM}: ${RESET}${GREEN}["-y", "@devbrain/mcp"]${RESET}`);
     console.log(`      ${DIM}}${RESET}`);
     console.log(`    ${DIM}}${RESET}`);
     console.log(`  ${DIM}}${RESET}`);
     console.log(`${CYAN}  └────────────────────────────────────────────────────────────────────┘${RESET}\n`);
-    console.log(`  ${DIM}Or configure standard stdio host using the DevBrain MCP server binary.${RESET}\n`);
+    console.log(`  ${DIM}Your knowledge stays on this machine. To point at a server you host${RESET}`);
+    console.log(`  ${DIM}yourself instead, use {"type": "http", "url": "<your-host>/mcp"}.${RESET}
+`);
     console.log(bar2);
     console.log();
 
-    if (isNew) {
-      printInitInstructions(name, stack, repoRoot);
+    // The one next step: history that has not been read yet. Phrased as what to
+    // ask the agent, because the agent is what reads it.
+    if (unreviewed > 0) {
+      console.log(`  ${BOLD}Next:${RESET} ${unreviewed} past commit${unreviewed === 1 ? '' : 's'} to learn from. Ask your coding agent:`);
+      console.log(`  ${CYAN}"run devbrain backfill and save what matters"${RESET}\n`);
     }
   } catch (err) {
     s.fail('Init failed');
-    console.error(err);
+    reportError(err);
   }
 }
 
-function printInitInstructions(name: string, stack: string[], repoRoot: string): void {
-  const W   = Math.min(process.stdout.columns || 80, 80);
-  const bar = `${DIM}${'─'.repeat(W)}${RESET}`;
-  const cats = 'auth|database|deployment|build|config|network|performance|ui|data|testing|security|other';
-  const stackStr = stack.join(', ') || 'Unknown';
 
-  console.log(`${bar}`);
-  console.log(`\n  ${BOLD}${CYAN}Next step — tell your AI Agent (e.g. Gemini / Agent Builder) to set up DevBrain${RESET}\n`);
-  console.log(`  ${DIM}Paste the block below into your AI Agent's chat:${RESET}\n`);
-  console.log(
-`${CYAN}────────────────────────────────── copy from here ──────────────────────────${RESET}
-You are setting up DevBrain persistent memory for the project at "${repoRoot}".
+// ─── backfill: past work, reviewed by the agent ─────────────────────────────
 
-Do these two things now:
+/** How far back to look for commits nobody has reviewed. */
+const BACKFILL_SCAN = 200;
+/** Commits per batch, by default. Small enough to actually read. */
+const BACKFILL_COMMITS_DEFAULT = 8;
+/** At most this many past sessions per batch. */
+const BACKFILL_SESSIONS = 2;
+/** A transcript written this recently is a live session — the Stop hook covers it. */
+const LIVE_SESSION_MS = 10 * 60 * 1000;
+// Deadline for the post-failure lookup in `devbrain run`. It wraps a build, so a
+// slow lookup must be abandoned rather than delay a failure already on screen.
+const RUN_LOOKUP_TIMEOUT_MS = 8000;
 
-1. CREATE or APPEND to DEV_CONTEXT.md with this block:
+/** Recent commits in this repo that have not been reviewed, newest first. */
+async function unreviewedCommits(repoRoot: string): Promise<string[]> {
+  if (!isGitRepo(repoRoot)) return [];
+  return filterUnprocessedCommits(listCommitHashes(repoRoot, BACKFILL_SCAN)).catch(() => []);
+}
 
-## DevBrain Memory
+/**
+ * Remove the dead `devbrain capture` post-commit hook from every registered
+ * project except `skip` (already handled by the caller).
+ *
+ * Removing the command left those hooks calling something that does not exist.
+ * They swallow the error, so nothing surfaces — the repo just runs a failing
+ * command after every commit. Returns the names cleaned.
+ */
+async function cleanStaleGitHooks(skip?: string): Promise<string[]> {
+  const cleaned: string[] = [];
+  for (const p of await getAllProjects().catch(() => [])) {
+    if (p.path === skip) continue;
+    try { if (removeGitHook(p.path)) cleaned.push(p.name); } catch { /* unreadable repo */ }
+  }
+  return cleaned;
+}
 
-Project: ${name}  |  Stack: ${stackStr}
+/** Past (not live) Claude Code sessions for this repo. */
+function pastSessions(repoRoot: string): string[] {
+  const now = Date.now();
+  return transcriptsFor(repoRoot).filter(f => now - statSync(f).mtimeMs > LIVE_SESSION_MS);
+}
 
-### Before every task
-- Call \`get_context\` with the task topic before writing any code.
-- Call \`search_knowledge\` with the EXACT error text before debugging anything.
+/**
+ * `devbrain backfill [n] [--print]` — hand past work to the coding agent.
+ *
+ * Commits made before DevBrain was installed, and agent sessions from before
+ * the Stop hook, have nobody to ask in the moment. This prints a bounded batch
+ * of them with instructions; the agent reads it, saves what matters through
+ * save_entry, and runs it again for the next batch. Nothing here calls a model.
+ *
+ * A person at a terminal gets an explanation instead, since the batch is
+ * reading material for the agent: marking it reviewed because it scrolled past
+ * a human would lose it. `--print` shows it without marking anything.
+ */
+async function handleBackfill(args: string[]): Promise<void> {
+  const repoRoot = getRepoRoot(process.cwd()) ?? process.cwd();
+  const project  = await getProjectByPath(repoRoot);
+  if (!project) {
+    console.log(`\n  ${YELLOW}Not a DevBrain project:${RESET} ${repoRoot}`);
+    console.log(`  ${DIM}Run ${RESET}${CYAN}devbrain init${RESET}${DIM} here first.${RESET}\n`);
+    return;
+  }
 
-### Save to DevBrain when you notice any of these signals (do not wait to be asked)
-Save immediately whenever you think:
-- "That was non-obvious — I would not have known that without digging"
-- "This fix took longer than it should — future me should know this"
-- "This behavior is counterintuitive — it looks like X but actually does Y"
-- "This pattern would apply to other parts of the codebase too"
-- "If I had known this upfront I would have designed it differently"
-- "This is a gotcha specific to this stack/environment/version combination"
-- "We decided against the obvious approach — here is why"
-- "This error message is misleading — the real cause is something else entirely"
-- "This works in dev but will silently break in production for this exact reason"
+  const countArg = args.find(a => /^\d+$/.test(a));
+  const limit    = countArg ? Math.max(1, Math.min(Number(countArg), 50)) : BACKFILL_COMMITS_DEFAULT;
+  const preview  = args.includes('--print');
+  const forAgent = preview || !process.stdout.isTTY;
 
-Call \`save_entry\` with:
-  type          — bug | fix | decision | pattern | lesson | anti-pattern | stack
-  title         — specific and searchable, not generic ("JWT expiry fails in prod" not "auth bug")
-  content       — symptom + root cause + exact fix (not just the fix)
-  error_pattern — exact verbatim error message if one exists
-  cause_archetype — abstract transferable root cause ("environment config divergence", "missing cleanup in teardown")
-  category      — auth | database | deployment | build | config | network | performance | ui | data | testing | security | other
-  project_path  — "${repoRoot}"
+  const pending  = await unreviewedCommits(repoRoot);
+  const sessions = pastSessions(repoRoot);
 
-### Rules
-- Run \`get_context\` before every non-trivial task — no exceptions.
-- Run \`search_knowledge\` before debugging any error you have not seen before.
-- Save proactively — if you had to think to solve it, it belongs in DevBrain.
+  if (!forAgent) {
+    const open = sessions.filter(f => nextSessionChunk(readFileSync(f, 'utf-8'), readCursor(basename(f, '.jsonl')).line).digest).length;
+    console.log(`\n  ${BOLD}Unreviewed history${RESET} ${DIM}— ${project.name}${RESET}`);
+    console.log(`  ${pending.length} commit${pending.length === 1 ? '' : 's'}${pending.length >= BACKFILL_SCAN ? '+' : ''} · ${open} earlier agent session${open === 1 ? '' : 's'}\n`);
+    if (!pending.length && !open) {
+      console.log(`  ${GREEN}✓${RESET} Everything has been reviewed.\n`);
+      return;
+    }
+    console.log(`  This is reading material for your coding agent — it writes the entries,`);
+    console.log(`  DevBrain only stores them. Ask it:\n`);
+    console.log(`    ${CYAN}"run devbrain backfill and save what matters"${RESET}\n`);
+    console.log(`  ${DIM}To read a batch yourself without marking it reviewed: ${RESET}${CYAN}devbrain backfill --print${RESET}\n`);
+    return;
+  }
 
-2. SCAN THIS PROJECT and save everything useful to DevBrain now:
-   - Read README, package.json / equivalent, key config files, main entry points
-   - Save: stack (type "stack"), architectural decisions (type "decision"),
-     known patterns (type "pattern"), and any anti-patterns you can infer
-   - Call save_entry once per item with project_path: "${repoRoot}"
-   - Skip trivial items — only save things that help future engineering decisions
-${CYAN}────────────────────────────────── copy to here ────────────────────────────${RESET}
-`);
-  console.log(`  ${DIM}Run ${CYAN}devbrain /recap${RESET}${DIM} anytime to extract knowledge from a session.${RESET}\n`);
-  console.log(bar);
+  // Fill the batch: commits first (newest — most likely to still matter), then
+  // past sessions, within one budget so the batch fits in an agent's context.
+  let budget = BACKFILL_BATCH_BUDGET;
+  const commits = [];
+  for (const hash of pending) {
+    if (commits.length >= limit) break;
+    const commit = getCommit(repoRoot, hash);
+    if (!commit) continue;
+    const size = commitExcerpt(commit).length;
+    if (commits.length && size > budget) break;
+    commits.push(commit);
+    budget -= size;
+  }
+
+  const chunks: { sessionId: string; digest: string; toLine: number; file: string }[] = [];
+  let sessionsLeft = 0;
+  for (const file of sessions) {
+    const sessionId = basename(file, '.jsonl');
+    const from  = readCursor(sessionId).line;
+    const chunk = nextSessionChunk(readFileSync(file, 'utf-8'), from);
+    if (!chunk.digest) {
+      // Nothing worth reading left in this session: let it go for good.
+      if (!preview && chunk.toLine !== from) writeCursor(sessionId, chunk.toLine);
+      continue;
+    }
+    if (chunks.length >= BACKFILL_SESSIONS || chunk.digest.length > budget) { sessionsLeft++; continue; }
+    chunks.push({ sessionId, digest: chunk.digest, toLine: chunk.toLine, file });
+    budget -= chunk.digest.length;
+  }
+  // A session handed over in part still counts as unreviewed if more of it is worth reading.
+  for (const c of chunks) {
+    if (nextSessionChunk(readFileSync(c.file, 'utf-8'), c.toLine).digest) sessionsLeft++;
+  }
+
+  if (!commits.length && !chunks.length) {
+    console.log('DevBrain: nothing left to review — history is fully reviewed.');
+    return;
+  }
+
+  console.log(formatBackfillBatch({
+    project: project.name,
+    commits,
+    sessions: chunks,
+    remainingCommits: pending.length - commits.length,
+    remainingSessions: sessionsLeft,
+    markedReviewed: !preview,
+  }));
+
+  if (preview) return;
+  for (const c of commits) await markCommitProcessed(c.hash, project.id);
+  for (const c of chunks) writeCursor(c.sessionId, c.toLine);
+}
+
+// ─── agent sessions: briefing and the record prompt ───────────────────────────
+
+const captureLogPath = join(devbrainDir, 'capture.log');
+
+function captureLog(message: string): void {
+  try {
+    mkdirSync(devbrainDir, { recursive: true });
+    appendFileSync(captureLogPath, `[${new Date().toISOString()}] ${message}\n`, 'utf-8');
+  } catch { /* logging must never break capture */ }
+}
+
+function agentSettingsPath(repoRoot: string, global: boolean): string {
+  return global
+    ? join(homedir(), '.claude', 'settings.json')
+    : join(repoRoot, '.claude', 'settings.local.json');
+}
+
+function readAgentSettings(path: string): Record<string, unknown> {
+  if (!existsSync(path)) return {};
+  const raw = readFileSync(path, 'utf-8').replace(/^﻿/, '').trim();
+  // Refuse to overwrite a file we cannot parse — it is the user's config.
+  return raw ? JSON.parse(raw) : {};
+}
+
+function writeAgentSettings(path: string, settings: Record<string, unknown>): void {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
+}
+
+/** Hook input on stdin. Bounded wait: a hook must never hang the agent. */
+function readHookInput(): Promise<Record<string, unknown>> {
+  if (process.stdin.isTTY) return Promise.resolve({});
+  return Promise.race([
+    readStdin(),
+    // unref: once stdin has ended, a pending safety timer must not keep the
+    // process — and so the agent — waiting out its full two seconds.
+    new Promise<string>(resolve => setTimeout(() => resolve(''), 2000).unref()),
+  ]).then(text => { try { return JSON.parse(text) as Record<string, unknown>; } catch { return {}; } });
+}
+
+/**
+ * Entry point for the agent harness (`devbrain hook <event>`).
+ *
+ * Exits 0 whatever happens: a failure here must never block or disturb the
+ * agent. session-start prints the briefing; stop decides from the transcript
+ * alone whether to ask the agent to record something. Neither calls a model.
+ */
+async function handleHook(event: string): Promise<void> {
+  try {
+    const input = await readHookInput();
+    const cwd = typeof input.cwd === 'string' ? input.cwd : process.cwd();
+
+    if (event === 'session-start') {
+      const repoRoot = getRepoRoot(cwd) ?? cwd;
+      const project = await getProjectByPath(repoRoot);
+      if (!project) return;
+      const all = await getAllEntriesWithProjects();
+      // This project's own CLAUDE.md is already in the agent's context; ranking
+      // it back in would restate the file in fewer words. Named, not hidden.
+      const shown = briefingEntries(all, project.id);
+      const skipped = all.filter(e => isAlreadyInAgentContext(e, project.id));
+      const briefing = formatSessionBriefing(buildContext(shown, project), {
+        unreviewedCommits: (await unreviewedCommits(repoRoot)).length,
+        ...(skipped.length
+          ? { indexedFromFile: { file: skipped[0].source!.file, count: skipped.length } }
+          : {}),
+      });
+      if (!briefing) return;
+      process.stdout.write(JSON.stringify({
+        hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: briefing },
+      }));
+      return;
+    }
+
+    // A shell command just ran. If it failed and memory holds a literal match
+    // for the error, hand it to the agent now — this is the moment recall pays
+    // off, and the moment an agent is least likely to go looking.
+    if (event === 'post-tool') {
+      const output = typeof input.tool_output === 'string'
+        ? input.tool_output
+        : JSON.stringify(input.tool_output ?? '');
+      const command = String((input.tool_input as { command?: unknown } | undefined)?.command ?? '');
+
+      // Decided before touching the database: most commands succeed, and a
+      // hook that runs after every one of them must cost nothing when idle.
+      // The echo check matters most here: DevBrain's own recall message quotes
+      // the error it matched, so without it one failure could recall itself.
+      if (!looksLikeError(output, false)
+        || isReadOnlyCommand(command)
+        || isEchoedOutput(output, command)) return;
+      const failure = extractFailure(output);
+      if (!failure) return;
+
+      const sessionId = typeof input.session_id === 'string' ? input.session_id : '';
+      const project = await getProjectByPath(getRepoRoot(cwd) ?? cwd);
+      if (!project) return;
+
+      const hits = recallForFailure(failure, await getAllEntriesWithProjects(), {
+        projectId: project.id,
+        // Pushing the same past fix after every retry of a flaky command would
+        // teach the agent to tune the whole channel out.
+        exclude: sessionId ? readCursor(sessionId).surfaced ?? [] : [],
+      });
+      const message = formatRecallForAgent(failure, hits);
+      if (!message) return;
+
+      if (sessionId) markSurfaced(sessionId, hits.map(h => h.entry.id));
+      const recalled = hits.map(h => h.entry.id);
+      bumpRetrievalCounts(recalled, project.id).catch(() => {});
+      // The one surfacing that shows the entry earned its place: a command
+      // failed and this entry matched it. Counted apart from being shown.
+      bumpRecallCounts(recalled).catch(() => {});
+      captureLog(`${project.name} ${sessionId.slice(0, 8)}: recalled ${hits.length} for "${clip(failure, 60)}"`);
+      process.stdout.write(JSON.stringify({
+        hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: message },
+      }));
+      return;
+    }
+
+    // pre-compact and session-end were installed by an earlier version that ran
+    // a model over the transcript. Capture is the agent's job now, and neither
+    // event leaves an agent turn to do it in, so they are accepted and ignored.
+    if (event !== 'stop') return;
+
+    // Set when the agent is continuing because a Stop hook — ours — held it.
+    // It has had its chance to record; asking again would loop.
+    if (input.stop_hook_active === true) return;
+
+    const transcript = input.transcript_path;
+    const sessionId = input.session_id;
+    if (typeof transcript !== 'string' || typeof sessionId !== 'string' || !existsSync(transcript)) return;
+
+    const cursor = readCursor(sessionId);
+    const review = reviewTurn(readFileSync(transcript, 'utf-8'), cursor.line, { warned: cursor.warned ?? [] });
+    const advance = () => writeCursor(sessionId, review.cursor);
+
+    // Going in circles. Interrupt with what is repeating, plus anything memory
+    // holds about it — the part a generic loop detector cannot do.
+    if (review.action === 'step-back') {
+      const project = await getProjectByPath(getRepoRoot(cwd) ?? cwd);
+      let related: string[] = [];
+      if (project) {
+        const failing = review.signals!.find(s => s.kind === 'repeated-failure');
+        if (failing) {
+          const hits = recallForFailure(failing.subject, await getAllEntriesWithProjects(), {
+            projectId: project.id, topK: 2,
+          });
+          related = hits.map(h => `[${normalizeType(h.entry.type)}] ${h.entry.title} (id: ${h.entry.id})`);
+          if (hits.length) bumpRecallCounts(hits.map(h => h.entry.id)).catch(() => {});
+        }
+      }
+      markWarned(sessionId, review.suppress ?? review.signals!.map(s => s.fingerprint));
+      captureLog(`${project?.name ?? '?'} ${sessionId.slice(0, 8)}: step-back — ` +
+        review.signals!.map(s => s.kind + ' x' + s.count).join(', '));
+      process.stdout.write(JSON.stringify({
+        decision: 'block',
+        reason: formatStepBack(review.signals!, related),
+      }));
+      return;
+    }
+
+    if (review.action !== 'ask') {
+      if (review.cursor !== cursor.line) advance();
+      return;
+    }
+
+    // Only registered projects are captured. Checked last: it is the one step
+    // that touches the database, and most turns never get this far.
+    const project = await getProjectByPath(getRepoRoot(cwd) ?? cwd);
+    if (!project) return;
+
+    advance();
+    captureLog(`${project.name} ${sessionId.slice(0, 8)}: asked the agent to record this stretch`);
+    process.stdout.write(JSON.stringify({ decision: 'block', reason: review.prompt }));
+  } catch (err) {
+    captureLog(`hook ${event} failed: ${explainError(err)}`);
+  }
+}
+
+function flag(args: string[], name: string): string | undefined {
+  const i = args.indexOf(name);
+  return i >= 0 ? args[i + 1] : undefined;
+}
+
+/** Claude Code keeps a project's transcripts in a folder named after its path. */
+function transcriptsFor(repoRoot: string): string[] {
+  const dir = join(homedir(), '.claude', 'projects', repoRoot.replace(/[^A-Za-z0-9]/g, '-'));
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir)
+    .filter(f => f.endsWith('.jsonl'))
+    .map(f => join(dir, f))
+    .sort((a, b) => statSync(a).mtimeMs - statSync(b).mtimeMs);
+}
+
+
+/** True when Claude Code runs DevBrain's hooks here, from project or user settings. */
+function agentHooksInstalled(repoRoot: string): boolean {
+  for (const global of [false, true]) {
+    try {
+      if (installedDevbrainHooks(readAgentSettings(agentSettingsPath(repoRoot, global))).length) return true;
+    } catch { /* unreadable settings: treat as not installed */ }
+  }
+  return false;
+}
+
+/** `devbrain hooks [install|uninstall|status] [--global]` */
+async function handleHooks(args: string[]): Promise<void> {
+  const action = args.find(a => !a.startsWith('--')) ?? 'status';
+  const global = args.includes('--global');
+  const repoRoot = getRepoRoot(process.cwd()) ?? process.cwd();
+  const path = agentSettingsPath(repoRoot, global);
+  const scope = global ? 'all projects (user settings)' : 'this project (.claude/settings.local.json)';
+
+  if (action === 'install') {
+    writeAgentSettings(path, withDevbrainHooks(readAgentSettings(path)));
+    console.log(`\n  ${GREEN}✓${RESET} Claude Code hooks installed for ${scope}`);
+    console.log(`  ${DIM}${path}${RESET}`);
+    console.log(`  ${DIM}Sessions start briefed with project memory, and when the agent fixes or decides`);
+    console.log(`  something without saving it, DevBrain asks it to. Registered projects only.${RESET}`);
+    console.log(`  ${DIM}Restart Claude Code (or run /hooks) for it to pick them up.${RESET}\n`);
+    return;
+  }
+  if (action === 'uninstall') {
+    writeAgentSettings(path, withoutDevbrainHooks(readAgentSettings(path)));
+    console.log(`\n  ${GREEN}✓${RESET} DevBrain hooks removed from ${scope}\n`);
+    return;
+  }
+
+  console.log(`\n  ${BOLD}Agent hooks${RESET}`);
+  for (const [label, p] of [['project', agentSettingsPath(repoRoot, false)], ['global ', agentSettingsPath(repoRoot, true)]] as const) {
+    let events: string[] = [];
+    try { events = installedDevbrainHooks(readAgentSettings(p)); } catch { events = ['(unreadable settings file)']; }
+    console.log(`  ${label}  ${events.length ? `${GREEN}${events.join(', ')}${RESET}` : `${DIM}not installed${RESET}`}`);
+  }
+  if (existsSync(captureLogPath)) {
+    const recent = readFileSync(captureLogPath, 'utf-8').trimEnd().split('\n').slice(-12);
+    console.log(`\n  ${BOLD}Recent DevBrain prompts${RESET} ${DIM}(${captureLogPath})${RESET}`);
+    for (const l of recent) console.log(`  ${DIM}${l}${RESET}`);
+  } else {
+    console.log(`\n  ${DIM}Nothing logged yet.${RESET}`);
+  }
   console.log();
 }
 
-async function handleCapture(): Promise<void> {
-  const cwd = process.cwd();
+// ─── index: treat a Markdown file as a source of truth ────────────────────────
+
+const DEFAULT_SOURCE_FILES = ['CLAUDE.md', 'AGENTS.md', 'DEVBRAIN.md'];
+
+/**
+ * Index a Markdown file so its knowledge reaches agents, without copying it.
+ *
+ * The file stays authoritative. Each run reconciles against its current content:
+ * a changed section updates its entry, a removed section retracts one, a new
+ * section adds one. That is what keeps DevBrain and the file from drifting —
+ * the failure the whole feature exists to prevent.
+ */
+async function handleIndex(fileArg?: string, opts: { force?: boolean } = {}): Promise<void> {
+  const cwd      = process.cwd();
   const repoRoot = getRepoRoot(cwd) ?? cwd;
-  const project = await getProjectByPath(repoRoot);
-  if (!project) return;
-  const commit = getLastCommit(repoRoot);
-  if (!commit) return;
-  if (await isCommitProcessed(commit.hash)) return;
 
-  console.log(`\n${CYAN}[DevBrain]${RESET} Processing commit diff...`);
-
-  let knowledge;
-  try {
-    knowledge = await extractKnowledge(commit.diff, commit.message);
-  } catch (err) {
-    console.error(`  ${RED}✗${RESET} Failed to extract knowledge: ${err instanceof Error ? err.message : String(err)}`);
-    if (err instanceof RateLimitError) return;
+  const candidates = fileArg ? [fileArg] : DEFAULT_SOURCE_FILES;
+  const file = candidates.find(f => existsSync(join(repoRoot, f)));
+  if (!file) {
+    console.log(`\n  ${YELLOW}No source file to index.${RESET}`);
+    console.log(`  ${DIM}Looked for: ${candidates.join(', ')} in ${repoRoot}${RESET}`);
+    console.log(`  ${DIM}Name one explicitly: ${RESET}${CYAN}devbrain index docs/ENGINEERING.md${RESET}\n`);
     return;
   }
-  if (!knowledge) {
-    await markCommitProcessed(commit.hash, project.id);
-    console.log(`  ${DIM}No meaningful developer knowledge found in this commit — skipped.${RESET}\n`);
+
+  let project = await getProjectByPath(repoRoot);
+  if (!project) {
+    project = { id: nanoid(), name: getProjectName(repoRoot), path: repoRoot, stack: detectStack(repoRoot), createdAt: Date.now(), lastSeen: Date.now() };
+    await upsertProject(project);
+  }
+
+  const text     = readFileSync(join(repoRoot, file), 'utf-8');
+  const sections = parseMarkdownSource(text);
+  const existing = (await getAllEntriesWithProjects()).filter(e => e.projectId === project!.id);
+  const plan     = planIndex(sections, existing, file, { force: opts.force });
+
+  console.log(`\n  ${bold(`Indexing ${file}`)}  ${dim(`${sections.length} sections`)}`);
+  console.log(`  ${DIM}${plan.added.length} new · ${plan.updated.length} changed · ${plan.unchanged} unchanged · ${plan.removed.length} gone${RESET}\n`);
+
+  if (!plan.added.length && !plan.updated.length && !plan.removed.length) {
+    console.log(`  ${GREEN}✓${RESET} Already up to date.\n`);
     return;
   }
-  const embeddingText = `${knowledge.problem} ${knowledge.solution} ${knowledge.tags.join(' ')}`;
-  let embedding: number[] | undefined;
-  try { embedding = await getEmbedding(embeddingText); } catch {}
-  await insertEntry({
-    id: nanoid(), projectId: project.id,
-    type: knowledge.type,
-    title: knowledge.problem.slice(0, 120),
-    content: knowledge.solution,
-    tags: knowledge.tags,
-    embedding, createdAt: commit.timestamp,
-    confidence: 'observation',
-    ...(knowledge.category     ? { category: knowledge.category }         : {}),
-    ...(knowledge.errorPattern ? { errorPattern: knowledge.errorPattern } : {}),
+
+  const embedFor = async (s: { title: string; body: string }) => {
+    try { return await getEmbedding(`${s.title} ${s.body}`); } catch { return undefined; }
+  };
+
+  for (const section of plan.added) {
+    await insertEntry(entryForSection(section, project, file, { id: nanoid(), embedding: await embedFor(section) }));
+    console.log(`  ${GREEN}+${RESET} ${typeCode(section.type)}${section.type}${RESET}  ${clip(section.title, 62)}`);
+  }
+
+  for (const { section, entry } of plan.updated) {
+    // Replace in place: same id, so anything referencing it still resolves.
+    await deleteEntry(entry.id);
+    await insertEntry(entryForSection(section, project, file, {
+      id: entry.id, embedding: await embedFor(section), createdAt: entry.createdAt,
+    }));
+    console.log(`  ${YELLOW}~${RESET} ${typeCode(section.type)}${section.type}${RESET}  ${clip(section.title, 62)}  ${DIM}(source changed)${RESET}`);
+  }
+
+  for (const entry of plan.removed) {
+    // Retract rather than delete: the entry was true once, and something may
+    // have cited it. Superseded entries stop surfacing but stay readable.
+    const id = nanoid();
+    await insertEntry({
+      id, projectId: project.id, type: 'lesson',
+      title: clip(`No longer in ${file}: ${entry.title}`, 120),
+      content: `This was removed from ${file}, so it is no longer current guidance.`,
+      tags: ['claude-md', 'removed'], createdAt: Date.now(), confidence: 'observation',
+    });
+    await supersedeEntry(entry.id, id);
+    console.log(`  ${RED}-${RESET} ${clip(entry.title, 62)}  ${DIM}(removed from source)${RESET}`);
+  }
+
+  console.log(`\n  ${GREEN}${bold('Indexed.')}${RESET} ${DIM}${file} stays the source — edit it there and re-run to update.${RESET}\n`);
+}
+
+// ─── run: look up past fixes at the moment something fails ────────────────────
+
+// Lines worth treating as the failure, most specific first. A stack trace is
+// mostly frames; the line naming the error is the one a past fix was filed under.
+const ERROR_SIGNALS: RegExp[] = [
+  /^[A-Za-z_.]*(Error|Exception)\b.*/,              // TypeError: x is not a function
+  /\berror\s+[A-Z]{1,4}\d{2,5}\b.*/,                // error TS2345, error CS1002
+  /\b(E[A-Z]{3,}|ENOENT|ECONNREFUSED|EADDRINUSE)\b.*/,
+  /\b(failed|failure|cannot|could not|unable to)\b.*/i,
+  /\b(assert|expected .* (to|but)|✕|✗|FAIL)\b.*/i,
+];
+
+/**
+ * Pick the line most likely to be the actual failure.
+ *
+ * Callers pass a whole build or test log. Embedding all of it buries the signal,
+ * and the first line is usually a banner rather than the error.
+ */
+export function extractFailure(output: string): string | null {
+  const lines = output
+    .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')          // strip colour
+    .split(/\r?\n/)
+    .map(l => l.trim())
+    .filter(Boolean)
+    .filter(l => !/^\s*at\s+/.test(l));             // drop stack frames
+  if (lines.length === 0) return null;
+
+  // Search the tail first: the failure is usually near the end of a log.
+  const tail = lines.slice(-80).reverse();
+  for (const re of ERROR_SIGNALS) {
+    const hit = tail.find(l => re.test(l));
+    if (hit) return hit.slice(0, 300);
+  }
+  return lines[lines.length - 1].slice(0, 300);
+}
+
+/**
+ * Run a command and, if it fails, say whether this went wrong here before.
+ *
+ * Every other lookup depends on someone choosing to ask. This one fires at the
+ * exact moment a past fix is worth most — when the error is on screen — and
+ * needs no agent cooperation. It is deliberately invisible otherwise: output
+ * streams through untouched, the child's exit code is preserved, and any
+ * internal failure is swallowed rather than breaking the wrapped command.
+ */
+async function handleRun(argv: string[]): Promise<void> {
+  if (argv.length === 0) {
+    console.log(`\n  ${BOLD}devbrain run${RESET} ${MAGENTA}<command>${RESET}`);
+    console.log(`  ${DIM}Runs the command. If it fails, searches your memory for the error.${RESET}\n`);
+    console.log(`  ${CYAN}devbrain run npm test${RESET}`);
+    console.log(`  ${CYAN}devbrain run npm run build${RESET}\n`);
+    process.exitCode = 1;
+    return;
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { spawn } = require('child_process') as typeof import('child_process');
+
+  const captured: string[] = [];
+  const MAX_CAPTURE = 64 * 1024;
+  let size = 0;
+  const tee = (chunk: Buffer, to: NodeJS.WriteStream) => {
+    to.write(chunk);
+    if (size < MAX_CAPTURE) { captured.push(chunk.toString()); size += chunk.length; }
+  };
+
+  const code: number = await new Promise(resolve => {
+    const child = spawn(argv.join(' '), {
+      shell: true,
+      stdio: ['inherit', 'pipe', 'pipe'],
+    });
+    child.stdout?.on('data', c => tee(c, process.stdout));
+    child.stderr?.on('data', c => tee(c, process.stderr));
+    child.on('error', () => resolve(127));
+    child.on('close', c => resolve(c ?? 0));
   });
-  await markCommitProcessed(commit.hash, project.id);
 
-  const typeColor = typeCode(knowledge.type);
-  console.log(`  ${GREEN}✓${RESET} Captured ${typeColor}${knowledge.type}${RESET}: ${knowledge.problem}`);
-  console.log(`  ${DIM}Stored in MongoDB Atlas Vector Search database.${RESET}\n`);
+  if (code === 0) { process.exitCode = 0; return; }
+
+  // Past this point nothing may change the outcome of the user's command.
+  process.exitCode = code;
+
+  try {
+    const failure = extractFailure(captured.join(''));
+    if (!failure) return;
+
+    // Match on the error text alone — no embedding, so no Gemini call.
+    //
+    // This started as an embedded search with a timeout, which was wrong twice
+    // over: an exhausted quota made it hang for minutes, and abandoning the
+    // in-flight request at exit tripped a libuv assertion on Windows that
+    // corrupted the exit code. It is also the wrong tool. preciseSearch scores
+    // literal overlap against errorPattern and title with no vector at all, and
+    // for an exact error string that beats semantic similarity. The result is
+    // instant, free, works offline, and needs no credentials.
+    const repoRoot = getRepoRoot(process.cwd()) ?? process.cwd();
+    const [allEntries, project] = await Promise.all([
+      getAllEntriesWithProjects(),
+      getProjectByPath(repoRoot),
+    ]);
+    const hits = preciseSearch(failure, [], allEntries, { topK: 3 });
+    if (hits.length === 0) return;
+
+    const W = Math.min(process.stdout.columns || 80, 80);
+    console.log(`\n${DIM}${'─'.repeat(W)}${RESET}`);
+    console.log(`  ${CYAN}${bold('DevBrain')}${RESET} — this looked familiar:`);
+    console.log(`  ${DIM}matched on: ${failure.slice(0, 68)}${RESET}\n`);
+
+    hits.forEach((r, i) => {
+      const type = normalizeType(r.entry.type);
+      console.log(`  ${BOLD}${i + 1}.${RESET} ${typeCode(type)}[${type}]${RESET} ${r.entry.title}`);
+      console.log(`     ${DIM}${r.project.name} · ${timeAgo(r.entry.createdAt)} · ${r.matchType === 'pattern' ? 'exact match' : similarityLabel(r.similarity)}${RESET}`);
+      if (r.entry.errorPattern) console.log(`     ${DIM}error:${RESET} ${r.entry.errorPattern.slice(0, 100)}`);
+      for (const line of wrap(r.entry.content.slice(0, 400), 70)) console.log(`     ${line}`);
+      console.log();
+    });
+
+    const matched = hits.map(r => r.entry.id);
+    bumpRetrievalCounts(matched, project?.id).catch(() => {});
+    // `run` only looks anything up because the wrapped command failed, so every
+    // hit here is a failure caught, exactly as in the PostToolUse hook.
+    bumpRecallCounts(matched).catch(() => {});
+    console.log(`${DIM}${'─'.repeat(W)}${RESET}\n`);
+  } catch {
+    // A memory lookup must never add noise to a failing build.
+  } finally {
+    // Exit explicitly rather than waiting for the event loop to drain. An
+    // abandoned lookup leaves an in-flight HTTP request and an open database
+    // connection behind, and Node would sit on them long after the deadline —
+    // turning a "give up quietly" into the hang it was meant to prevent.
+    //
+    // Deliberately no closeDb() here: closing the driver while a request is
+    // still in flight trips a libuv assertion on Windows
+    // (!(handle->flags & UV_HANDLE_CLOSING) in win/async.c). Exiting releases
+    // the socket anyway, and this process is ending regardless.
+    process.exit(code);
+  }
 }
 
 async function handleSearch(query: string): Promise<void> {
@@ -387,7 +1026,8 @@ async function handleSearch(query: string): Promise<void> {
     const cwd      = process.cwd();
     const repoRoot = getRepoRoot(cwd) ?? cwd;
     const [queryEmbedding, classification, allEntries, currentProject] = await Promise.all([
-      getEmbedding(query),
+      // No AI service, or it failed: an empty vector makes preciseSearch rank by keywords.
+      getEmbedding(query).catch(() => [] as number[]),
       classifyQuery(query).catch(() => ({ category: 'other' as const, errorPattern: undefined })),
       getAllEntriesWithProjects(),
       getProjectByPath(repoRoot),
@@ -427,26 +1067,19 @@ async function handleSearch(query: string): Promise<void> {
     });
   } catch (err: unknown) {
     s.fail('Search failed');
-    if (err instanceof RateLimitError) {
-      console.log(`\n  ${YELLOW}Gemini rate limit hit — retry in ~${err.retryAfter}s${RESET}\n`);
-    } else {
-      console.error(err);
-    }
+    reportError(err);
   }
 }
 
-const PREFIXES: Record<string, Entry['type']> = {
-  'bug:':           'bug',
-  'fix:':           'fix',
-  'note:':          'note',
-  'stack:':         'stack',
-  'decision:':      'decision',
-  'pattern:':       'pattern',
-  'lesson:':        'lesson',
-  'solution:':      'solution',
-  'image:':         'image',
-  'anti-pattern:':  'anti-pattern',
-};
+// Derived from the type registry, plus legacy aliases so `solution:` keeps working
+// and normalises to `fix`. A hand-maintained list here is how the CLI, the
+// dashboard and the extraction prompts drifted into four different taxonomies.
+const PREFIXES: Record<string, Entry['type']> = Object.fromEntries(
+  ENTRY_TYPES.flatMap(spec => [
+    [`${spec.type}:`, spec.type],
+    ...(spec.aliases ?? []).map(alias => [`${alias}:`, spec.type] as const),
+  ]),
+) as Record<string, Entry['type']>;
 
 function parseQuickSave(text: string): { type: Entry['type']; content: string } {
   const lower = text.trimStart().toLowerCase();
@@ -459,7 +1092,19 @@ function parseQuickSave(text: string): { type: Entry['type']; content: string } 
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function handleNote(text: string, inq?: any): Promise<void> {
+/**
+ * `devbrain note "<type>: <title> — <detail>" [--error …] [--category …] [--tags a,b]`
+ *
+ * The extra fields are not decoration. error_pattern is what the failure hook
+ * matches against, so a note saved without one can never be recalled unasked —
+ * and until these flags existed the CLI had nowhere to put it, while the Stop
+ * hook was busy asking agents to supply it.
+ */
+async function handleNote(
+  text: string,
+  inq?: any,
+  extra: { error?: string; category?: string; tags?: string } = {},
+): Promise<void> {
   if (!text.trim()) return;
   const cwd = process.cwd();
   const repoRoot = getRepoRoot(cwd) ?? cwd;
@@ -506,7 +1151,7 @@ async function handleNote(text: string, inq?: any): Promise<void> {
           return;
         }
         const newS = spin('Saving...');
-        await insertEntry({ id: nanoid(), projectId: project.id, type, title: content.slice(0, 120), content, tags: [], embedding, createdAt: Date.now(), confidence: 'observation' });
+        await insertEntry({ id: nanoid(), projectId: project.id, type, title: clip(content, 120), content, tags: [], embedding, createdAt: Date.now(), confidence: 'observation' });
         newS.succeed(`Saved  ${DIM}[${type}]${RESET}`);
         console.log();
         return;
@@ -533,13 +1178,13 @@ async function handleNote(text: string, inq?: any): Promise<void> {
           }]);
           if (action === 'supersede') {
             const newId = nanoid();
-            await insertEntry({ id: newId, projectId: project.id, type, title: content.slice(0, 120), content, tags: [], embedding, createdAt: Date.now(), confidence: 'observation' });
+            await insertEntry({ id: newId, projectId: project.id, type, title: clip(content, 120), content, tags: [], embedding, createdAt: Date.now(), confidence: 'observation' });
             await supersedeEntry(top.entry.id, newId);
             console.log(`  ${GREEN}✓${RESET} Saved new decision  ${DIM}old marked superseded${RESET}\n`);
             return;
           }
           const newS = spin('Saving...');
-          await insertEntry({ id: nanoid(), projectId: project.id, type, title: content.slice(0, 120), content, tags: [], embedding, createdAt: Date.now(), confidence: 'observation' });
+          await insertEntry({ id: nanoid(), projectId: project.id, type, title: clip(content, 120), content, tags: [], embedding, createdAt: Date.now(), confidence: 'observation' });
           newS.succeed(`Saved  ${DIM}[${type}]${RESET}`);
           console.log();
           return;
@@ -549,7 +1194,40 @@ async function handleNote(text: string, inq?: any): Promise<void> {
     }
     // ─────────────────────────────────────────────────────────────────────────
 
-    await insertEntry({ id: nanoid(), projectId: project.id, type, title: content.slice(0, 120), content, tags: [], embedding, createdAt: Date.now(), confidence: 'observation' });
+    // Non-interactive `devbrain note` — the command DEV_CONTEXT.md gives agents.
+    // The block above only runs in the REPL, where a human can be asked; with no
+    // human there was no check at all, so an agent saving the same insight twice
+    // stored it twice.
+    // "<title> — <cause and fix>" is the shape agents are asked to write: the
+    // title is the searchable statement, so keep it apart from the detail.
+    const dash = content.search(/\s[—–]\s|\s--\s/);
+    const title = clip(dash > 10 ? content.slice(0, dash) : content, 120);
+    // The body is the detail only. Storing the whole string here repeated the
+    // title at the head of every entry, so each one had to be read twice.
+    const detail = dash > 10
+      ? content.slice(dash).replace(/^\s*(?:[—–]|--)\s*/, '').trim()
+      : content;
+
+    // With no embedding (no AI configured), compare titles instead.
+    const known = !inq && (embedding
+      ? await isDuplicateEntry(embedding, project.id)
+      : !!(await findTextDuplicate(title, project.id).catch(() => null)));
+    if (known) {
+      s.stop();
+      console.log(`  ${DIM}Already known — near-duplicate of an existing entry, not saved.${RESET}\n`);
+      return;
+    }
+
+    const tags = (extra.tags ?? '').split(',').map(t => t.trim().toLowerCase()).filter(Boolean).slice(0, 4);
+    const category = ENTRY_CATEGORIES.includes(extra.category as EntryCategory)
+      ? extra.category as EntryCategory
+      : undefined;
+    await insertEntry({
+      id: nanoid(), projectId: project.id, type, title, content: detail, tags,
+      embedding, createdAt: Date.now(), confidence: 'observation',
+      ...(extra.error?.trim() ? { errorPattern: extra.error.trim() } : {}),
+      ...(category ? { category } : {}),
+    });
     if (inq) {
       console.log(`  ${GREEN}✓${RESET} Saved  ${DIM}[${type}]${RESET}\n`);
     } else {
@@ -558,34 +1236,123 @@ async function handleNote(text: string, inq?: any): Promise<void> {
     }
   } catch (err) {
     s.fail('Failed to save');
-    console.error(err);
+    reportError(err);
   }
 }
 
-async function handleSummary(): Promise<void> {
-  const cwd = process.cwd();
-  const repoRoot = getRepoRoot(cwd) ?? cwd;
-  const project = await getProjectByPath(repoRoot);
-  if (!project) { console.log(`\n  ${YELLOW}Project not tracked.${RESET} Run Init first.\n`); return; }
-  const entries = await getEntriesByProject(project.id);
 
-  const bugs  = entries.filter(e => e.type === 'bug').length;
-  const fixes = entries.filter(e => e.type === 'fix').length;
-  const notes = entries.filter(e => e.type === 'note').length;
+/** Read all of stdin as text. Resolves empty if stdin closes with nothing. */
+function readStdin(): Promise<string> {
+  return new Promise(resolve => {
+    let buf = '';
+    process.stdin.setEncoding('utf-8');
+    process.stdin.on('data', chunk => { buf += chunk; });
+    process.stdin.on('end', () => resolve(buf));
+    process.stdin.on('error', () => resolve(buf));
+  });
+}
 
-  console.log(`\n  ${bold('Project')}  ${project.name}`);
-  console.log(`  ${bold('Stack')}    ${project.stack.join(', ') || 'Unknown'}`);
-  console.log(`  ${bold('Memory')}   ${entries.length} entries  ${dim(`${bugs} bugs · ${fixes} fixes · ${notes} notes`)}`);
-
-  if (entries.length > 0) {
-    console.log(`\n  ${CYAN}Knowledge captured${RESET}`);
-    entries.slice(0, 8).forEach(e => {
-      const dot = typeDot(e.type);
-      const title = e.title.length > 68 ? e.title.slice(0, 68) + '…' : e.title;
-      console.log(`  ${dot} ${title}  ${dim(timeAgo(e.createdAt))}`);
-    });
+/** Soft-wrap prose to a column width for terminal output. */
+function wrap(text: string, width: number): string[] {
+  const lines: string[] = [];
+  let line = '';
+  for (const word of text.split(/\s+/)) {
+    if (line && line.length + word.length + 1 > width) { lines.push(line); line = word; }
+    else line = line ? `${line} ${word}` : word;
   }
+  if (line) lines.push(line);
+  return lines;
+}
+
+// ─── project dossier ──────────────────────────────────────────────────────────
+
+/**
+ * Everything known about one project, in one place: identity, stack, then every
+ * entry grouped by section. Unlike `context` this truncates nothing — it is the
+ * answer to "show me this project and what we learned in it".
+ */
+async function handleProject(nameArg?: string, opts: { write?: boolean } = {}): Promise<void> {
+  const cwd      = process.cwd();
+  const repoRoot = getRepoRoot(cwd) ?? cwd;
+
+  const projects = await getAllProjects();
+  if (projects.length === 0) {
+    console.log(`\n  ${YELLOW}No projects registered yet.${RESET} Run ${CYAN}devbrain init${RESET} in a repo.\n`);
+    return;
+  }
+
+  let project = null as (typeof projects)[number] | null;
+  if (nameArg?.trim()) {
+    const q = nameArg.trim().toLowerCase();
+    const matches = projects.filter(p => p.name.toLowerCase().includes(q));
+    if (matches.length === 0) {
+      console.log(`\n  ${YELLOW}No project matching${RESET} "${nameArg.trim()}"\n`);
+      console.log(`  ${DIM}Known projects:${RESET} ${projects.map(p => p.name).join(', ')}\n`);
+      return;
+    }
+    if (matches.length > 1) {
+      console.log(`\n  ${YELLOW}Several projects match${RESET} "${nameArg.trim()}"\n`);
+      matches.forEach(p => console.log(`  ${CYAN}${p.name}${RESET}  ${DIM}${p.path}${RESET}`));
+      console.log();
+      return;
+    }
+    project = matches[0];
+  } else {
+    project = projects.find(p => p.path === repoRoot) ?? null;
+    if (!project) {
+      console.log(`\n  ${YELLOW}This directory isn't a registered project.${RESET}\n`);
+      console.log(`  ${DIM}Run ${RESET}${CYAN}devbrain init${RESET}${DIM} here, or name one:${RESET}`);
+      projects.forEach(p => console.log(`  ${CYAN}devbrain project ${p.name}${RESET}  ${DIM}${p.path}${RESET}`));
+      console.log();
+      return;
+    }
+  }
+
+  const all     = await getAllEntriesWithProjects();
+  const dossier = buildDossier(project, all);
+
+  if (opts.write) {
+    const outDir = join(devbrainDir, 'projects', project.name.replace(/[^\w.-]+/g, '-'));
+    mkdirSync(outDir, { recursive: true });
+    const files = dossierFiles(dossier);
+    for (const f of files) writeFileSync(join(outDir, f.path), f.contents, 'utf-8');
+    console.log(`\n  ${GREEN}✓${RESET} Wrote ${files.length} file${files.length === 1 ? '' : 's'} for ${bold(project.name)}`);
+    files.forEach(f => console.log(`  ${DIM}${join(outDir, f.path)}${RESET}`));
+    console.log();
+    openPath(outDir);
+    return;
+  }
+
+  // Terminal rendering: the same structure as the Markdown, with colour.
   console.log();
+  console.log(`  ${BOLD}${CYAN}${project.name}${RESET}`);
+  console.log(`  ${DIM}Stack   ${RESET}${project.stack.join(' · ') || 'not detected'}`);
+  console.log(`  ${DIM}Path    ${RESET}${project.path}`);
+  console.log(`  ${DIM}Memory  ${RESET}${dossier.total} ${dossier.total === 1 ? 'entry' : 'entries'}`
+    + (dossier.lastEntryAt ? `  ${DIM}· last ${timeAgo(dossier.lastEntryAt)}${RESET}` : '')
+    + (dossier.supersededCount ? `  ${DIM}· ${dossier.supersededCount} superseded${RESET}` : ''));
+
+  if (dossier.total === 0) {
+    console.log(`\n  ${DIM}Nothing recorded yet. Ask your coding agent to ${RESET}${CYAN}run devbrain backfill${RESET}${DIM} and save what matters.${RESET}\n`);
+    return;
+  }
+
+  console.log();
+  for (const section of dossier.sections) {
+    console.log(`  ${BOLD}${section.heading}${RESET}  ${DIM}(${section.entries.length})${RESET}`);
+    for (const entry of section.entries.slice(0, 8)) {
+      const type  = normalizeType(entry.type);
+      const title = entry.title.length > 66 ? `${entry.title.slice(0, 66)}…` : entry.title;
+      const flags = entry.supersededBy ? ` ${YELLOW}[superseded]${RESET}` : '';
+      console.log(`    ${typeDot(type)} ${title}${flags}  ${DIM}${timeAgo(entry.createdAt)}${RESET}`);
+    }
+    if (section.entries.length > 8) {
+      console.log(`    ${DIM}… ${section.entries.length - 8} more${RESET}`);
+    }
+    console.log();
+  }
+
+  console.log(`  ${DIM}Full write-up: ${RESET}${CYAN}devbrain project${nameArg ? ` ${nameArg}` : ''} --write${RESET}${DIM} (one .md per section)${RESET}\n`);
 }
 
 // ─── context ──────────────────────────────────────────────────────────────────
@@ -600,17 +1367,9 @@ async function handleContext(query?: string): Promise<void> {
 
   let queryEmbedding: number[] | undefined;
   if (query?.trim()) {
-    try {
-      queryEmbedding = await getEmbedding(query);
-    } catch (err) {
-      s?.fail('Embedding failed');
-      if (err instanceof RateLimitError) {
-        console.log(`\n  ${YELLOW}Gemini rate limit — retry in ~${err.retryAfter}s${RESET}\n`);
-      } else {
-        console.error(err);
-      }
-      return;
-    }
+    // Without an embedding, buildContext ranks by keywords instead. A missing
+    // or rate-limited AI service must not cost the agent its context.
+    queryEmbedding = await getEmbedding(query).catch(() => undefined);
   }
 
   s?.stop();
@@ -813,168 +1572,26 @@ async function handleDelete(inquirer: unknown): Promise<void> {
 
 // ─── interactive mode ─────────────────────────────────────────────────────────
 
-// ─── export ───────────────────────────────────────────────────────────────────
 
-async function handleExport(): Promise<void> {
-  const cwd = process.cwd();
-  const repoRoot = getRepoRoot(cwd) ?? cwd;
-  const project = await getProjectByPath(repoRoot);
-  if (!project) { console.log(`\n  ${YELLOW}Project not tracked.${RESET} Run /init first.\n`); return; }
-  const entries = await getEntriesByProject(project.id);
-  if (entries.length === 0) { console.log(`\n  No entries to export yet.\n`); return; }
 
-  const s = spin('Building export...');
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const AdmZip = require('adm-zip');
-    const zip = new AdmZip();
 
-    const groups: Record<string, typeof entries> = {};
-    for (const e of entries) {
-      (groups[e.type] ??= []).push(e);
-    }
-
-    for (const [type, list] of Object.entries(groups)) {
-      const text = list.map(e => [
-        `Date:    ${new Date(e.createdAt).toLocaleString()}`,
-        `Title:   ${e.title}`,
-        `Details: ${e.content}`,
-        e.tags.length ? `Tags:    ${e.tags.join(', ')}` : '',
-        '─'.repeat(64),
-      ].filter(Boolean).join('\n')).join('\n\n');
-      zip.addFile(`${type}s.txt`, Buffer.from(text, 'utf-8'));
-    }
-
-    const exportDir  = join(homedir(), '.devbrain');
-    const exportPath = join(exportDir, `${project.name}-export.zip`);
-    zip.writeZip(exportPath);
-
-    s.succeed(`Export complete`);
-    console.log(`\n  ${BOLD}Saved to${RESET}`);
-    console.log(`  ${CYAN}${exportPath}${RESET}\n`);
-    console.log(`  ${BOLD}Contains${RESET}`);
-    for (const [type, list] of Object.entries(groups)) {
-      console.log(`  ${typeDot(type)} ${(type + 's.txt').padEnd(18)} ${DIM}${list.length} entr${list.length === 1 ? 'y' : 'ies'}${RESET}`);
-    }
-    console.log();
-    openPath(exportDir);
-  } catch (err) {
-    s.fail('Export failed');
-    console.error(err);
-  }
-}
-
-// ─── prompt ───────────────────────────────────────────────────────────────────
-
-async function handlePrompt(): Promise<void> {
-  const cwd      = process.cwd();
-  const repoRoot = getRepoRoot(cwd) ?? cwd;
-  const project  = await getProjectByPath(repoRoot);
-  const name     = project?.name ?? getProjectName(repoRoot);
-  const stack    = project?.stack ?? [];
-
-  printInitInstructions(name, stack, repoRoot);
-}
-
-// ─── open ─────────────────────────────────────────────────────────────────────
-
-async function handleOpen(): Promise<void> {
-  const folder = join(homedir(), '.devbrain');
-  openPath(folder);
-  console.log(`\n  ${GREEN}✓${RESET} Opened ${CYAN}${folder}${RESET}\n`);
-}
-
-// ─── recap ────────────────────────────────────────────────────────────────────
-
-async function handleRecap(sessionText?: string): Promise<void> {
-  const W   = Math.min(process.stdout.columns || 80, 80);
-  const bar = `${DIM}${'─'.repeat(W)}${RESET}`;
-
-  let text = sessionText ?? '';
-
-  if (!text) {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-explicit-any
-    const _inq: any = require('inquirer');
-    const inq = typeof _inq.prompt === 'function' ? _inq : _inq.default;
-    const tmpFile = join(tmpdir(), `devbrain-recap-${Date.now()}.txt`);
-    writeFileSync(tmpFile, '', 'utf-8');
-    openPath(tmpFile);
-    console.log(`\n  ${BOLD}${CYAN}Session Recap${RESET}`);
-    console.log(`  ${DIM}Your editor just opened. Paste the session transcript, save, and close it.${RESET}`);
-    console.log(`  ${DIM}(Windows: Ctrl+S then close Notepad · Mac/Linux: save and quit)${RESET}\n`);
-    try {
-      await inq.prompt([{ type: 'input', name: '_', message: 'Press Enter when done:', prefix: ' ' }]);
-    } catch { return; }
-    try {
-      text = readFileSync(tmpFile, 'utf-8').trim();
-    } catch {
-      console.log(`  ${YELLOW}Could not read temp file.${RESET}\n`);
-      return;
-    }
-    try { unlinkSync(tmpFile); } catch {}
-  }
-
-  if (!text) {
-    console.log(`  ${YELLOW}Nothing to recap.${RESET}\n`);
-    return;
-  }
-
-  console.log(`\n  ${DIM}Analyzing session with Gemini...${RESET}`);
-
-  let extracted;
-  try {
-    extracted = await recapSession(text);
-  } catch (err) {
-    console.log(`  ${RED}Recap failed: ${err instanceof Error ? err.message : String(err)}${RESET}\n`);
-    return;
-  }
-
-  if (!extracted.length) {
-    console.log(`  ${DIM}No new knowledge found worth saving.${RESET}\n`);
-    return;
-  }
-
-  console.log(`\n  ${BOLD}Found ${extracted.length} item${extracted.length > 1 ? 's' : ''} to save:${RESET}\n`);
-  extracted.forEach((e, i) => {
-    const col = e.type === 'anti-pattern' ? RED : e.type === 'bug' ? YELLOW : GREEN;
-    console.log(`  ${col}${i + 1}. [${e.type}]${RESET} ${e.title.slice(0, 80)}`);
-  });
-  console.log();
-
-  const cwd      = process.cwd();
-  const repoRoot = getRepoRoot(cwd) ?? cwd;
-  let project    = await getProjectByPath(repoRoot);
-
-  if (!project) {
-    project = {
-      id: nanoid(), name: getProjectName(repoRoot), path: repoRoot,
-      stack: detectStack(repoRoot), createdAt: Date.now(), lastSeen: Date.now(),
-    };
-    await upsertProject(project);
-  }
-
-  let saved = 0;
-  for (const e of extracted) {
-    let embedding: number[] | undefined;
-    try { embedding = await getEmbedding(`${e.title} ${e.content} ${e.tags.join(' ')}`); } catch {}
-    await insertEntry({
-      id: nanoid(), projectId: project.id,
-      type: e.type, title: e.title.slice(0, 120), content: e.content,
-      tags: e.tags, embedding, createdAt: Date.now(), confidence: 'observation',
-      ...(e.category      ? { category: e.category as EntryCategory }   : {}),
-      ...(e.errorPattern  ? { errorPattern: e.errorPattern }            : {}),
-      ...(e.causeArchetype ? { causeArchetype: e.causeArchetype }       : {}),
-    });
-    saved++;
-  }
-
-  console.log(bar);
-  console.log(`  ${GREEN}✓${RESET} Saved ${BOLD}${saved}${RESET} entr${saved > 1 ? 'ies' : 'y'} to DevBrain\n`);
-}
 
 // ─── first-run onboarding ─────────────────────────────────────────────────────
 
 async function runOnboarding(): Promise<void> {
+  // The wizard is all prompts. Without a TTY (CI, a piped script, an agent
+  // shelling out) inquirer's readline closes on EOF and Node dies with an
+  // unhandled ERR_USE_AFTER_CLOSE, so print the manual path and stop instead.
+  if (!process.stdin.isTTY) {
+    console.log(`\n  ${YELLOW}Setup needs an interactive terminal.${RESET}\n`);
+    console.log(`  ${DIM}Nothing is required to start — memory defaults to ${RESET}${getLocalDbPath()}${DIM}.${RESET}`);
+    console.log(`  ${DIM}Commands that save and recall notes already work.${RESET}\n`);
+    console.log(`  Optional, in ${DIM}${envFilePath}${RESET}:`);
+    console.log(`    ${CYAN}GEMINI_API_KEY${RESET}=...              ${DIM}# semantic search instead of keywords${RESET}`);
+    console.log(`    ${CYAN}MONGODB_URI${RESET}=mongodb+srv://...   ${DIM}# optional — share memory across a team${RESET}\n`);
+    return;
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-explicit-any
   const _inq: any = require('inquirer');
   const inq = typeof _inq.prompt === 'function' ? _inq : _inq.default;
@@ -983,105 +1600,121 @@ async function runOnboarding(): Promise<void> {
   console.log(BANNER);
   console.log(`\n  ${BOLD}Welcome to DevBrain.${RESET} Let's get you set up — takes about 30 seconds.\n`);
 
-  // ── Stage 1: Gemini API key ───────────────────────────────────────────────
   const stageHeader = (n: number, total: number, label: string) =>
     `  ${BOLD}${CYAN}[${n}/${total}]${RESET}  ${BOLD}${label}${RESET}`;
 
-  console.log(stageHeader(1, 3, 'Gemini Credentials'));
-  console.log(`  ${DIM}Used for semantic search and auto-capture from commits.${RESET}`);
-  console.log(`  ${DIM}Vertex AI (Google Cloud) or a free key at https://aistudio.google.com${RESET}\n`);
+  // ── Stage 1: Storage ──────────────────────────────────────────────────────
+  // Local is the default so setup can't strand anyone. MongoDB is the upgrade
+  // you pick when you want a team to share one memory.
+  console.log(stageHeader(1, 3, 'Storage'));
 
-  const usingVertex = ['true', '1'].includes((process.env.GOOGLE_GENAI_USE_VERTEXAI ?? '').toLowerCase()) && !!process.env.GOOGLE_CLOUD_PROJECT;
-  const alreadyHasKey = !!process.env.GEMINI_API_KEY || usingVertex;
-  if (usingVertex) {
+  if (hasMongoUri()) {
+    console.log(`  ${GREEN}✓${RESET} MongoDB already configured ${DIM}(MONGODB_URI is set)${RESET}\n`);
+  } else {
+    const { store } = await inq.prompt([{
+      type: 'list', name: 'store', prefix: ' ',
+      message: 'Where should DevBrain keep your memory?',
+      choices: [
+        { name: `${GREEN}This machine${RESET}  ${DIM}a JSON file in ~/.devbrain — no setup, works now${RESET}`, value: 'local' },
+        { name: `${CYAN}MongoDB${RESET}       ${DIM}share one memory across a team or machines${RESET}`, value: 'mongo' },
+      ],
+    }]);
+
+    if (store === 'mongo') {
+      console.log(`\n  ${DIM}${RESET}${CYAN}https://cloud.mongodb.com${RESET}${DIM} → create a free cluster → Connect → copy the string${RESET}\n`);
+      const { uri } = await inq.prompt([{
+        type: 'password', name: 'uri', prefix: ' ',
+        message: 'Paste your MongoDB connection string (or press Enter to stay local):',
+        validate: (v: string) =>
+          !v?.trim() || /^mongodb(\+srv)?:\/\//.test(v.trim())
+            ? true
+            : 'That does not look like a connection string — it should start with mongodb:// or mongodb+srv://',
+      }]);
+      if (uri?.trim()) {
+        writeEnvVars({ MONGODB_URI: uri.trim() });
+        process.env.MONGODB_URI = uri.trim();
+        console.log(`  ${GREEN}✓${RESET} Saved to ${DIM}${envFilePath}${RESET}\n`);
+      } else {
+        console.log(`  ${DIM}Staying local — ${RESET}${CYAN}${getLocalDbPath()}${RESET}\n`);
+      }
+    } else {
+      console.log(`  ${GREEN}✓${RESET} Local storage — ${DIM}${getLocalDbPath()}${RESET}`);
+      console.log(`     ${DIM}Switch later by adding MONGODB_URI to ${envFilePath}${RESET}\n`);
+    }
+  }
+
+  // ── Stage 2: semantic search (optional) ───────────────────────────────────
+  // Nothing in DevBrain needs a model: the coding agent writes every entry and
+  // search matches keywords. A Gemini key only upgrades search to meaning.
+  console.log(stageHeader(2, 3, 'Semantic Search (optional)'));
+  console.log(`  ${DIM}DevBrain needs no AI — your coding agent writes every entry, and search matches keywords.${RESET}`);
+  console.log(`  ${DIM}A Gemini key adds semantic search: matching by meaning, not just words.${RESET}\n`);
+
+  if (isMockMode()) {
+    console.log(`  ${GREEN}✓${RESET} Mock mode (DEVBRAIN_MOCK=true) — no Gemini calls will be made\n`);
+  } else if (hasVertexCreds()) {
     console.log(`  ${GREEN}✓${RESET} Vertex AI configured (project ${process.env.GOOGLE_CLOUD_PROJECT})\n`);
-  } else if (alreadyHasKey) {
-    console.log(`  ${GREEN}✓${RESET} API key already set\n`);
+  } else if (hasGeminiCreds()) {
+    console.log(`  ${GREEN}✓${RESET} Gemini API key already set\n`);
   } else {
     const { apiKey } = await inq.prompt([{
       type: 'password',
       name: 'apiKey',
-      message: 'Paste your Gemini API key (or press Enter to skip):',
+      message: 'Gemini API key (press Enter to skip — you can add one later):',
       prefix: ' ',
     }]);
     if (apiKey?.trim()) {
-      if (!existsSync(devbrainDir)) mkdirSync(devbrainDir, { recursive: true });
-      writeFileSync(join(devbrainDir, '.env'), `GEMINI_API_KEY=${apiKey.trim()}\n`, 'utf-8');
+      writeEnvVars({ GEMINI_API_KEY: apiKey.trim() });
       process.env.GEMINI_API_KEY = apiKey.trim();
-      console.log(`  ${GREEN}✓${RESET} Saved to ~/.devbrain/.env\n`);
+      console.log(`  ${GREEN}✓${RESET} Saved to ${DIM}${envFilePath}${RESET}\n`);
     } else {
-      console.log(`  ${YELLOW}⚠${RESET}  Skipped — AI features disabled until you add a key to ~/.devbrain/.env\n`);
+      console.log(`  ${GREEN}✓${RESET} Keyword search ${DIM}— add GEMINI_API_KEY to ${envFilePath} anytime${RESET}\n`);
     }
   }
 
-  // ── Stage 2: Project registration ────────────────────────────────────────
-  console.log(stageHeader(2, 3, 'Register Current Project'));
-  const cwd      = process.cwd();
-  const repoRoot = getRepoRoot(cwd) ?? cwd;
-  const autoName = getProjectName(repoRoot);
-  const autoStack = detectStack(repoRoot);
+  // Settings are on disk, so this run counts as onboarded. Recorded before the
+  // stage that touches the database: if it is unreachable we must not relaunch
+  // this wizard on every invocation.
+  markOnboarded();
 
-  console.log(`  ${DIM}Detected: ${RESET}${BOLD}${autoName}${RESET}`);
-  if (autoStack.length) console.log(`  ${DIM}Stack:    ${autoStack.join(', ')}${RESET}`);
-  console.log();
+  // ── Stage 3: this project ─────────────────────────────────────────────────
+  // Exactly what `devbrain init` does — one implementation, not a second copy.
+  console.log(stageHeader(3, 3, 'This Project'));
+  const repoRoot = getRepoRoot(process.cwd()) ?? process.cwd();
+  console.log(`  ${DIM}Detected: ${RESET}${BOLD}${getProjectName(repoRoot)}${RESET}  ${DIM}${repoRoot}${RESET}\n`);
 
   const { regProject } = await inq.prompt([{
     type: 'confirm', name: 'regProject',
-    message: `Register "${autoName}"?`,
+    message: 'Set up DevBrain for this project?',
     default: true, prefix: ' ',
   }]);
-
   if (regProject) {
-    const existing = await getProjectByPath(repoRoot);
-    await upsertProject({
-      id: existing?.id ?? nanoid(), name: autoName, path: repoRoot,
-      stack: autoStack, createdAt: existing?.createdAt ?? Date.now(), lastSeen: Date.now(),
-    });
-    console.log(`  ${GREEN}✓${RESET} Project registered\n`);
+    await handleInit();
   } else {
-    console.log(`  ${DIM}Skipped — use /init anytime to register a project${RESET}\n`);
-  }
-
-  // ── Stage 3: Git hook ─────────────────────────────────────────────────────
-  console.log(stageHeader(3, 3, 'Auto-capture from Git'));
-  console.log(`  ${DIM}After every commit, DevBrain extracts bugs, fixes, and lessons automatically.${RESET}\n`);
-
-  if (!isGitRepo(repoRoot)) {
-    console.log(`  ${YELLOW}⚠${RESET}  Not a git repo — skipping hook install\n`);
-  } else if (isHookInstalled(repoRoot)) {
-    console.log(`  ${GREEN}✓${RESET} Git hook already installed\n`);
-  } else {
-    const { doHook } = await inq.prompt([{
-      type: 'confirm', name: 'doHook',
-      message: 'Install post-commit hook?',
-      default: true, prefix: ' ',
-    }]);
-    if (doHook) {
-      installGitHook(repoRoot);
-      console.log(`  ${GREEN}✓${RESET} Hook installed — commits captured automatically\n`);
-    } else {
-      console.log(`  ${DIM}Skipped — use /init anytime to install the hook${RESET}\n`);
-    }
+    console.log(`  ${DIM}Skipped — run ${RESET}${CYAN}devbrain init${RESET}${DIM} in any project to set it up.${RESET}\n`);
   }
 
   // ── Done ──────────────────────────────────────────────────────────────────
-  const W   = Math.min(process.stdout.columns || 80, 80);
+  const W = Math.min(process.stdout.columns || 80, 80);
+  const storage = describeStorage();
   console.log(`${DIM}${'─'.repeat(W)}${RESET}`);
   console.log(`\n  ${GREEN}${BOLD}DevBrain is ready.${RESET}\n`);
 
   console.log(`  ${BOLD}Where your data lives${RESET}`);
-  console.log(`  ${DIM}Database  ${RESET}MongoDB Atlas (MONGODB_URI in ${join(devbrainDir, '.env')})`);
-  console.log(`  ${DIM}Exports   ${RESET}${join(devbrainDir, '<project>-export.zip')}`);
-  console.log(`  ${DIM}API key   ${RESET}${join(devbrainDir, '.env')}\n`);
+  console.log(`  ${DIM}Memory    ${RESET}${storage.location}${storage.kind === 'local' ? ` ${DIM}(local)${RESET}` : ''}`);
+  console.log(`  ${DIM}Config    ${RESET}${envFilePath}\n`);
+
+  if (!hasGeminiCreds()) {
+    console.log(`  ${DIM}Search matches keywords. For semantic search, add GEMINI_API_KEY to ${envFilePath}.${RESET}\n`);
+  }
 
   console.log(`  ${BOLD}Quick reference${RESET}`);
   console.log(`  ${CYAN}bug: <text>${RESET}   save a bug instantly`);
   console.log(`  ${CYAN}fix: <text>${RESET}   save a fix instantly`);
-  console.log(`  ${CYAN}/<command>${RESET}    type / to see all commands\n`);
+  console.log(`  ${CYAN}/<command>${RESET}    type / to see all commands`);
+  console.log(`  ${CYAN}devbrain setup${RESET} re-run this wizard anytime\n`);
 
   console.log(`${DIM}${'─'.repeat(W)}${RESET}\n`);
-
-  markOnboarded();
 
   let goNow = true;
   try {
@@ -1099,17 +1732,14 @@ async function runOnboarding(): Promise<void> {
 // ─── interactive REPL ────────────────────────────────────────────────────────
 
 const COMMANDS = [
-  { value: '/search',  desc: 'Semantic search across all projects'                },
-  { value: '/context', desc: 'Inject ranked context for AI agents'                },
+  { value: '/search',  desc: 'Search memory — exact error text works best'        },
+  { value: '/context', desc: 'Ranked project history, as an agent sees it'         },
+  { value: '/project', desc: 'Everything saved about this project'                },
   { value: '/browse',  desc: 'Scroll through all saved entries'                   },
-  { value: '/save',    desc: 'Save entry  (bug: fix: stack: decision: image: ...)'},
+  { value: '/save',    desc: 'Save entry  (fix: decision: lesson: bug: stack: ...)'},
   { value: '/delete',  desc: 'Delete an entry'                                    },
-  { value: '/recap',   desc: 'AI-extract + save knowledge from a session'         },
-  { value: '/prompt',  desc: 'Generate agent DEV_CONTEXT.md + ingestion prompt'  },
-  { value: '/summary', desc: 'Project name, stack and recent entries'             },
-  { value: '/export',  desc: 'Export knowledge to zip file'                       },
-  { value: '/open',    desc: 'Open ~/.devbrain folder in file explorer'           },
-  { value: '/init',    desc: 'Register project + install git hook'                },
+  { value: '/backfill',desc: 'Unreviewed commits and sessions, for your agent'    },
+  { value: '/init',    desc: 'Register this project + Claude Code hooks'          },
   { value: '/clear',   desc: 'Clear the screen'                                   },
   { value: '/exit',    desc: 'Quit DevBrain'                                      },
 ];
@@ -1146,12 +1776,9 @@ async function runCommand(cmd: string, arg: string, inquirer: unknown): Promise<
       break;
     }
     case '/delete':  await handleDelete(inq);  break;
-    case '/summary': await handleSummary();    break;
-    case '/export':  await handleExport();     break;
-    case '/prompt':  await handlePrompt();     break;
-    case '/recap':   await handleRecap();      break;
-    case '/open':    await handleOpen();       break;
+    case '/backfill': await handleBackfill(arg ? arg.split(/\s+/) : []); break;
     case '/init':    await handleInit();       break;
+    case '/project': await handleProject(arg || undefined); break;
     case '/browse':  await handleBrowse(inq);  break;
     case '/clear':   clr(); await printProjectContext(); break;
     case '/exit': case '/quit':
@@ -1179,11 +1806,16 @@ async function handleInteractive(): Promise<void> {
 
   let entryPool = await getAllEntriesWithProjects();
 
-  // eslint-disable-next-line no-constant-condition
-  // bottom border is always the first dropdown item so both lines are
-  // visible while the user is typing — top line (console.log) + input +
-  // bottom line (first item) = bordered input box, same as terminal agents
-  const botSep = { name: sep, value: '__sep__', short: '' };
+  // The bottom border is the first dropdown row so both lines frame the input
+  // while typing — top line (console.log) + input + bottom line = a bordered
+  // box, like other terminal agents.
+  //
+  // It MUST be an inquirer Separator, not a choice. As a plain choice it was the
+  // first *selectable* row, so Enter submitted the border instead of the command
+  // you typed — the action was there but you had to arrow past the border to
+  // reach it. Separators are excluded from selection, so the real action is
+  // highlighted first and Enter fires it directly.
+  const botSep = new inquirer.Separator(sep);
 
   while (true) {
     let submitted: string;
@@ -1209,6 +1841,26 @@ async function handleInteractive(): Promise<void> {
 
           // slash → bottom border + matching command list
           if (t.startsWith('/')) {
+            // "/search auth token" — a command with an argument. Offer it verbatim
+            // so Enter runs it with the argument, rather than matching nothing and
+            // falling back to the full list (which silently dropped the argument).
+            const spaceAt = t.indexOf(' ');
+            if (spaceAt > 0) {
+              const name = t.slice(0, spaceAt);
+              const rest = t.slice(spaceAt + 1).trim();
+              const known = COMMANDS.find(c => c.value === name);
+              if (known && rest) {
+                return [
+                  botSep,
+                  {
+                    name:  `${CYAN}${name}${RESET} ${rest.slice(0, 50)}  ${DIM}${known.desc}${RESET}`,
+                    value: `__cmd__${name} ${rest}`,
+                    short: t,
+                  },
+                ];
+              }
+            }
+
             const list = t === '/' ? COMMANDS : COMMANDS.filter(c => c.value.startsWith(t));
             return [
               botSep,
@@ -1250,6 +1902,12 @@ async function handleInteractive(): Promise<void> {
 
     if (!submitted || submitted === '__hint__' || submitted === '__sep__') continue;
 
+    // Normalize: typing a /command and pressing Enter submits the raw string.
+    // Wrap it so it goes through the same dispatch path as a selected item.
+    if (submitted.startsWith('/') && !submitted.startsWith('__')) {
+      submitted = `__cmd__${submitted}`;
+    }
+
     if (submitted.startsWith('__cmd__')) {
       const cmd = submitted.slice(7);
       const sp  = cmd.indexOf(' ');
@@ -1278,36 +1936,90 @@ async function main(): Promise<void> {
 
   try {
     switch (command) {
+      case 'setup':   await runOnboarding();                       break;
       case 'init':    await handleInit();                          break;
-      case 'capture': await handleCapture();                       break;
+      case 'note': {
+        const rest = args.slice(1);
+        const flags = new Set(['--error', '--category', '--tags']);
+        // Keep only the words that are not a flag or a flag's value, so the
+        // note text can still be given unquoted.
+        const words = rest.filter((a, i) => !flags.has(a) && !flags.has(rest[i - 1] ?? ''));
+        await handleNote(words.join(' '), undefined, {
+          error: flag(rest, '--error'),
+          category: flag(rest, '--category'),
+          tags: flag(rest, '--tags'),
+        });
+        break;
+      }
       case 'search':  await handleSearch(args.slice(1).join(' ')); break;
-      case 'note':    await handleNote(args.slice(1).join(' '));   break;
-      case 'summary': await handleSummary();                                        break;
-      case 'export':  await handleExport();                                         break;
-      case 'prompt':  await handlePrompt();                                         break;
-      case 'recap':   await handleRecap(args.slice(1).join(' ') || undefined);      break;
-      case 'open':    await handleOpen();                                            break;
-      case 'context': await handleContext(args.slice(1).join(' ') || undefined);    break;
+      case 'context': await handleContext(args.slice(1).join(' ') || undefined); break;
+      case 'project': case 'projects': {
+        const rest  = args.slice(1).filter(a => a !== '--write');
+        const write = args.includes('--write');
+        await handleProject(rest.join(' ') || undefined, { write });
+        break;
+      }
+      case 'run':     await handleRun(args.slice(1));              break;
+      case 'index': {
+        const rest = args.slice(1);
+        await handleIndex(rest.find(a => !a.startsWith('--')), { force: rest.includes('--force') });
+        break;
+      }
+      case 'backfill': await handleBackfill(args.slice(1));        break;
+      case 'hooks':   await handleHooks(args.slice(1));            break;
+      // Called by Claude Code, not by people. Never fails.
+      case 'hook':    await handleHook(args[1] ?? '');             break;
       case 'help': case '--help': case '-h':
-        console.log(`\n${BOLD}${CYAN}DevBrain${RESET} — your developer memory\n`);
-        console.log(`  ${CYAN}devbrain${RESET}               Interactive REPL`);
-        console.log(`  ${CYAN}devbrain init${RESET}          Register project + install git hook`);
-        console.log(`  ${CYAN}devbrain search${RESET} ${MAGENTA}<q>${RESET}    Semantic search`);
-        console.log(`  ${CYAN}devbrain note${RESET} ${MAGENTA}"<t>"${RESET}   Save  ${DIM}(bug: fix: stack: decision: image:...)${RESET}`);
-        console.log(`  ${CYAN}devbrain export${RESET}        Export knowledge to zip`);
-        console.log(`  ${CYAN}devbrain prompt${RESET}        Generate DEV_CONTEXT.md block + ingestion prompt`);
-        console.log(`  ${CYAN}devbrain recap${RESET}         AI-extract + save knowledge from a session`);
-        console.log(`  ${CYAN}devbrain open${RESET}          Open ~/.devbrain in file explorer\n`);
+        console.log(`\n${BOLD}${CYAN}DevBrain${RESET} — memory your coding agent writes, and reads back\n`);
+        console.log(`  ${BOLD}Set up${RESET}`);
+        console.log(`  ${CYAN}devbrain setup${RESET}            Storage, optional semantic search, this project`);
+        console.log(`  ${CYAN}devbrain init${RESET}             Register a project + Claude Code hooks`);
+        console.log(`  ${CYAN}devbrain hooks${RESET} ${MAGENTA}[install]${RESET}  Brief sessions and prompt the agent to save ${DIM}(--global)${RESET}`);
+        console.log(`\n  ${BOLD}Write${RESET}`);
+        console.log(`  ${CYAN}devbrain note${RESET} ${MAGENTA}"<t>"${RESET}       Save  ${DIM}fix: decision: lesson: bug: stack: …${RESET}`);
+        console.log(`  ${CYAN}devbrain backfill${RESET} ${MAGENTA}[n]${RESET}    Unreviewed commits and sessions, for your agent to save from`);
+        console.log(`  ${CYAN}devbrain index${RESET} ${MAGENTA}[file]${RESET}     Index CLAUDE.md as a source of truth`);
+        console.log(`\n  ${BOLD}Read${RESET}`);
+        console.log(`  ${CYAN}devbrain context${RESET} ${MAGENTA}[task]${RESET}  Ranked project history, as an agent sees it`);
+        console.log(`  ${CYAN}devbrain search${RESET} ${MAGENTA}<q>${RESET}       Search — exact error text works best`);
+        console.log(`  ${CYAN}devbrain project${RESET} ${MAGENTA}[n]${RESET}      Everything saved about a project ${DIM}(--write: one .md per section)${RESET}`);
+        console.log(`  ${CYAN}devbrain run${RESET} ${MAGENTA}<cmd>${RESET}        Run a command; on failure, show past fixes`);
+        console.log(`\n  ${CYAN}devbrain${RESET}                  Interactive REPL`);
+        console.log(`\n  ${DIM}Set DEVBRAIN_DEBUG=1 to see full stack traces on error.${RESET}\n`);
         break;
       default:
-        if (!isOnboarded()) await runOnboarding();
+        if (command && !command.startsWith('-')) {
+          console.log(`\n  ${RED}Unknown command:${RESET} ${command}`);
+          console.log(`  ${DIM}Run ${RESET}${CYAN}devbrain --help${RESET}${DIM} to see what's available.${RESET}\n`);
+          process.exit(1);
+        }
+        if (!isOnboarded()) {
+          await runOnboarding();
+          if (!isOnboarded()) process.exit(1);   // setup skipped or non-interactive
+        }
+        if (!process.stdin.isTTY) {
+          console.log(`\n  ${YELLOW}The DevBrain REPL needs an interactive terminal.${RESET}`);
+          console.log(`  ${DIM}Non-interactively, use ${RESET}${CYAN}devbrain context${RESET}${DIM}, ${RESET}${CYAN}devbrain search${RESET}${DIM} or ${RESET}${CYAN}devbrain note${RESET}${DIM}.${RESET}\n`);
+          process.exit(1);
+        }
         await handleInteractive();
         break;
     }
   } catch (err: unknown) {
-    if (err instanceof Error) console.error(`\n${RED}Error:${RESET} ${err.message}\n`);
+    reportError(err);
+    await closeDb();
     process.exit(1);
   }
+
+  // An open MongoClient holds the event loop open, so a one-shot command would
+  // print its result and then sit there until killed. Release it and exit.
+  await closeDb();
 }
 
-main();
+// Only run the CLI when this file is the process entry point. Calling main() at
+// import time meant the whole CLI executed — and could call process.exit — as a
+// side effect of importing any helper from this module, which made the file
+// impossible to unit test.
+if (require.main === module) {
+  main();
+}

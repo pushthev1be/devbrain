@@ -5,7 +5,9 @@
   "types": "./dist/index.d.ts",
   "scripts": {
     "build": "tsc",
-    "dev": "tsc --watch"
+    "dev": "tsc --watch",
+    "test": "vitest run --reporter=verbose",
+    "test:watch": "vitest --reporter=verbose"
   },
   "dependencies": {
     "@google/genai": "^1.52.0",
