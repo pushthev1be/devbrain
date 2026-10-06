@@ -9,7 +9,8 @@
     "dev": "npm run dev -w packages/cli",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "icons": "node scripts/gen-stack-icons.mjs"
   },
   "dependencies": {
     "@google/adk": "^1.1.0"

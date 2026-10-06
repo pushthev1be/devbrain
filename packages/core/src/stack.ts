@@ -29,6 +29,20 @@ const FRAMEWORK_MAP: Record<string, string> = {
   socket: 'Socket.io',
 };
 
+/** Labels detectStack adds from a file rather than a dependency. */
+const FILE_SIGNAL_LABELS = ['Node.js', 'Rust', 'Go', 'Java', 'Ruby', 'Python', 'C#/.NET'] as const;
+
+/**
+ * Every label detectStack can produce.
+ *
+ * Exported so the thing that draws stack marks can be checked against it
+ * rather than against a second hand-written list. The first version of that
+ * list was already missing tRPC, GraphQL and Socket.io on the day it was
+ * written, and nothing said so — the marks just did not appear.
+ */
+export const ALL_STACK_LABELS: readonly string[] =
+  [...new Set([...FILE_SIGNAL_LABELS, ...Object.values(FRAMEWORK_MAP)])].sort();
+
 export function detectStack(projectPath: string): string[] {
   const stack: string[] = [];
 
