@@ -20,6 +20,7 @@
 // attributes instead, so no escaping is ever required.
 
 import { ICON_PATHS } from './icons';
+import { STACK_ICONS } from './stackIcons';
 import { ENTRY_TYPES } from '@devbrain/core';
 
 export const HTML_DASHBOARD = `<!DOCTYPE html>
@@ -169,6 +170,15 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
       body[data-sidebar="collapsed"] .sidebar-group-label,
       body[data-sidebar="collapsed"] .sidebar-collapse-hide { display: none; }
       body[data-sidebar="collapsed"] .sidebar-menu-button { justify-content: center; gap: 0; padding: 7px 0; }
+      /* Collapsed, a project is just its folder. The stack row and the count
+         have nowhere to go in a 52px rail and were spilling past its edge. */
+      body[data-sidebar="collapsed"] .pstack-row,
+      body[data-sidebar="collapsed"] .sidebar-menu-badge { display: none; }
+      /* The toggle stays. A control that collapses the panel and then vanishes
+         makes the action one-way, leaving only the hairline rail to undo it. */
+      body[data-sidebar="collapsed"] .sidebar-toggle { position: static; margin: 0 auto; }
+      body[data-sidebar="collapsed"] .sidebar-menu-button.proj { align-items: center; }
+      body[data-sidebar="collapsed"] .proj-main { flex: 0 0 auto; }
       body[data-sidebar="collapsed"] .sidebar-brand,
       body[data-sidebar="collapsed"] .sidebar-footer { justify-content: center; }
       body[data-sidebar="collapsed"] .sidebar-header,
@@ -347,6 +357,27 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
     .sidebar-icon svg { width: 13px; height: 13px; }
     .sidebar-search span { flex: 1; }
     .sidebar-search kbd { font-family: var(--mono); font-size: 10px; color: var(--text3); border: 1px solid var(--border2); border-radius: 3px; padding: 0 4px; }
+    /* The toggle sits above the brand: removing the topbar took the old
+       trigger with it and left only the hairline rail, which nobody finds. A
+       keyboard shortcut is not an affordance. */
+    .sidebar-toggle { position: absolute; top: var(--s3); right: var(--s3); width: 24px; height: 24px; display: grid; place-items: center; padding: 0; background: none; border: 1px solid transparent; border-radius: var(--r1); color: var(--text3); cursor: pointer; }
+    .sidebar-toggle:hover { color: var(--text); background: var(--surface2); border-color: var(--border); }
+    .sidebar-toggle svg { width: 15px; height: 15px; }
+    .sidebar-header { position: relative; }
+
+    /* A project is two lines: what it is called, and what it is made of. */
+    .sidebar-menu-button.proj { align-items: flex-start; }
+    .proj-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+    .proj-top { display: flex; align-items: center; gap: var(--s2); min-width: 0; }
+    .proj-top .sidebar-menu-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+    .pstack-row { display: flex; align-items: center; gap: 5px; }
+    /* Dimmed until the project is the one being read: at full strength, five
+       brand colours per row turn the panel into a sticker album. */
+    .smark { display: inline-flex; width: 12px; height: 12px; opacity: .55; transition: opacity var(--fast); }
+    .smark svg { width: 12px; height: 12px; display: block; }
+    .sidebar-menu-button:hover .smark,
+    .sidebar-menu-button[data-active="true"] .smark { opacity: 1; }
+
     .sfoot { display: flex; align-items: center; gap: 7px; font-family: var(--mono); font-size: 10px; color: var(--text3); line-height: 1.7; }
     .sfoot .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text3); flex: 0 0 6px; }
     .sfoot.ok .dot { background: var(--green); }
@@ -519,6 +550,7 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
   <div class="layout">
     <aside class="sidebar" id="sidebar" data-collapsible="icon">
       <div class="sidebar-header">
+        <button class="sidebar-toggle" data-act="toggle-sidebar" title="Toggle sidebar (Ctrl+B)" aria-label="Toggle sidebar" data-icon="panel"></button>
         <div class="sidebar-brand">
           <span class="sidebar-mark" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
@@ -650,9 +682,29 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
 
     // A collapsed panel shows icons only, and a project has no icon, so it gets
     // the first two letters of its name — enough to tell projects apart.
-    function monogram(name) {
-      var letters = String(name || '').replace(/[^A-Za-z0-9]/g, '');
-      return letters.slice(0, 2) || '?';
+    // Stack marks are fill-based on a 24x24 box, unlike Lucide's stroked
+    // icons, so they get their own wrapper rather than sharing icon().
+    var STACKS = ${JSON.stringify(STACK_ICONS)};
+    var STACK_ORDER = { lang: 0, frontend: 1, backend: 2, data: 3, build: 4 };
+
+    /**
+     * The stack as a row of marks, ordered language first.
+     *
+     * Capped at five. A project with nine dependencies worth naming would
+     * otherwise push the row wider than the panel, and the first few are the
+     * ones that say what kind of thing it is.
+     */
+    function stackRow(stack) {
+      var known = (stack || [])
+        .filter(function (n) { return STACKS[n]; })
+        .sort(function (a, b) { return STACK_ORDER[STACKS[a].role] - STACK_ORDER[STACKS[b].role]; })
+        .slice(0, 5);
+      if (!known.length) return '';
+      return '<span class="pstack-row">' + known.map(function (n) {
+        var ic = STACKS[n];
+        return '<span class="smark" style="color:' + esc(ic.color) + '" title="' + esc(n) + '">' +
+          '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' + ic.d + '</svg></span>';
+      }).join('') + '</span>';
     }
 
     async function loadProjects() {
@@ -665,15 +717,23 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
           return;
         }
         box.innerHTML = STATE.projects.map(function (p) {
+          // A folder reads as "a project" instantly; two letters of its name
+          // read as nothing until you have learnt them.
           return '<li class="sidebar-menu-item">' +
-                 '<button class="sidebar-menu-button" data-project="' + esc(p.id) + '"' +
+                 '<button class="sidebar-menu-button proj" data-project="' + esc(p.id) + '"' +
                  (p.id === STATE.projectId ? ' data-active="true"' : '') +
                  ' title="' + esc(p.name) + ' &mdash; ' + esc(p.path) + '">' +
-                 '<span class="sidebar-icon">' + esc(monogram(p.name)) + '</span>' +
-                 '<span class="sidebar-menu-label">' + esc(p.name) + '</span>' +
-                 '<span class="sidebar-menu-badge">' + p.total + '</span>' +
+                 '<span class="sidebar-icon" data-icon="folder"></span>' +
+                 '<span class="proj-main">' +
+                   '<span class="proj-top">' +
+                     '<span class="sidebar-menu-label">' + esc(p.name) + '</span>' +
+                     '<span class="sidebar-menu-badge">' + p.total + '</span>' +
+                   '</span>' +
+                   stackRow(p.stack) +
+                 '</span>' +
                  '</button></li>';
         }).join('');
+        paintShellIcons();
         if (!STATE.projectId) selectProject(STATE.projects[0].id);
       } catch (e) {
         box.innerHTML = fail('could not load projects', e.message);

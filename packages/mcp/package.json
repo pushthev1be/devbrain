@@ -20,6 +20,7 @@
   "devDependencies": {
     "@types/node": "^20.0.0",
     "lucide-static": "^1.52.0",
+    "simple-icons": "^16.34.0",
     "typescript": "^5.0.0"
   }
 }
