@@ -83,6 +83,18 @@ describe('projects', () => {
     expect(all[0]).toMatchObject({ id: 'p2', name: 'new' });
   });
 
+  // VS Code hands hooks `c:\…`; Node and the CLI store `C:\…`. Compared as
+  // written, a registered project was invisible to every hook the editor ran.
+  it('finds a Windows project whatever the drive-letter case or slash style', async () => {
+    await upsertProject(project({ path: 'C:\\Users\\me\\repo' }));
+    expect(await getProjectByPath('c:\\Users\\me\\repo')).toMatchObject({ id: 'p1' });
+    expect(await getProjectByPath('C:/Users/me/repo/')).toMatchObject({ id: 'p1' });
+    await upsertProject(project({ id: 'p2', path: 'c:\\Users\\me\\repo\\' }));
+    const all = await getAllProjects();
+    expect(all).toHaveLength(1);
+    expect(all[0]).toMatchObject({ id: 'p2', path: 'C:\\Users\\me\\repo' });
+  });
+
   it('sorts getAllProjects by lastSeen descending', async () => {
     await upsertProject(project({ id: 'a', path: '/a', lastSeen: 100 }));
     await upsertProject(project({ id: 'b', path: '/b', lastSeen: 300 }));

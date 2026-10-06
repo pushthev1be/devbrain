@@ -1,5 +1,6 @@
 export * from './types';
 export * from './db';
+export * from './projectPath';
 export * from './gemini';
 export * from './stack';
 export * from './git';

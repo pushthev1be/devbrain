@@ -62,6 +62,14 @@ describe('agent hook settings', () => {
     expect(groups[0].hooks[0].command).toContain('hook post-tool');
   });
 
+  // Claude Code sends a failed tool call to PostToolUseFailure, never to
+  // PostToolUse — without this, a failing command could not trigger recall.
+  it('installs PostToolUseFailure for every tool, to the same handler', () => {
+    const groups = withDevbrainHooks({}).hooks!.PostToolUseFailure;
+    expect(groups.map(g => g.matcher)).toEqual(['*']);
+    expect(groups[0].hooks[0].command).toContain('hook post-tool');
+  });
+
   // Widening is only safe because the tools whose output is file content are
   // dropped: source code is full of the word Error.
   it('excludes the tools whose output is source rather than a result', () => {

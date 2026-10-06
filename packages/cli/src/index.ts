@@ -26,6 +26,7 @@ import {
   looksLikeError, isReadOnlyCommand, isEchoedOutput, isGenericFailureLine, recallForFailure, formatRecallForAgent,
   withDevbrainHooks, withoutDevbrainHooks, installedDevbrainHooks,
   nextSessionChunk, formatBackfillBatch, commitExcerpt, BACKFILL_BATCH_BUDGET,
+  sameProjectPath,
 } from '@devbrain/core';
 import type { Entry, Project, EntryCategory } from '@devbrain/core';
 import { nanoid } from 'nanoid';
@@ -451,7 +452,7 @@ async function unreviewedCommits(repoRoot: string): Promise<string[]> {
 async function cleanStaleGitHooks(skip?: string): Promise<string[]> {
   const cleaned: string[] = [];
   for (const p of await getAllProjects().catch(() => [])) {
-    if (p.path === skip) continue;
+    if (skip !== undefined && sameProjectPath(p.path, skip)) continue;
     try { if (removeGitHook(p.path)) cleaned.push(p.name); } catch { /* unreadable repo */ }
   }
   return cleaned;
@@ -691,16 +692,19 @@ async function handleHook(event: string): Promise<void> {
       const toolName = typeof input.tool_name === 'string' ? input.tool_name : '';
       if (isFileTool(toolName)) return;
 
-      const output = typeof input.tool_output === 'string'
-        ? input.tool_output
-        : JSON.stringify(input.tool_output ?? '');
+      // Installed for both PostToolUse and PostToolUseFailure; the reply must
+      // name the event it answers or Claude Code drops the context.
+      const failedCall = input.hook_event_name === 'PostToolUseFailure';
+      // A tool call the user interrupted is not a failure worth recalling for.
+      if (failedCall && input.is_interrupt === true) return;
+      const output = toolOutputText(input);
       const command = String((input.tool_input as { command?: unknown } | undefined)?.command ?? '');
 
       // Decided before touching the database: most commands succeed, and a
       // hook that runs after every one of them must cost nothing when idle.
       // The echo check matters most here: DevBrain's own recall message quotes
       // the error it matched, so without it one failure could recall itself.
-      if (!looksLikeError(output, false)
+      if (!looksLikeError(output, failedCall)
         || isReadOnlyCommand(command)
         || isEchoedOutput(output, command)) return;
       const failure = extractFailure(output);
@@ -739,7 +743,10 @@ async function handleHook(event: string): Promise<void> {
       await bumpRecallCounts(recalled, { query: failure, sessionId }).catch(() => {});
       captureLog(`${project.name} ${sessionId.slice(0, 8)}: recalled ${hits.length} for "${clip(failure, 60)}"`);
       process.stdout.write(JSON.stringify({
-        hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: message },
+        hookSpecificOutput: {
+          hookEventName: failedCall ? 'PostToolUseFailure' : 'PostToolUse',
+          additionalContext: message,
+        },
       }));
       return;
     }
@@ -970,6 +977,33 @@ const ERROR_SIGNALS: RegExp[] = [
   /\b(failed|failure|cannot|could not|unable to)\b.*/i,
   /\b(assert|expected .* (to|but)|✕|✗|FAIL)\b.*/i,
 ];
+
+/**
+ * The text a tool call produced, from a PostToolUse or PostToolUseFailure event.
+ *
+ * Claude Code puts a result in `tool_response` (for Bash, an object holding
+ * stdout and stderr) and a failure in `error`. This read only `tool_output`, a
+ * field Claude Code never sends, so every output arrived as '""', nothing ever
+ * looked like an error, and the hook stayed silent while the matching entry sat
+ * in memory. `tool_output` is still read for any harness that does send it.
+ */
+export function toolOutputText(input: Record<string, unknown>): string {
+  const parts: string[] = [];
+  const add = (v: unknown) => {
+    if (v === undefined || v === null || v === '') return;
+    if (typeof v === 'string') { parts.push(v); return; }
+    const o = v as { stdout?: unknown; stderr?: unknown };
+    if (typeof o === 'object' && (typeof o.stdout === 'string' || typeof o.stderr === 'string')) {
+      for (const s of [o.stdout, o.stderr]) if (typeof s === 'string' && s) parts.push(s);
+      return;
+    }
+    parts.push(JSON.stringify(v));
+  };
+  add(input.error);
+  add(input.tool_response);
+  add(input.tool_output);
+  return parts.join('\n');
+}
 
 /**
  * Pick the line most likely to be the actual failure.
@@ -1411,7 +1445,7 @@ async function handleProject(nameArg?: string, opts: { write?: boolean } = {}): 
     }
     project = matches[0];
   } else {
-    project = projects.find(p => p.path === repoRoot) ?? null;
+    project = projects.find(p => sameProjectPath(p.path, repoRoot)) ?? null;
     if (!project) {
       console.log(`\n  ${YELLOW}This directory isn't a registered project.${RESET}\n`);
       console.log(`  ${DIM}Run ${RESET}${CYAN}devbrain init${RESET}${DIM} here, or name one:${RESET}`);

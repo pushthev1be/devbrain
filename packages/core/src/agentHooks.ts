@@ -53,7 +53,7 @@ export function briefingEntries<T extends Entry>(all: T[], projectId?: string): 
   return all.filter(e => !isAlreadyInAgentContext(e, projectId));
 }
 
-export const HOOK_EVENTS = ['SessionStart', 'UserPromptSubmit', 'PostToolUse', 'Stop'] as const;
+export const HOOK_EVENTS = ['SessionStart', 'UserPromptSubmit', 'PostToolUse', 'PostToolUseFailure', 'Stop'] as const;
 export type HookEvent = typeof HOOK_EVENTS[number];
 
 const HOOK_ARG: Record<HookEvent, string> = {
@@ -63,6 +63,11 @@ const HOOK_ARG: Record<HookEvent, string> = {
   // late: most work begins with a sentence, not a stack trace.
   UserPromptSubmit: 'user-prompt',
   PostToolUse: 'post-tool',
+  // Claude Code does not send a failed tool call to PostToolUse at all: a Bash
+  // command that exits non-zero arrives here, with its output in `error`. With
+  // only PostToolUse installed, the one moment recall exists for — a command
+  // failing with an error memory already holds — never reached DevBrain.
+  PostToolUseFailure: 'post-tool',
   Stop: 'stop',
 };
 
@@ -130,7 +135,7 @@ export function withDevbrainHooks(settings: Settings, binary = 'devbrain'): Sett
       // output even looks like a failure.
       timeout: 20,
     };
-    const groups: HookGroup[] = event === 'PostToolUse'
+    const groups: HookGroup[] = event === 'PostToolUse' || event === 'PostToolUseFailure'
       ? POST_TOOL_MATCHERS.map(matcher => ({ matcher, hooks: [handler] }))
       : [{ hooks: [handler] }];
     hooks[event] = [...(hooks[event] ?? []), ...groups];

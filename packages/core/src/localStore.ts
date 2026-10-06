@@ -17,6 +17,7 @@ import { homedir } from 'os';
 import type { Entry, Project } from './types';
 import { RECALL_LOG_MAX } from './types';
 import { cosineSimilarity } from './search';
+import { normalizeProjectPath, sameProjectPath } from './projectPath';
 
 interface ProcessedCommit {
   hash: string;
@@ -86,15 +87,16 @@ function projectFor(projects: Project[], projectId: string): Project {
 // ── projects ──────────────────────────────────────────────────────────────────
 
 export async function upsertProject(project: Project): Promise<void> {
+  const stored = { ...project, path: normalizeProjectPath(project.path) };
   mutate(data => {
-    const idx = data.projects.findIndex(p => p.path === project.path);
-    if (idx === -1) data.projects.push(project);
-    else data.projects[idx] = project;
+    const idx = data.projects.findIndex(p => sameProjectPath(p.path, stored.path));
+    if (idx === -1) data.projects.push(stored);
+    else data.projects[idx] = stored;
   });
 }
 
 export async function getProjectByPath(path: string): Promise<Project | null> {
-  return read().projects.find(p => p.path === path) ?? null;
+  return read().projects.find(p => sameProjectPath(p.path, path)) ?? null;
 }
 
 export async function getAllProjects(): Promise<Project[]> {

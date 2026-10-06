@@ -4,6 +4,7 @@ import { homedir } from 'os';
 import type { Entry, Project } from './types';
 import { RECALL_LOG_MAX } from './types';
 import * as local from './localStore';
+import { normalizeProjectPath } from './projectPath';
 
 export { getLocalDbPath } from './localStore';
 
@@ -74,14 +75,28 @@ function strip<T>(doc: Record<string, unknown>): T {
 export async function upsertProject(project: Project): Promise<void> {
   if (useLocal()) return local.upsertProject(project);
   const db = await getDb();
-  await db.collection('projects').replaceOne({ path: project.path }, project, { upsert: true });
+  const stored = { ...project, path: normalizeProjectPath(project.path) };
+  // Matching every spelling replaces a record saved before paths were
+  // normalized, rather than leaving it beside the new one.
+  await db.collection('projects').replaceOne({ path: { $in: pathSpellings(project.path) } }, stored, { upsert: true });
 }
 
 export async function getProjectByPath(path: string): Promise<Project | null> {
   if (useLocal()) return local.getProjectByPath(path);
   const db = await getDb();
-  const doc = await db.collection('projects').findOne({ path });
+  const doc = await db.collection('projects').findOne({ path: { $in: pathSpellings(path) } });
   return doc ? strip<Project>(doc as Record<string, unknown>) : null;
+}
+
+/**
+ * The ways one project path may already be stored: normalized, as given, and —
+ * on Windows — with a lowercase drive letter, which is how records written
+ * before normalization from an editor's cwd look.
+ */
+function pathSpellings(path: string): string[] {
+  const norm = normalizeProjectPath(path);
+  const lowerDrive = /^[A-Z]:/.test(norm) ? norm[0].toLowerCase() + norm.slice(1) : norm;
+  return [...new Set([norm, path, lowerDrive])];
 }
 
 export async function getAllProjects(): Promise<Project[]> {
