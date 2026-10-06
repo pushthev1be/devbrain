@@ -19,6 +19,7 @@
 // early and killed the entire script block. Clicks are delegated from data
 // attributes instead, so no escaping is ever required.
 
+import { ICON_PATHS } from './icons';
 import { ENTRY_TYPES } from '@devbrain/core';
 
 export const HTML_DASHBOARD = `<!DOCTYPE html>
@@ -29,27 +30,79 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
   <title>DevBrain &mdash; Developer Memory</title>
   <style>
     :root {
-      --bg: #141414; --surface: #1a1a1a; --surface2: #202020;
-      --border: #2b2b2b; --border2: #383838;
-      --text: #e6e6e6; --text2: #a8a8a8; --text3: #6e6e6e;
-      --accent: #d9a441; --blue: #5b9bd5; --green: #4caf7d; --yellow: #d4a72f; --red: #d45f5f;
-      --purple: #9b7fd4; --cyan: #4aa8c0;
-      --mono: 'Consolas', 'Courier New', monospace;
-      --ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      /* ── neutrals ────────────────────────────────────────────────────────
+         Nine steps, and nothing outside them. Most interfaces that read as
+         amateur are not badly designed so much as inconsistent: eleven nearly
+         identical greys, each chosen in the moment. */
+      --bg: #0f0f11; --surface: #161618; --surface2: #1d1d20;
+      --border: #26262b; --border2: #33333a;
+      --text: #ececf0; --text2: #9f9fa9; --text3: #6a6a74;
 
-      /* The sidebar keeps its own tokens, as shadcn/ui's Sidebar does, so the
-         panel can be themed without touching the rest of the page. */
-      --sidebar: #1a1a1a;
-      --sidebar-foreground: #c8c8c8;
-      --sidebar-accent: #242424;
-      --sidebar-accent-foreground: #f0f0f0;
-      --sidebar-border: #2b2b2b;
-      --sidebar-ring: #d9a441;
+      /* ── colour with a job ───────────────────────────────────────────────
+         Each of these means exactly one thing, which is the only way colour
+         carries meaning at all. Previously one amber did six jobs — brand,
+         primary action, active tab, focus ring, warning, and a graph edge
+         kind — so it had stopped signalling any of them.
+
+         --accent  interactive: focus, selection, the active tab
+         --warn    needs attention, and nothing else
+         --brand   the logo mark, and nothing else */
+      --accent: #6d7cf0;
+      --accent-soft: rgba(109, 124, 240, .14);
+      --warn: #d4a053;
+      --warn-dim: rgba(212, 160, 83, .10);
+      --brand: #d4a053;
+
+      /* Entry types. Desaturated on purpose: these are a data encoding read
+         forty rows at a time, not highlights. */
+      --t-red: #c97070; --t-green: #5aa37e; --t-blue: #6f93c9;
+      --t-purple: #8d85c4; --t-cyan: #5d96a8; --t-amber: #b99a5c;
+      /* Older names, still referenced by the graph and badges. */
+      --green: var(--t-green); --red: var(--t-red); --yellow: var(--t-amber);
+      --purple: var(--t-purple); --cyan: var(--t-cyan); --blue: var(--t-blue);
+
+      /* ── type ────────────────────────────────────────────────────────────
+         System stacks, deliberately. A webfont on a locally served tool buys
+         a little character and costs a network round trip, a flash of
+         unstyled text, and working offline. Segoe UI Variable is picked up on
+         Windows 11 and Cascadia ships with the terminal. */
+      --ui: ui-sans-serif, system-ui, -apple-system, 'Segoe UI Variable Text',
+            'Segoe UI', Inter, Roboto, 'Helvetica Neue', Arial, sans-serif;
+      --mono: ui-monospace, 'Cascadia Code', 'Cascadia Mono', 'SF Mono',
+              'JetBrains Mono', Consolas, monospace;
+
+      --t-xs: 10.5px; --t-sm: 11.5px; --t-base: 12.5px;
+      --t-md: 13.5px; --t-lg: 16px;   --t-xl: 21px;
+
+      /* ── space ───────────────────────────────────────────────────────────
+         A 4px grid. Every margin and padding below is one of these. */
+      --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px;
+
+      --r1: 5px; --r2: 7px; --r3: 10px;
+      /* Short and eased out. Longer reads as sluggish, linear as mechanical. */
+      --fast: 120ms cubic-bezier(.4, 0, .2, 1);
+      --med: 200ms cubic-bezier(.4, 0, .2, 1);
+
+      --sidebar: #141416;
+      --sidebar-foreground: #c4c4cc;
+      --sidebar-accent: #1f1f23;
+      --sidebar-accent-foreground: #f0f0f4;
+      --sidebar-border: #26262b;
+      --sidebar-ring: var(--accent);
       --sidebar-width: 13.5rem;
       --sidebar-width-icon: 3.25rem;
     }
     * { box-sizing: border-box; }
-    body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--ui); font-size: 14px; }
+    body {
+      margin: 0; background: var(--bg); color: var(--text);
+      font-family: var(--ui); font-size: var(--t-md); line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+      /* Digits of equal width, so the shown-and-caught column and the stat
+         cards line up instead of shuffling as the numbers change. */
+      font-variant-numeric: tabular-nums;
+    }
+    ::selection { background: var(--accent-soft); }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
     .topbar { display: flex; align-items: center; gap: 10px; padding: 8px 14px; background: var(--surface); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 20; }
     .brand { font-family: var(--mono); font-size: 13px; color: var(--text2); }
@@ -221,7 +274,7 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
        low opacity it was invisible against the surface, which is the same as
        not drawing it: the picture read as loose dots when nearly every entry
        in fact had a connection. */
-    .gedge.e-related { stroke: var(--accent); stroke-dasharray: 3 3; opacity: .5; }
+    .gedge.e-related { stroke: var(--t-blue); stroke-dasharray: 3 3; opacity: .45; }
     .gedge.dim { opacity: .12; }
     .gnode { cursor: pointer; }
     .gnode circle { stroke: var(--bg); stroke-width: 1.5; }
@@ -247,7 +300,7 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
     .gspark.e-sequence { color: var(--text2); }
     .gspark.e-same-error { color: var(--yellow); }
     .gspark.e-same-cause { color: var(--purple); }
-    .gspark.e-related { color: var(--accent); }
+    .gspark.e-related { color: var(--t-blue); }
     /* Brighter than the ambient light: these were asked for, not stumbled on. */
     .gspark.gfocus { filter: drop-shadow(0 0 7px currentColor); }
     .gbadge { font-family: var(--mono); font-size: 9px; font-weight: 700; text-anchor: middle; pointer-events: none; }
@@ -277,12 +330,21 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
 
     /* == sidebar brand, search and footer =================================== */
     .sidebar-brand { display: flex; align-items: center; gap: 9px; }
-    .sidebar-mark { flex: 0 0 26px; width: 26px; height: 26px; display: grid; place-items: center; border-radius: 6px; background: var(--accent); color: #241c08; font-family: var(--mono); font-size: 11px; font-weight: 700; }
-    .sidebar-brand-name { display: block; font-size: 13px; font-weight: 600; color: var(--sidebar-accent-foreground); line-height: 1.2; }
-    .sidebar-brand-sub { display: block; font-family: var(--mono); font-size: 10px; color: var(--text3); line-height: 1.3; }
-    .sidebar-search { display: flex; align-items: center; gap: 7px; width: 100%; margin-top: 10px; padding: 6px 9px; background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; color: var(--text3); font-size: 12px; font-family: inherit; cursor: pointer; text-align: left; }
+    /* Three nodes and the links between them — the graph view in miniature,
+       so the mark says what the product is for. A monogram in a coloured
+       square says only that someone needed a logo. */
+    .sidebar-mark { flex: 0 0 24px; width: 24px; height: 24px; color: var(--brand); }
+    .sidebar-mark svg { width: 24px; height: 24px; display: block; }
+    .sidebar-brand-name { display: block; font-size: var(--t-md); font-weight: 600; letter-spacing: -.01em; color: var(--sidebar-accent-foreground); line-height: 1.25; }
+    .sidebar-brand-sub { display: block; font-size: var(--t-xs); letter-spacing: .04em; color: var(--text3); line-height: 1.35; }
+    /* One line, always. Wrapped onto two it stopped reading as a control and
+       started reading as a paragraph with a border. */
+    .sidebar-search { display: flex; align-items: center; gap: var(--s2); width: 100%; margin-top: var(--s3); padding: var(--s2) var(--s2); background: var(--surface2); border: 1px solid var(--border); border-radius: var(--r1); color: var(--text3); font-size: var(--t-base); font-family: inherit; cursor: pointer; text-align: left; white-space: nowrap; transition: border-color var(--fast), color var(--fast); }
+    .sidebar-search > span:not(.sidebar-sicon) { flex: 1; overflow: hidden; text-overflow: ellipsis; }
     .sidebar-search:hover { border-color: var(--border2); color: var(--text2); }
+    .sidebar-sicon { display: inline-flex; flex: 0 0 13px; }
     .sidebar-search svg { width: 13px; height: 13px; flex: 0 0 13px; }
+    .sidebar-icon svg { width: 13px; height: 13px; }
     .sidebar-search span { flex: 1; }
     .sidebar-search kbd { font-family: var(--mono); font-size: 10px; color: var(--text3); border: 1px solid var(--border2); border-radius: 3px; padding: 0 4px; }
     .sfoot { display: flex; align-items: center; gap: 7px; font-family: var(--mono); font-size: 10px; color: var(--text3); line-height: 1.7; }
@@ -292,28 +354,33 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
 
     /* == project header ===================================================== */
     .phead2 { display: flex; align-items: flex-start; gap: 14px; flex-wrap: wrap; margin-bottom: 14px; }
-    .phead2 h1 { margin: 0 0 7px; font-size: 21px; font-weight: 600; letter-spacing: -.01em; }
+    .phead2 h1 { margin: 0 0 var(--s2); font-size: var(--t-xl); font-weight: 600; letter-spacing: -.02em; }
     .pstack { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; font-family: var(--mono); font-size: 11px; color: var(--text3); }
     .pchip { border: 1px solid var(--border2); border-radius: 4px; padding: 1px 7px; color: var(--text2); }
     .pactions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
     .btn2 { display: inline-flex; align-items: center; gap: 6px; background: var(--surface2); border: 1px solid var(--border2); color: var(--text2); padding: 6px 12px; border-radius: 6px; font-size: 12px; font-family: inherit; cursor: pointer; }
+    .btn2 { transition: background var(--fast), border-color var(--fast), color var(--fast); }
     .btn2:hover { border-color: var(--text3); color: var(--text); }
     .btn2 svg { width: 13px; height: 13px; }
-    .btn2.primary { background: var(--accent); border-color: var(--accent); color: #241c08; font-weight: 600; }
-    .btn2.primary:hover { filter: brightness(1.08); color: #241c08; }
+    /* Near-white rather than coloured. A primary button earns its emphasis from
+       contrast and from being the only one on screen, not from hue — and a
+       brand colour spent here is a brand colour that cannot mean anything
+       else. */
+    .btn2.primary { background: var(--text); border-color: var(--text); color: var(--bg); font-weight: 550; }
+    .btn2.primary:hover { background: #fff; border-color: #fff; color: var(--bg); }
 
     /* == the four cards ======================================================
        Side by side on purpose. "39 entries" is only good news next to "1 has
        ever caught a failure", and apart they read as four unrelated numbers. */
-    .cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 11px; margin-bottom: 18px; }
-    .card2 { border: 1px solid var(--border); border-radius: 7px; background: var(--surface); padding: 11px 13px; }
+    .cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--s3); margin-bottom: var(--s5); }
+    .card2 { border: 1px solid var(--border); border-radius: var(--r2); background: var(--surface); padding: var(--s3) var(--s4); }
     /* The one that should bother you if it is large. */
-    .card2.warn { border-color: #5a4616; background: #221b0c; }
-    .card2 .k { font-size: 11px; color: var(--text3); margin-bottom: 6px; }
-    .card2.warn .k { color: var(--accent); }
-    .card2 .v { font-size: 22px; font-weight: 600; line-height: 1.1; }
+    .card2.warn { border-color: rgba(212, 160, 83, .3); background: var(--warn-dim); }
+    .card2 .k { font-size: var(--t-sm); color: var(--text3); margin-bottom: var(--s2); letter-spacing: .01em; }
+    .card2.warn .k { color: var(--warn); }
+    .card2 .v { font-size: var(--t-xl); font-weight: 600; line-height: 1.15; letter-spacing: -.02em; }
     .card2 .v small { font-size: 11px; font-weight: 400; color: var(--text3); margin-left: 6px; }
-    .card2.warn .v { color: var(--accent); font-family: var(--mono); }
+    .card2.warn .v { color: var(--warn); }
 
     /* == tabs ================================================================ */
     .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin-bottom: 14px; overflow-x: auto; }
@@ -353,6 +420,7 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
     .lhead .lh-c { flex: 0 0 56px; text-align: right; }
 
     .erow { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 8px 8px 7px; background: none; border: none; border-left: 2px solid transparent; border-radius: 5px; color: inherit; font-family: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+    .erow { transition: background var(--fast), border-color var(--fast); }
     .erow:hover { background: var(--surface); }
     .erow[data-sel="true"] { background: var(--surface2); border-left-color: var(--accent); }
     .erow .et { flex: 0 0 38px; font-family: var(--mono); font-size: 9.5px; font-weight: 700; letter-spacing: .05em; }
@@ -379,7 +447,7 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
     .dbadges { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-family: var(--mono); font-size: 10.5px; color: var(--text3); padding-top: 10px; }
     .dpill { border-radius: 3px; padding: 1px 6px; font-weight: 700; letter-spacing: .05em; }
     .dvia { border: 1px solid var(--border2); border-radius: 3px; padding: 1px 6px; color: var(--text2); }
-    .dtitle { margin: 9px 0 0; font-size: 16px; font-weight: 600; line-height: 1.35; }
+    .dtitle { margin: var(--s3) 0 0; font-size: var(--t-lg); font-weight: 600; line-height: 1.35; letter-spacing: -.01em; }
     .dtabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin: 12px 0 0; }
     .dtab { background: none; border: none; border-bottom: 2px solid transparent; color: var(--text3); padding: 7px 9px; font-size: 12px; font-family: inherit; cursor: pointer; margin-bottom: -1px; white-space: nowrap; }
     .dtab:hover { color: var(--text2); }
@@ -387,7 +455,9 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
     .dbody { flex: 1; overflow-y: auto; padding: 14px 2px 14px 0; }
     .dsec { font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: .09em; color: var(--text3); margin: 0 0 6px; }
     .dsec + .dtext { margin: 0 0 15px; }
-    .dtext { color: var(--text2); font-size: 13px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
+    /* Capped for reading. Past about 70 characters the eye loses the start of
+       the next line, and entry bodies are the only real prose here. */
+    .dtext { color: var(--text2); font-size: var(--t-md); line-height: 1.65; max-width: 68ch; white-space: pre-wrap; word-break: break-word; }
     .derr { font-family: var(--mono); font-size: 11px; background: #0f0f0f; border: 1px solid var(--border); border-radius: 5px; padding: 8px 10px; color: var(--yellow); margin: 0 0 15px; overflow-x: auto; white-space: pre-wrap; word-break: break-word; }
     .dtags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 4px; }
     .dtag { font-family: var(--mono); font-size: 10px; color: var(--text3); }
@@ -450,15 +520,22 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
     <aside class="sidebar" id="sidebar" data-collapsible="icon">
       <div class="sidebar-header">
         <div class="sidebar-brand">
-          <span class="sidebar-mark">db</span>
+          <span class="sidebar-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M7.5 8.5 16 6"></path><path d="M7.5 9.8 15.6 16"></path>
+              <circle cx="6" cy="9" r="2.6"></circle>
+              <circle cx="18" cy="5.5" r="1.9"></circle>
+              <circle cx="17.5" cy="17.5" r="1.9"></circle>
+            </svg>
+          </span>
           <span class="sidebar-collapse-hide">
             <span class="sidebar-brand-name">devbrain</span>
             <span class="sidebar-brand-sub">developer memory</span>
           </span>
         </div>
         <button class="sidebar-search" data-view="search" title="Search all projects">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.6-3.6"></path></svg>
-          <span class="sidebar-collapse-hide">Search all projects</span>
+          <span class="sidebar-sicon"></span>
+          <span class="sidebar-collapse-hide">Search</span>
           <kbd class="sidebar-collapse-hide">&#8984;K</kbd>
         </button>
       </div>
@@ -469,13 +546,13 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
           <ul class="sidebar-menu">
             <li class="sidebar-menu-item">
               <button class="sidebar-menu-button" data-view="entries" data-active="true" title="Entries">
-                <span class="sidebar-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16"></path><path d="M4 12h16"></path><path d="M4 18h10"></path></svg></span>
+                <span class="sidebar-icon" data-icon="list"></span>
                 <span class="sidebar-menu-label">Entries</span>
               </button>
             </li>
             <li class="sidebar-menu-item">
               <button class="sidebar-menu-button" data-view="recall" title="Test what memory answers for a failure">
-                <span class="sidebar-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg></span>
+                <span class="sidebar-icon" data-icon="flask"></span>
                 <span class="sidebar-menu-label">Recall tester</span>
               </button>
             </li>
@@ -547,6 +624,16 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
       n.lastChild.textContent = text;
     }
 
+    // The shell's icons are declared by name in the markup and filled here, so
+    // the HTML stays legible instead of carrying path data inline.
+    function paintShellIcons() {
+      document.querySelectorAll('[data-icon]').forEach(function (n) {
+        n.innerHTML = icon(n.getAttribute('data-icon'));
+      });
+      var si = document.querySelector('.sidebar-sicon');
+      if (si) si.innerHTML = icon('search');
+    }
+
     async function loadStorage() {
       try {
         var d = await getJSON('/api/health');
@@ -612,15 +699,16 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
     // Collapsible cards could not do that — opening one pushed every row below
     // it down the page, so comparing two entries meant losing your place.
 
-    function icon(d) {
-      return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
-        'stroke-linecap="round" stroke-linejoin="round">' + d + '</svg>';
+    // Lucide's real paths, generated into icons.ts rather than drawn by hand.
+    // The wrapper lives here and only here, so stroke weight, cap and optical
+    // size cannot drift between one icon and the next.
+    var ICONS = ${JSON.stringify(ICON_PATHS)};
+    function icon(name) {
+      var d = ICONS[name];
+      if (!d) return '';
+      return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" ' +
+        'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + d + '</svg>';
     }
-    var I_WARN = '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path>';
-    var I_DOC = '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path>';
-    var I_PLUS = '<path d="M12 5v14"></path><path d="M5 12h14"></path>';
-    var I_EYE = '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"></path><circle cx="12" cy="12" r="3"></circle>';
-    var I_GLOBE = '<circle cx="12" cy="12" r="9"></circle><path d="M3 12h18"></path><path d="M12 3a15 15 0 0 1 0 18a15 15 0 0 1 0-18"></path>';
 
     /** Every entry of the project in one list, section tagged onto each. */
     function allEntries() {
@@ -683,7 +771,7 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
       var kinds = [['all', 'All'], ['bug', 'Bugs'], ['fix', 'Fixes']];
       return '<div class="tb2">' +
         '<span class="fwrap">' +
-          icon('<circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.6-3.6"></path>') +
+          icon('search') +
           '<input class="fin" id="f-q" placeholder="Filter by title, tag, error pattern&hellip;" value="' + esc(STATE.q) + '">' +
           '<kbd>/</kbd>' +
         '</span>' +
@@ -691,7 +779,7 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
           return '<button data-kind="' + k[0] + '" class="' + (STATE.kind === k[0] ? 'on' : '') + '">' + k[1] + '</button>';
         }).join('') + '</span>' +
         '<button class="tgl' + (STATE.neverOnly ? ' on' : '') + '" data-act="toggle-never">' +
-          icon(I_EYE) + 'Never surfaced</button>' +
+          icon('eye-off') + 'Never surfaced</button>' +
         '<select class="sel2" id="f-origin">' +
           opts([['all', 'All sources'], ['hook', 'Via hook'], ['agent', 'By the agent'],
                 ['manual', 'Typed by hand'], ['indexed', 'From a file']], STATE.origin) +
@@ -746,9 +834,9 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
           (p.stack || []).map(function (x) { return '<span class="pchip">' + esc(x) + '</span>'; }).join('') +
           '<span>' + esc(p.path) + '</span></div></div>' +
           '<div class="pactions">' +
-          '<button class="btn2" data-view="recall">' + icon(I_WARN) + 'Test recall</button>' +
-          '<button class="btn2" data-act="context">' + icon(I_DOC) + 'agent.md</button>' +
-          '<button class="btn2 primary" data-act="save-here">' + icon(I_PLUS) + 'Save entry</button>' +
+          '<button class="btn2" data-view="recall">' + icon('flask') + 'Test recall</button>' +
+          '<button class="btn2" data-act="context">' + icon('file') + 'agent.md</button>' +
+          '<button class="btn2 primary" data-act="save-here">' + icon('plus') + 'Save entry</button>' +
           '</div></div>';
 
         if (!d.total) {
@@ -840,9 +928,9 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
         '</div>' +
         '<div class="dbody">' + body + '</div>' +
         '<div class="dfoot">' +
-        '<button class="btn2" data-act="edit-entry">Edit</button>' +
-        '<button class="btn2" data-act="promote">' + icon(I_GLOBE) + 'Promote to all projects</button>' +
-        (e.supersededBy ? '' : '<button class="btn2 danger" data-act="retract">Retract</button>') +
+        '<button class="btn2" data-act="edit-entry">' + icon('pencil') + 'Edit</button>' +
+        '<button class="btn2" data-act="promote">' + icon('globe') + 'Promote to all projects</button>' +
+        (e.supersededBy ? '' : '<button class="btn2 danger" data-act="retract">' + icon('archive') + 'Retract</button>') +
         '</div></div>';
     }
 
@@ -1743,6 +1831,7 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
       setCollapsed(false);
     }
 
+    paintShellIcons();
     loadStorage();
     loadProjects();
   </script>
