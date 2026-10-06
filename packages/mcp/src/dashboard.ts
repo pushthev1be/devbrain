@@ -21,6 +21,7 @@
 
 import { ICON_PATHS } from './icons';
 import { STACK_ICONS } from './stackIcons';
+import { LOGO_MARK, faviconDataUri } from './brand';
 import { ENTRY_TYPES } from '@devbrain/core';
 
 export const HTML_DASHBOARD = `<!DOCTYPE html>
@@ -29,6 +30,7 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>DevBrain &mdash; Developer Memory</title>
+  <link rel="icon" href="${faviconDataUri()}">
   <style>
     :root {
       /* ── neutrals ────────────────────────────────────────────────────────
@@ -553,12 +555,7 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
         <button class="sidebar-toggle" data-act="toggle-sidebar" title="Toggle sidebar (Ctrl+B)" aria-label="Toggle sidebar" data-icon="panel"></button>
         <div class="sidebar-brand">
           <span class="sidebar-mark" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M7.5 8.5 16 6"></path><path d="M7.5 9.8 15.6 16"></path>
-              <circle cx="6" cy="9" r="2.6"></circle>
-              <circle cx="18" cy="5.5" r="1.9"></circle>
-              <circle cx="17.5" cy="17.5" r="1.9"></circle>
-            </svg>
+            <svg viewBox="0 0 24 24" fill="none">${LOGO_MARK}</svg>
           </span>
           <span class="sidebar-collapse-hide">
             <span class="sidebar-brand-name">devbrain</span>

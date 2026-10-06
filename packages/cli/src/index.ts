@@ -174,6 +174,26 @@ function spin(text: string) {
 
 // ─── project context ──────────────────────────────────────────────────────────
 
+/**
+ * Re-detect a registered project's stack, writing it back only when it changed.
+ *
+ * Detection improves — monorepo scanning and Dart/Flutter were both added after
+ * these records were written — and a stored stack is a snapshot of whatever the
+ * detector could see on the day the project was registered. Three of five real
+ * projects here held an empty stack for that reason, which showed up as a
+ * project with no marks beside it and no way to tell why.
+ */
+async function refreshStack(project: Project): Promise<void> {
+  try {
+    const stack = detectStack(project.path);
+    if (!stack.length) return;
+    const same = stack.length === project.stack.length
+      && stack.every((s, i) => s === project.stack[i]);
+    if (same) return;
+    await upsertProject({ ...project, stack });
+  } catch { /* an unreadable project must not break the hook */ }
+}
+
 async function printProjectContext(): Promise<void> {
   const cwd = process.cwd();
   const repoRoot = getRepoRoot(cwd) ?? cwd;
@@ -186,6 +206,7 @@ async function printProjectContext(): Promise<void> {
     return;
   }
 
+  await refreshStack(project);
   await upsertProject({ ...project, lastSeen: Date.now() });
   const entries = await getEntriesByProject(project.id);
   const bugs  = entries.filter(e => e.type === 'bug').length;
@@ -621,6 +642,11 @@ async function handleHook(event: string): Promise<void> {
       if (typeof input.session_id === 'string') markActiveSession(repoRoot, input.session_id);
       const project = await getProjectByPath(repoRoot);
       if (!project) return;
+      // Re-read the stack while we are here. It is only filesystem checks, a
+      // few milliseconds, and it is how a project registered before the
+      // detector could see monorepos or Flutter stops reporting nothing —
+      // without the user having to know to re-run anything.
+      await refreshStack(project);
       const all = await getAllEntriesWithProjects();
       // This project's own CLAUDE.md is already in the agent's context; ranking
       // it back in would restate the file in fewer words. Named, not hidden.

@@ -1,3 +1,5 @@
+<img src="assets/logo.svg" alt="" width="56" height="56">
+
 # DevBrain
 
 Persistent developer memory for you and your AI agents. Your coding agent writes down what it fixes and decides as it works, and reads it back before the next task — so it already knows what broke before, what was decided, and why. DevBrain notices when something worth keeping happened, stores it, and ranks it back; it needs no AI service of its own.

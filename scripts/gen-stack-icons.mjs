@@ -25,12 +25,12 @@ const { ALL_STACK_LABELS } = require('../packages/core/dist/stack.js');
 /** How a label is placed in the row: written in, built with, stores in, built by. */
 const ROLES = {
   'Node.js': 'lang', 'TypeScript': 'lang', 'Python': 'lang', 'Rust': 'lang',
-  'Go': 'lang', 'Ruby': 'lang', 'Java': 'lang', 'C#/.NET': 'lang',
+  'Go': 'lang', 'Ruby': 'lang', 'Java': 'lang', 'C#/.NET': 'lang', 'Dart': 'lang',
 
   'React': 'frontend', 'Vue': 'frontend', 'Angular': 'frontend',
   'Svelte': 'frontend', 'Next.js': 'frontend', 'Nuxt': 'frontend',
   'React Native': 'frontend', 'Expo': 'frontend', 'Electron': 'frontend',
-  'Tailwind CSS': 'frontend',
+  'Tailwind CSS': 'frontend', 'Flutter': 'frontend',
 
   'Express': 'backend', 'Fastify': 'backend', 'NestJS': 'backend',
   'Hono': 'backend', 'tRPC': 'backend', 'GraphQL': 'backend', 'Socket.io': 'backend',
