@@ -41208,7 +41208,7 @@ var require_gemini = __commonJS({
   "packages/core/dist/gemini.js"(exports2) {
     "use strict";
     Object.defineProperty(exports2, "__esModule", { value: true });
-    exports2.GEMINI_TIMEOUT_MS = exports2.RateLimitError = void 0;
+    exports2.geminiTimeoutMs = exports2.RateLimitError = void 0;
     exports2.hasGeminiCreds = hasGeminiCreds2;
     exports2.within = within;
     exports2.getEmbedding = getEmbedding2;
@@ -41217,8 +41217,8 @@ var require_gemini = __commonJS({
     exports2.autoArchetype = autoArchetype;
     var redact_1 = require_redact();
     var types_1 = require_types();
-    var TEXT_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
-    var EMBED_MODEL = process.env.GEMINI_EMBED_MODEL || "gemini-embedding-001";
+    var textModel = () => process.env.GEMINI_MODEL || "gemini-2.5-flash";
+    var embedModel = () => process.env.GEMINI_EMBED_MODEL || "gemini-embedding-001";
     var EMBED_DIM = 3072;
     var RateLimitError = class extends Error {
       constructor(retryAfter = 60) {
@@ -41280,10 +41280,10 @@ var require_gemini = __commonJS({
     }
     async function generateText(prompt2) {
       const res = await withAbort((signal) => getClient().models.generateContent({
-        model: TEXT_MODEL,
+        model: textModel(),
         contents: (0, redact_1.redactSecrets)(prompt2),
         config: { abortSignal: signal }
-      }), exports2.GEMINI_TIMEOUT_MS, "Generation");
+      }), (0, exports2.geminiTimeoutMs)(), "Generation");
       return (res.text ?? "").trim();
     }
     function hasGeminiCreds2() {
@@ -41291,8 +41291,9 @@ var require_gemini = __commonJS({
         return Boolean(process.env.GOOGLE_CLOUD_PROJECT);
       return Boolean(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
     }
-    exports2.GEMINI_TIMEOUT_MS = Number(process.env.DEVBRAIN_AI_TIMEOUT_MS) || 8e3;
-    async function withAbort(call, ms = exports2.GEMINI_TIMEOUT_MS, label = "Gemini") {
+    var geminiTimeoutMs = () => Number(process.env.DEVBRAIN_AI_TIMEOUT_MS) || 8e3;
+    exports2.geminiTimeoutMs = geminiTimeoutMs;
+    async function withAbort(call, ms = (0, exports2.geminiTimeoutMs)(), label = "Gemini") {
       const controller = new AbortController();
       let timer;
       const deadline = new Promise((_2, reject) => {
@@ -41309,7 +41310,7 @@ var require_gemini = __commonJS({
         clearTimeout(timer);
       }
     }
-    function within(work, ms = exports2.GEMINI_TIMEOUT_MS, label = "Gemini") {
+    function within(work, ms = (0, exports2.geminiTimeoutMs)(), label = "Gemini") {
       let timer;
       return Promise.race([
         work.finally(() => clearTimeout(timer)),
@@ -41335,11 +41336,11 @@ var require_gemini = __commonJS({
       }
       try {
         const res = await withAbort((signal) => getClient().models.embedContent({
-          model: EMBED_MODEL,
+          model: embedModel(),
           // Scrubbed before it leaves the machine — see redact.ts.
           contents: (0, redact_1.redactSecrets)(text),
           config: { outputDimensionality: EMBED_DIM, abortSignal: signal }
-        }), exports2.GEMINI_TIMEOUT_MS, "Embedding");
+        }), (0, exports2.geminiTimeoutMs)(), "Embedding");
         const values = res.embeddings?.[0]?.values;
         if (!values || values.length === 0) {
           throw new Error("Embedding response contained no values");

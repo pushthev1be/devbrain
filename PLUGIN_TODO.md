@@ -214,14 +214,18 @@ secure credential store rather than `settings.json`.
 
 ## After
 
-- [ ] **`.env` keys read at module load are missed.** `import` statements hoist
+- [x] **`.env` keys read at module load are missed.** `import` statements hoist
       above the `loadGlobalEnv()` call, so any `process.env` read at a core
       module's top level happens before the file is loaded. That is
       `GEMINI_MODEL`, `GEMINI_EMBED_MODEL` and `DEVBRAIN_AI_TIMEOUT_MS` in
       `gemini.ts` — all advanced overrides that `devbrain setup` never writes, so
       nothing in the documented path is affected. The keys that matter are read
       lazily inside functions and do work. Fix by reading them at the point of
-      use, not by moving the call.
+      use, not by moving the call. Done that way: `textModel()`,
+      `embedModel()` and `geminiTimeoutMs()`. The last was an exported const and
+      is now an exported function — nothing outside `gemini.ts` imported it. Two
+      tests set the variable *after* the import and assert it takes effect,
+      which is the thing that was broken.
 - [x] **Ranking bug**: `patternScore` is weighted 0.45 against semantic's 0.30,
       so on a plain-English query — where the pattern term degenerates into title
       word overlap — the best semantic hit can land at rank 3 and be dropped by
@@ -267,8 +271,28 @@ secure credential store rather than `settings.json`.
       harness to be committed rather than thrown away.
 - [ ] **Dashboard stubs**: Edit, and Promote to all projects. Promote is what the
       Global scope needs.
-- [ ] **Write `supersedes` on insert.** Only `supersededBy` is stored; the
-      forward field is dead and the graph reads both directions to work around it.
+- [x] **Write `supersedes` on insert.** ~~Only `supersededBy` is stored; the
+      forward field is dead and the graph reads both directions to work around
+      it.~~ **This was wrong, and nothing needed changing.** `supersedeEntry`
+      writes both directions already — verified by running it against an
+      isolated store rather than by reading: the retracted entry came back with
+      `supersededBy`, and the correction with `supersedes` and
+      `revisionCount: 1`, on the local and the Mongo path alike. The insert also
+      precedes the call in `save_entry`, so the replacement exists to be
+      stamped.
+
+      What is true is the observation that produced the claim: of 223 entries, 8
+      have `supersededBy` and 0 have `supersedes`. Those 8 were retracted by a
+      one-off script that set the field directly — the one the "retracting eight
+      noise entries" lesson records — so they never went through
+      `supersedeEntry`. Reading both directions in `graph.ts` is therefore
+      correct and must stay; removing it would drop every historical retraction
+      from the graph. Its comment said the forward write did not exist, and has
+      been corrected.
+
+      Not done, and deliberately: backfilling `supersedes` onto those 8. It
+      would make the data uniform, but it is a migration over someone's store to
+      fix nothing — the graph already reads both directions.
 - [ ] **Stop offering generic lines as error patterns** — `Traceback (most recent
       call last):`, benchmark table rows. Same class already fixed for
       `Exit code 1`.

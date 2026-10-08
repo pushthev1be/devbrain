@@ -13,8 +13,18 @@ import { ENTRY_CATEGORIES } from './types';
 // Model is overridable via GEMINI_MODEL. Default is gemini-2.5-flash — the current
 // Flash model, available on both the Gemini Developer API and Vertex AI (incl. the
 // `global` location used by AI-Studio-origin projects, where 2.0-flash is unavailable).
-const TEXT_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
-const EMBED_MODEL = process.env.GEMINI_EMBED_MODEL || 'gemini-embedding-001';
+//
+// Read at the point of use, not at module load. `import` statements hoist above
+// the `loadGlobalEnv()` call in the CLI and MCP entry points, so a constant
+// initialised here is bound before ~/.devbrain/.env has been read — and these
+// three were, which meant GEMINI_MODEL, GEMINI_EMBED_MODEL and
+// DEVBRAIN_AI_TIMEOUT_MS set in that file were silently ignored. Nothing in the
+// documented path was affected, because `devbrain setup` never writes them and
+// the keys that matter (GEMINI_API_KEY, MONGODB_URI) are read inside functions
+// already. Still wrong, and invisible in exactly the way a config override
+// should never be.
+const textModel = () => process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+const embedModel = () => process.env.GEMINI_EMBED_MODEL || 'gemini-embedding-001';
 const EMBED_DIM = 3072;
 
 export class RateLimitError extends Error {
@@ -101,9 +111,9 @@ async function generateText(prompt: string): Promise<string> {
   // autoArchetype, synthesizeSection — goes through here.
   const res = await withAbort(
     signal => getClient().models.generateContent({
-      model: TEXT_MODEL, contents: redactSecrets(prompt), config: { abortSignal: signal },
+      model: textModel(), contents: redactSecrets(prompt), config: { abortSignal: signal },
     }),
-    GEMINI_TIMEOUT_MS, 'Generation');
+    geminiTimeoutMs(), 'Generation');
   return (res.text ?? '').trim();
 }
 
@@ -121,7 +131,7 @@ export function hasGeminiCreds(): boolean {
  * `devbrain search` sit there silently with no output and no error, and the
  * same stall inside a hook would hold up the agent's turn.
  */
-export const GEMINI_TIMEOUT_MS = Number(process.env.DEVBRAIN_AI_TIMEOUT_MS) || 8000;
+export const geminiTimeoutMs = (): number => Number(process.env.DEVBRAIN_AI_TIMEOUT_MS) || 8000;
 
 /**
  * Run a Gemini call with a deadline that actually cancels it.
@@ -139,7 +149,7 @@ export const GEMINI_TIMEOUT_MS = Number(process.env.DEVBRAIN_AI_TIMEOUT_MS) || 8
  */
 async function withAbort<T>(
   call: (signal: AbortSignal) => Promise<T>,
-  ms = GEMINI_TIMEOUT_MS,
+  ms = geminiTimeoutMs(),
   label = 'Gemini',
 ): Promise<T> {
   const controller = new AbortController();
@@ -159,7 +169,7 @@ async function withAbort<T>(
 }
 
 /** Reject rather than hang. The timer is cleared so the process can still exit. */
-export function within<T>(work: Promise<T>, ms = GEMINI_TIMEOUT_MS, label = 'Gemini'): Promise<T> {
+export function within<T>(work: Promise<T>, ms = geminiTimeoutMs(), label = 'Gemini'): Promise<T> {
   let timer: ReturnType<typeof setTimeout>;
   return Promise.race([
     work.finally(() => clearTimeout(timer)),
@@ -189,12 +199,12 @@ export async function getEmbedding(text: string): Promise<number[]> {
   try {
     const res = await withAbort(
       signal => getClient().models.embedContent({
-        model: EMBED_MODEL,
+        model: embedModel(),
         // Scrubbed before it leaves the machine — see redact.ts.
         contents: redactSecrets(text),
         config: { outputDimensionality: EMBED_DIM, abortSignal: signal },
       }),
-      GEMINI_TIMEOUT_MS, 'Embedding');
+      geminiTimeoutMs(), 'Embedding');
     const values = res.embeddings?.[0]?.values;
     if (!values || values.length === 0) {
       throw new Error('Embedding response contained no values');
