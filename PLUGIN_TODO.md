@@ -25,7 +25,7 @@ request rather than by reading:
   reload-mutate-write, stale-broken after ten seconds, with a Windows retry on
   the rename.
 
-501 tests.
+507 tests.
 
 ---
 
@@ -138,15 +138,30 @@ secure credential store rather than `settings.json`.
 
 ### 4. Register on SessionStart
 
-- [ ] When the repo is not a known project, register it then — replacing job 1 of
+- [x] When the repo is not a known project, register it then — replacing job 1 of
       `init`. There is no natural moment to run a setup command in the plugin
-      path, and the hook already runs at exactly the right time
-- [ ] Decide deliberately where the store lives. `${CLAUDE_PLUGIN_DATA}`
+      path, and the hook already runs at exactly the right time. **Every hook was
+      bailing on `if (!project) return`**, so in any repo nobody had run `init`
+      in — which is every repo, for someone who only installed the plugin — the
+      whole thing loaded and did nothing. Guarded by `looksLikeProject`: a git
+      repo, or a directory with a detected stack. A session started in a home or
+      Downloads folder registers nothing, because nobody would come back there
+      looking for it. The first session also says so once, since
+      `formatSessionBriefing` correctly returns null when nothing is stored, and
+      a project registered automatically has nothing stored by definition.
+      Verified against a throwaway HOME: git repo → registered with its stack and
+      the message; second session → silent; bare directory → nothing
+- [x] Decide deliberately where the store lives. `${CLAUDE_PLUGIN_DATA}`
       (`~/.claude/plugins/data/<id>/`) survives plugin updates and is the
       documented home for plugin state — but `~/.devbrain/db.json` is shared with
-      the CLI and already holds everyone's data. Recommendation: keep
-      `~/.devbrain/`, and never write to `${CLAUDE_PLUGIN_ROOT}`, which moves on
-      every update
+      the CLI and already holds everyone's data. **Decided: `~/.devbrain/`**, so
+      the plugin and the CLI read one memory rather than two, and installing the
+      plugin next to an existing CLI shows the entries that are already there
+      instead of an empty store. `${CLAUDE_PLUGIN_DATA}` would be a second,
+      invisible one. Checked rather than assumed: every write is
+      `join(homedir(), '.devbrain', …)` — `db.json`, `db.json.lock`, `.env`,
+      `sessions/` — and nothing is anchored to `__dirname` or the plugin root,
+      which moves on every update
 
 ### 5. Validate and publish
 

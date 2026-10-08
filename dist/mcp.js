@@ -93671,6 +93671,7 @@ var require_stack = __commonJS({
     exports2.ALL_STACK_LABELS = void 0;
     exports2.detectStack = detectStack2;
     exports2.getProjectName = getProjectName2;
+    exports2.looksLikeProject = looksLikeProject;
     var fs_1 = require("fs");
     var path_1 = require("path");
     var FRAMEWORK_MAP = {
@@ -93785,6 +93786,9 @@ var require_stack = __commonJS({
         }
       }
       return projectPath.split(/[\\/]/).filter(Boolean).pop() ?? "unknown";
+    }
+    function looksLikeProject(signals) {
+      return signals.isGitRepo || signals.stack.length > 0;
     }
   }
 });
@@ -94559,6 +94563,7 @@ var require_agentHooks = __commonJS({
     exports2.withoutDevbrainHooks = withoutDevbrainHooks;
     exports2.installedDevbrainHooks = installedDevbrainHooks;
     exports2.formatSessionBriefing = formatSessionBriefing;
+    exports2.formatFirstSession = formatFirstSession;
     var search_1 = require_search();
     exports2.AGENT_LOADED_SOURCE_FILES = ["CLAUDE.md", "AGENTS.md"];
     function baseName(file2) {
@@ -94673,6 +94678,15 @@ var require_agentHooks = __commonJS({
         lines.push("", body);
       }
       return lines.join("\n");
+    }
+    function formatFirstSession(project) {
+      const stack = project.stack.length ? project.stack.join(", ") : "no stack detected";
+      return [
+        `DevBrain is now tracking ${project.name} (${stack}). Nothing is stored for it yet.`,
+        "It fills up as you work: save what you fix, decide or find non-obvious with the `save_entry`",
+        "MCP tool \u2014 the root cause first, then the fix, and the exact error text as `error_pattern`.",
+        "From the next session on, what you record here comes back before the task that needs it."
+      ].join("\n");
     }
   }
 });

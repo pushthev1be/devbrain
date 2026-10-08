@@ -12,7 +12,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { detectStack, ALL_STACK_LABELS } from './stack';
+import { detectStack, ALL_STACK_LABELS, looksLikeProject } from './stack';
 
 let root: string;
 
@@ -85,5 +85,23 @@ describe('detectStack', () => {
     for (const label of detectStack(root)) {
       expect(ALL_STACK_LABELS, label).toContain(label);
     }
+  });
+});
+
+describe('looksLikeProject', () => {
+  it('accepts a git repository even with nothing recognisable in it', () => {
+    expect(looksLikeProject({ isGitRepo: true, stack: [] })).toBe(true);
+  });
+
+  // No repo, but a manifest: a stack was detected, so something declares what
+  // this directory is.
+  it('accepts a directory with a detected stack but no repo', () => {
+    expect(looksLikeProject({ isGitRepo: false, stack: ['Node.js'] })).toBe(true);
+  });
+
+  // The case this exists for: a session started somewhere incidental. Nothing
+  // should be registered, because nobody would come back here looking for it.
+  it('declines a directory with neither', () => {
+    expect(looksLikeProject({ isGitRepo: false, stack: [] })).toBe(false);
   });
 });

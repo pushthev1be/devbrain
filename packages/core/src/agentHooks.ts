@@ -220,3 +220,24 @@ export function formatSessionBriefing(
   }
   return lines.join('\n');
 }
+
+/**
+ * The one-off line for a project's first session.
+ *
+ * formatSessionBriefing returns null when there is nothing stored, which is
+ * correct — an empty briefing is noise. But a project registered automatically
+ * has nothing stored *by definition*, so without this the first session of every
+ * new project says nothing, and someone who installed a plugin and ran no
+ * command gets no sign it is working.
+ *
+ * Addressed to the agent, like the briefing, because that is who reads it.
+ */
+export function formatFirstSession(project: { name: string; stack: string[] }): string {
+  const stack = project.stack.length ? project.stack.join(', ') : 'no stack detected';
+  return [
+    `DevBrain is now tracking ${project.name} (${stack}). Nothing is stored for it yet.`,
+    'It fills up as you work: save what you fix, decide or find non-obvious with the `save_entry`',
+    'MCP tool — the root cause first, then the fix, and the exact error text as `error_pattern`.',
+    'From the next session on, what you record here comes back before the task that needs it.',
+  ].join('\n');
+}

@@ -74804,6 +74804,7 @@ var require_stack = __commonJS({
     exports2.ALL_STACK_LABELS = void 0;
     exports2.detectStack = detectStack2;
     exports2.getProjectName = getProjectName2;
+    exports2.looksLikeProject = looksLikeProject2;
     var fs_1 = require("fs");
     var path_1 = require("path");
     var FRAMEWORK_MAP = {
@@ -74918,6 +74919,9 @@ var require_stack = __commonJS({
         }
       }
       return projectPath.split(/[\\/]/).filter(Boolean).pop() ?? "unknown";
+    }
+    function looksLikeProject2(signals) {
+      return signals.isGitRepo || signals.stack.length > 0;
     }
   }
 });
@@ -75692,6 +75696,7 @@ var require_agentHooks = __commonJS({
     exports2.withoutDevbrainHooks = withoutDevbrainHooks2;
     exports2.installedDevbrainHooks = installedDevbrainHooks2;
     exports2.formatSessionBriefing = formatSessionBriefing2;
+    exports2.formatFirstSession = formatFirstSession2;
     var search_1 = require_search();
     exports2.AGENT_LOADED_SOURCE_FILES = ["CLAUDE.md", "AGENTS.md"];
     function baseName(file) {
@@ -75806,6 +75811,15 @@ var require_agentHooks = __commonJS({
         lines.push("", body);
       }
       return lines.join("\n");
+    }
+    function formatFirstSession2(project) {
+      const stack = project.stack.length ? project.stack.join(", ") : "no stack detected";
+      return [
+        `DevBrain is now tracking ${project.name} (${stack}). Nothing is stored for it yet.`,
+        "It fills up as you work: save what you fix, decide or find non-obvious with the `save_entry`",
+        "MCP tool \u2014 the root cause first, then the fix, and the exact error text as `error_pattern`.",
+        "From the next session on, what you record here comes back before the task that needs it."
+      ].join("\n");
     }
   }
 });
@@ -107626,8 +107640,28 @@ async function handleHook(event) {
     if (event === "session-start") {
       const repoRoot = (0, import_core.getRepoRoot)(cwd) ?? cwd;
       if (typeof input.session_id === "string") (0, import_core.markActiveSession)(repoRoot, input.session_id);
-      const project2 = await (0, import_core.getProjectByPath)(repoRoot);
-      if (!project2) return;
+      let project2 = await (0, import_core.getProjectByPath)(repoRoot);
+      if (!project2) {
+        const stack = (0, import_core.detectStack)(repoRoot);
+        if (!(0, import_core.looksLikeProject)({ isGitRepo: (0, import_core.isGitRepo)(repoRoot), stack })) return;
+        project2 = {
+          id: nanoid(),
+          name: (0, import_core.getProjectName)(repoRoot),
+          path: repoRoot,
+          stack,
+          createdAt: Date.now(),
+          lastSeen: Date.now()
+        };
+        await (0, import_core.upsertProject)(project2);
+        captureLog(`registered ${project2.name} from the session-start hook`);
+        process.stdout.write(JSON.stringify({
+          hookSpecificOutput: {
+            hookEventName: "SessionStart",
+            additionalContext: (0, import_core.formatFirstSession)(project2)
+          }
+        }));
+        return;
+      }
       await refreshStack(project2);
       const all = await (0, import_core.getAllEntriesWithProjects)();
       const shown = (0, import_core.briefingEntries)(all, project2.id);

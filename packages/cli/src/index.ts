@@ -26,7 +26,7 @@ import {
   looksLikeError, isReadOnlyCommand, isEchoedOutput, isGenericFailureLine, recallForFailure, formatRecallForAgent,
   withDevbrainHooks, withoutDevbrainHooks, installedDevbrainHooks,
   nextSessionChunk, formatBackfillBatch, commitExcerpt, BACKFILL_BATCH_BUDGET,
-  sameProjectPath, loadGlobalEnv,
+  sameProjectPath, loadGlobalEnv, looksLikeProject, formatFirstSession,
 } from '@devbrain/core';
 import type { Entry, Project, EntryCategory } from '@devbrain/core';
 import { nanoid } from 'nanoid';
@@ -631,8 +631,39 @@ async function handleHook(event: string): Promise<void> {
       // `devbrain note` can stamp it, which is what makes a run of entries
       // readable as one episode instead of unrelated rows.
       if (typeof input.session_id === 'string') markActiveSession(repoRoot, input.session_id);
-      const project = await getProjectByPath(repoRoot);
-      if (!project) return;
+      let project = await getProjectByPath(repoRoot);
+
+      // Register the project here when it is not known yet.
+      //
+      // This was job 1 of `devbrain init`, and the plugin has no setup step to
+      // put it in: an install copies files and runs nothing. Without this, every
+      // hook bailed on `if (!project) return` in any repo nobody had run `init`
+      // in, so the plugin loaded, connected, and did nothing at all — the same
+      // shape of silence as the empty MONGODB_URI, reached a different way.
+      //
+      // This is the right moment regardless of the plugin: the hook already runs
+      // once per session, at the start, knowing the repo root.
+      if (!project) {
+        const stack = detectStack(repoRoot);
+        if (!looksLikeProject({ isGitRepo: isGitRepo(repoRoot), stack })) return;
+        project = {
+          id: nanoid(), name: getProjectName(repoRoot), path: repoRoot, stack,
+          createdAt: Date.now(), lastSeen: Date.now(),
+        };
+        await upsertProject(project);
+        captureLog(`registered ${project.name} from the session-start hook`);
+        // Say so once. Nothing is stored for a project on its first session, so
+        // the briefing below is empty and the agent would otherwise have no way
+        // to know memory is live — which, for someone who installed a plugin and
+        // ran no command, is the only confirmation they get that it works.
+        process.stdout.write(JSON.stringify({
+          hookSpecificOutput: {
+            hookEventName: 'SessionStart',
+            additionalContext: formatFirstSession(project),
+          },
+        }));
+        return;
+      }
       // Re-read the stack while we are here. It is only filesystem checks, a
       // few milliseconds, and it is how a project registered before the
       // detector could see monorepos or Flutter stops reporting nothing —
