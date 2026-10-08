@@ -41473,6 +41473,7 @@ var require_search = __commonJS({
       const words = normalized.split(" ").filter(Boolean);
       return words.length >= 2 || (words[0]?.length ?? 0) >= 8;
     }
+    var content = (w) => w.length > 2 && !STOPWORDS.has(w);
     function patternOverlap(query, pattern) {
       const q = normalizeText(query);
       const p = normalizeText(pattern);
@@ -41481,8 +41482,8 @@ var require_search = __commonJS({
       const [needle, haystack] = q.length <= p.length ? [q, p] : [p, q];
       if (haystack.includes(needle) && specificEnough(needle))
         return 1;
-      const qWords = new Set(q.split(" ").filter((w) => w.length > 2));
-      const pWords = p.split(" ").filter((w) => w.length > 2);
+      const qWords = new Set(q.split(" ").filter(content));
+      const pWords = p.split(" ").filter(content);
       if (qWords.size === 0 || pWords.length === 0)
         return 0;
       const matches = pWords.filter((w) => qWords.has(w)).length;
@@ -41580,13 +41581,15 @@ var require_search = __commonJS({
           // match percentage show the one that found it.
           similarity: byVector ? semantic : lexical,
           patternScore: bestPattern,
+          errorScore: patternScore,
+          titleScore,
           categoryMatch,
           matchType: bestPattern >= 0.5 ? "pattern" : "semantic",
           sameProject: !!projectId && e2.projectId === projectId,
           lexical
         });
       }
-      const score = (r2) => r2.patternScore * 0.45 + r2.similarity * 0.3 + r2.lexical * 0.15 + (r2.categoryMatch ? 0.12 : 0) + (r2.sameProject ? 0.1 : 0);
+      const score = (r2) => r2.errorScore * 0.45 + r2.titleScore * 0.15 + r2.similarity * 0.3 + r2.lexical * 0.15 + (r2.categoryMatch ? 0.12 : 0) + (r2.sameProject ? 0.1 : 0);
       results.sort((a, b) => score(b) - score(a));
       return results.slice(0, topK);
     }

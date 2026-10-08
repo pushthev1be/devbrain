@@ -554,3 +554,104 @@ describe('errorPattern specificity', () => {
     expect(preciseSearch('SIGPIPE killed process', [], [e]).map(h => h.entry.id)).toContain('e-sig');
   });
 });
+
+// ── ranking: error text against title word overlap ────────────────────────────
+//
+// These pin the fix for a measured defect. preciseSearch used to rank on
+// `max(errorPatternOverlap, titleOverlap * 0.6)` paid at 0.45, so a query
+// phrased as a sentence was ranked mostly on how many words it happened to
+// share with a title — at an effective 0.27 against semantic's 0.30. On the
+// real store, the query "the command line tool dies with an unhelpful message
+// when no API key is configured" put the correct entry third despite its having
+// the highest semantic similarity of any candidate, 0.719 against 0.647, because
+// two other entries shared the words "line" and "message" with it. Unprompted
+// recall takes the top two, so third was dropped.
+
+describe('preciseSearch ranking', () => {
+  // No embeddings anywhere, so only the wording signals are in play and the
+  // comparison is between error-text overlap and title overlap alone.
+  const noVector = { embedding: undefined };
+
+  it('does not count stopwords as pattern overlap', () => {
+    // The title shares nothing with the query but words that are in every
+    // sentence. Before the fix each of "when", "the", "that", "not" and "was"
+    // scored, because the filter dropped only words of two characters or less.
+    const stopwordsOnly = makeEntry({
+      ...noVector, id: 'stopwords',
+      title: 'When the build does not find that file it was given',
+      content: 'Unrelated.',
+    });
+    const [hit] = preciseSearch(
+      'when the user taps that button nothing happens and it was not saved',
+      [], [stopwordsOnly], { topK: 5, threshold: 0 },
+    );
+    // Admitted or not, it must not be credited with a pattern match.
+    expect(hit?.titleScore ?? 0).toBe(0);
+    expect(hit?.patternScore ?? 0).toBe(0);
+  });
+
+  it('ranks a real error-text match above a title that shares a couple of words', () => {
+    const realError = makeEntry({
+      ...noVector, id: 'real-error',
+      title: 'Payments stop without any warning',
+      content: 'The key had expired.',
+      errorPattern: 'StripeAuthenticationError: Expired API Key provided',
+    });
+    const wordCoincidence = makeEntry({
+      ...noVector, id: 'coincidence',
+      title: 'A generic exit code line beat the real message',
+      content: 'Unrelated to keys.',
+    });
+    const results = preciseSearch(
+      'StripeAuthenticationError: Expired API Key provided',
+      [], [wordCoincidence, realError], { topK: 5, threshold: 0 },
+    );
+    expect(results[0].entry.id).toBe('real-error');
+    // And it is reported as what it is, so the caller can say "pattern match".
+    expect(results[0].errorScore).toBeGreaterThan(0.5);
+  });
+
+  // The defect itself, in miniature, with the numbers chosen so the two
+  // formulas disagree — which is the only way to show what the change buys.
+  //
+  // `means-same` shares no content word with the question but is the closer
+  // embedding; `coincidence` shares two words ("line", "message") and is
+  // further away. Under the old term, max(errorScore, titleScore * 0.6) * 0.45,
+  // the coincidence scored 0.323 against 0.304 and came first. Paying title
+  // overlap the lexical weight it deserves instead, 0.15, the order is 0.304
+  // against 0.296 and the entry that means the same thing comes first.
+  //
+  // Not a claim that title overlap can never win. Three shared content words
+  // still outrank a small semantic lead, and should — that is evidence too.
+  // What changed is the price: 0.15 rather than an effective 0.27, against
+  // semantic's 0.30.
+  it('no longer lets a title-word coincidence outrank a clearly closer match', () => {
+    const meansTheSame = makeEntry({
+      id: 'means-same',
+      title: 'CLI commands fail with cryptic errors for missing credentials',
+      content: 'preflight rewrites SDK errors into advice.',
+      embedding: vec(1, 0, 0),
+    });
+    const coincidence = makeEntry({
+      id: 'coincidence',
+      title: 'A generic line beat the real message',
+      content: 'A pattern too short to identify anything.',
+      embedding: vec(0.85, 0.527, 0),
+    });
+
+    const query = 'the command line tool dies with an unhelpful message when no API key is configured';
+    const results = preciseSearch(query, vec(1, 0, 0), [coincidence, meansTheSame],
+      { topK: 5, threshold: 0 });
+
+    expect(results[0].entry.id).toBe('means-same');
+
+    // And the old formula really did order these the other way round, so this
+    // test fails if the terms are ever folded back together.
+    const old = (r: typeof results[number]) =>
+      Math.max(r.errorScore, r.titleScore * 0.6) * 0.45
+      + r.similarity * 0.30 + r.lexical * 0.15 + (r.sameProject ? 0.10 : 0);
+    const same = results.find(r => r.entry.id === 'means-same')!;
+    const coin = results.find(r => r.entry.id === 'coincidence')!;
+    expect(old(coin)).toBeGreaterThan(old(same));
+  });
+});

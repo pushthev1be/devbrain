@@ -222,10 +222,49 @@ secure credential store rather than `settings.json`.
       nothing in the documented path is affected. The keys that matter are read
       lazily inside functions and do work. Fix by reading them at the point of
       use, not by moving the call.
-- [ ] **Ranking bug**: `patternScore` is weighted 0.45 against semantic's 0.30,
+- [x] **Ranking bug**: `patternScore` is weighted 0.45 against semantic's 0.30,
       so on a plain-English query — where the pattern term degenerates into title
       word overlap — the best semantic hit can land at rank 3 and be dropped by
-      the top-2 cap. Reproduced and measured.
+      the top-2 cap. Reproduced and measured. Two changes, both principled rather
+      than tuned:
+
+      1. `patternOverlap`'s word-overlap branch filtered only words of two
+         characters or less, so "the", "not", "when", "with" and "that" all
+         counted as overlap. It now uses the same content-word test as the
+         keyword index.
+      2. Error-text overlap and title overlap are weighted apart instead of
+         `max(error, title * 0.6) * 0.45`. Title overlap is a lexical signal, so
+         it is paid BM25's 0.15; real error-text overlap keeps 0.45, which is
+         what `devbrain search "<exact error>"` runs on.
+
+      Measured over the real 222-entry store, 16 paraphrased queries written to
+      avoid the entries' own wording plus 8 out-of-corpus controls:
+
+      | | rank 1 | top 2 | top 3 | controls fired |
+      |---|---|---|---|---|
+      | before | 9/16 | 11/16 | 13/16 | 0/8 |
+      | stopwords only | 11/16 | 11/16 | 12/16 | 0/8 |
+      | both | **11/16** | **12/16** | 12/16 | **0/8** |
+
+      The reported case went from rank 3 to rank 2, which is the one that
+      matters: unprompted recall takes the top two. One case moved the other way,
+      3 to 4 — a Supabase RLS query whose top five are all genuinely related
+      security entries inside a 0.022 band, which is a cluster of neighbours
+      rather than the same defect.
+
+      Gating is deliberately untouched. `patternScore` still reports the combined
+      value, so `recallForFailure`'s threshold and the "pattern match" label
+      behave exactly as before and the controls stayed silent. Only order changed.
+
+      Left alone on purpose: in nearly every remaining miss the correct entry has
+      the **highest semantic score** and loses on BM25, which suggests the
+      0.30/0.15/0.15 balance is wrong. That is a bigger claim than 16 cases can
+      carry, and chasing it here would be fitting my own benchmark. It needs its
+      own measured study.
+- [ ] **Semantic against lexical weighting**, per the note above: the correct
+      entry is usually the closest embedding and still loses on word overlap.
+      Needs a larger query set than the 16 used for the ranking fix, and the
+      harness to be committed rather than thrown away.
 - [ ] **Dashboard stubs**: Edit, and Promote to all projects. Promote is what the
       Global scope needs.
 - [ ] **Write `supersedes` on insert.** Only `supersededBy` is stored; the
