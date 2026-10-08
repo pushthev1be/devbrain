@@ -4,7 +4,9 @@
 
 Persistent developer memory for you and your AI agents. Your coding agent writes down what it fixes and decides as it works, and reads it back before the next task — so it already knows what broke before, what was decided, and why. DevBrain notices when something worth keeping happened, stores it, and ranks it back; it needs no AI service of its own.
 
-**🚀 Live demo:** **https://devbrain-oujuoveyvq-uc.a.run.app** — dashboard + team feed, with the agent at `POST /agent` and the MCP server at `/mcp`. Runs on **Gemini 2.5 Flash (Vertex AI)** + **MongoDB Atlas Vector Search** on **Google Cloud Run**.
+**🚀 Live demo:** **https://devbrain-oujuoveyvq-uc.a.run.app** — dashboard and the agent at `POST /agent`, on **Gemini 2.5 Flash (Vertex AI)** + **MongoDB Atlas** on **Google Cloud Run**.
+
+> The hosted instance is an older build than this repo and its database is not currently reachable, so parts of it answer and parts do not. Run it locally for the current thing — `npm install` through `devbrain setup` below takes a couple of minutes and needs no cloud account.
 
 ```bash
 # Ask the deployed agent (Gemini 2.5 Flash on Vertex AI) anything in your team's memory:
@@ -13,7 +15,7 @@ curl -X POST https://devbrain-oujuoveyvq-uc.a.run.app/agent \
   -d '{"query":"any fixes for mobile safe-area overlap?"}'
 ```
 
-<img width="923" height="866" alt="image" src="https://github.com/user-attachments/assets/68591649-0049-4e8d-bb72-620ffb604a91" />
+<img src="assets/dashboard.png" alt="The DevBrain dashboard: entries listed beside a detail pane, with counts for active, caught, never surfaced and retracted" width="900">
 
 ---
 
@@ -21,23 +23,31 @@ curl -X POST https://devbrain-oujuoveyvq-uc.a.run.app/agent \
 
 **The agent writes; DevBrain stores.** The coding agent that did the work already holds the whole story in its context — the error, the dead ends, why the fix works. It states that better than any second model reading a transcript afterwards, so it writes every entry, through the `save_entry` MCP tool or `devbrain note`. What agents lacked was a trigger they could not forget, so DevBrain supplies the triggers, mechanically and without a model:
 
-- **Session start** — the project's memory is put into the agent's context (a Claude Code hook).
-- **When a command fails** — the error text is matched against stored error patterns, and a literal hit is handed to the agent unasked, in the moment it would otherwise go looking. Writing was never the hard half; this is the read trigger.
-- **After each turn** — DevBrain checks the session locally. If the turn resolved an error or made a stated decision and nothing was saved, it asks the agent once, showing it the error text and files involved. The agent writes the entry; routine turns cost nothing.
-- **Past work** — commits and sessions from before DevBrain was installed are handed to the agent with `devbrain backfill`, in batches it reads and saves from.
+- **Session start** — the project's memory is put into the agent's context.
+- **When you describe a problem** — your own words are searched against memory before the agent starts work. Most debugging begins with a sentence, not a stack trace, and that sentence is the best description of the problem anyone writes all session.
+- **When a command fails** — the error is matched against what is stored and a hit is handed over unasked, in the moment the agent would otherwise press on. Installed for every tool, not just shells: a production error is usually found by *reading* it — a log query, a database probe — and those are often not shell commands at all.
+- **After each turn** — DevBrain reads the transcript locally. If the turn resolved an error or made a stated decision and nothing was saved, it asks the agent once, showing it the error text and the files involved. The agent writes the entry; routine turns cost nothing.
+- **Past work** — commits and sessions from before DevBrain was installed are handed over with `devbrain backfill`, in batches the agent reads and saves from.
 
-When you hit a known error pattern, `search_knowledge` finds the exact past fix — not just something semantically similar.
+Writing was never the hard half. Three of those five triggers exist to make memory get *read*, because an agent absorbed in a bug does not stop to search — and a memory nothing reads back is a diary.
 
 The memory compounds. An entry retrieved across multiple projects gets flagged as a cross-project pattern and surfaces in every future context load. Confidence rises only on independent evidence — the same knowledge recurring in a second project, or a person confirming it — never just because DevBrain read it back.
+
+### The dashboard
+
+`--serve` puts the whole store in a browser at **http://localhost:8080**:
+
+- **Entries** — a list beside a detail pane, so reading one entry never loses your place in the list. Each row carries its type, category, age, how it was captured, and how often it was shown against how often it actually caught a failure.
+- **Four counts across the top** — active, caught a failure, never surfaced, retracted. Side by side on purpose: "62 entries" is only good news next to "10 have ever caught anything".
+- **Graph** — the same entries drawn, time left to right, a lane per type. A bug and the fix that closed it are linked, so "where did this get fixed" is a place on the picture. Recorded links are solid; inferred ones (same session, same error, nearest in meaning) are dashed, because they are a guess.
+- **Recall tester** — paste a failure, see exactly what an agent would be handed. It is the only way to check the half that matters, and it says plainly when the answer is nothing.
+
+<img src="assets/graph.png" alt="The graph view: entries as nodes in lanes by type, over time, with links between them" width="900">
 
 ### Shared Knowledge Across Codebases
 Every registered project writes to one knowledge base — local by default, or a shared MongoDB Atlas cluster when `MONGODB_URI` is set. Across your own projects this works either way; a *team* sharing collective memory is what pointing several machines at the same Atlas database gives you:
 - **The Team Feed**: The web dashboard renders a shared activity timeline of the latest fixes, decisions, and patterns across all registered codebases, each labeled with its project and stack.
 - **CLI sibling alerts**: When you load context in the CLI, DevBrain surfaces the most recent entries from your *other* projects (e.g. surfacing a layout fix saved in a mobile repo while you work on a web frontend), so solutions cross repository boundaries instead of being re-derived.
-
-<img width="1315" height="580" alt="Image" src="https://github.com/user-attachments/assets/50542418-3346-45d7-8987-8124762487b4" />
----
-<img width="1689" height="707" alt="Image" src="https://github.com/user-attachments/assets/a69b0fdf-be49-4ed1-9e92-76df1406357a" />
 
 
 ## Install
@@ -46,9 +56,7 @@ Every registered project writes to one knowledge base — local by default, or a
 git clone https://github.com/pushthev1be/devbrain.git
 cd devbrain
 npm install --ignore-scripts
-npm run build --workspace=packages/core
-npm run build --workspace=packages/cli
-npm run build --workspace=packages/mcp
+npm run build          # builds core, then cli and mcp
 cd packages/cli && npm link
 ```
 
@@ -155,7 +163,7 @@ cd my-project
 devbrain init
 ```
 
-`init` registers the project, detects the tech stack, installs the Claude Code hooks into `.claude/settings.local.json` (local, so teammates without DevBrain are unaffected), and writes `DEV_CONTEXT.md` — instructions for any agent on reading and writing memory. Run `devbrain hooks install --global` to cover every project instead.
+`init` registers the project, detects the tech stack (reading the root *and* one level below it, so an app-and-server repo reports both halves rather than nothing), installs the Claude Code hooks into `.claude/settings.local.json` (local, so teammates without DevBrain are unaffected), and writes `DEV_CONTEXT.md` — instructions for any agent on reading and writing memory. Run `devbrain hooks install --global` to cover every project instead.
 
 ### Don't start from empty
 
@@ -179,7 +187,7 @@ Three MCP tools — one per thing an agent does with memory:
 |------|----------------------|
 | `get_context` | Start of any non-trivial task — ranked history for the task, plus how much is stored and what is unreviewed |
 | `search_knowledge` | Before debugging — exact error text first, then meaning (or keywords). With no query, lists by type, category or recency |
-| `save_entry` | After fixing, deciding or learning something. Pass `supersedes: <id>` to correct an entry that turned out wrong — it is retracted in the same call |
+| `save_entry` | After fixing, deciding or learning something. Pass `supersedes: <id>` to correct an entry that turned out wrong — it is retracted in the same call. Pass `fixes: <id>` when you just fixed a bug DevBrain already recorded — unlike `supersedes`, both entries stay true and the link records where it was closed |
 
 `DEV_CONTEXT.md` tells the agent when to use them, and in Claude Code the hooks make sure the important moments are not missed.
 
@@ -220,7 +228,7 @@ pattern: always run npm install --ignore-scripts on Windows
 stack: React, TypeScript, Vite, TailwindCSS, Node.js
 ```
 
-Devbrain checks for near-duplicate entries at save time (>86% embedding similarity) and warns before saving a duplicate. For decisions, it checks if you're superseding an existing one and marks the old entry as superseded.
+DevBrain checks for a near-duplicate at save time — 0.90 cosine similarity with embeddings configured, or 0.75 title overlap without — and declines rather than storing the same thing twice. An entry you are correcting never counts as its own duplicate: pass its id as `supersedes` and it is retracted in the same call.
 
 ---
 
@@ -262,16 +270,27 @@ With Gemini configured, sections with 2+ entries are summarised into bullet-poin
 
 ## Technical Retrieval Ranking
 
-Search uses a two-pass approach: pattern matching on stored `errorPattern` fields first, then semantic cosine similarity on embeddings as fallback. This means pasting an exact error message finds the specific past fix even if the wording differs from how it was saved.
+Search runs two passes: pattern matching on stored `errorPattern` fields first, then semantic cosine similarity as the fallback. Pasting an exact error finds the specific past fix even when the surrounding words differ from how it was saved.
 
-**Ranking formula:**
+Unprompted recall — the nudge after a failing command — admits a hit by either route, and the two fail in opposite directions. A literal match is never wrong but only fires when the failure arrives worded the way someone wrote it down months ago, which real stack traces do not do. Measured against five failures phrased the way a tool or a person actually emits them, the literal route alone found **none** of them, and adding meaning (cosine ≥ 0.62, the same bar a deliberate search uses) found **four**, while still firing on none of six unrelated failures. Precision comes from taking only the top two of an already ranked list, not from raising the threshold.
+
+**Search tells you when it is guessing.** It always returns its best candidates, and being handed something reads as evidence there was something to hand over. Below 0.70, with no literal match, results are labelled as not a close match — because on a real store an error that had never been seen came back at 0.63 while a correct hit on another query scored 0.64. The ranking is sound; the confidence it implies is not.
+
+**Ranking formula** (context loads):
 ```
 semantic × 0.45 + recency × 0.10 + same-project × 0.10 + same-stack × 0.08
   + usage × 0.05 + confidence × 0.05 + category-match × 0.07
   + pattern-match × 0.05 + cross-project × 0.05
 ```
 
-The same-project boost only fires when the entry already scores > 0.72 semantically — prevents local noise from outranking better cross-project solutions on a focused query. Without a query (general context load), same-project entries get a higher base score so they rank above entries from unrelated projects.
+The same-project boost only fires when the entry already scores > 0.72 semantically — this prevents local noise from outranking a better cross-project solution on a focused query. Without a query, same-project entries get a higher base score so they rank above unrelated ones.
+
+Direct search ranks differently, weighting the literal signal hardest:
+
+```
+pattern × 0.45 + semantic × 0.30 + bm25 × 0.15
+  + category-match 0.12 + same-project 0.10
+```
 
 ---
 
@@ -287,7 +306,21 @@ Every entry stores:
 | `causeArchetype` | Abstract root cause transferable across projects — e.g. "missing guard middleware causes silent runtime failure" |
 | `confidence` | `observation` → `corroborated` (seen in a 2nd project, or confirmed once by a person) → `confirmed` (confirmed twice) |
 | `seenInProjects` | Project IDs that have retrieved this entry — 2+ triggers cross-project promotion |
-| `supersededBy` | ID of replacement entry — superseded decisions shown separately, not in main context |
+| `supersededBy` | ID of the replacement — retracted entries are shown separately, never as current guidance |
+
+### How it connects, and whether it earned its place
+
+| Field | Purpose |
+|-------|---------|
+| `fixes` | The bug this entry closed. Unlike `supersedes`, the other entry was *right* — so both stay and both keep surfacing, and "where did this get fixed" has an answer |
+| `sessionId` | The agent session this was written in, so a run of entries reads as one episode of work rather than unrelated rows sharing a timestamp |
+| `origin` | `hook` (DevBrain asked) · `agent` (saved unprompted) · `manual` (typed by a person) · `indexed` (derived from a file). Whether memory had to be *asked for* is the one thing a list of entries cannot otherwise show |
+| `retrievalCount` | Times shown, including in session briefings — a popularity signal, not evidence of use |
+| `recallCount` | Times matched to a **real failure** and handed over unasked. The one count that means the entry earned its place |
+| `recalls` | The last 20 of those, each with the text it matched. A count of 9 cannot tell nine different failures from the same flaky command nine times |
+| `revisionCount` | How often this knowledge was corrected before arriving here. A high count means unsettled, which is worth seeing next to the claim |
+
+`retrievalCount` and `recallCount` are deliberately separate. A briefing surfaces entries whether or not they turn out to help, so an entry can be shown often having never helped anyone — and that is a thing worth being able to see.
 
 ---
 
@@ -307,7 +340,17 @@ node packages/mcp/dist/index.js --serve     # dashboard at :8080, MCP at :8080/m
 
 HTTP is opt-in: the default launch is a stdio MCP server, one per agent session, and binding a port on every launch would make the second session fail with `EADDRINUSE`. Set `PORT` to override.
 
-`devbrain hooks status` also shows the last few times DevBrain asked an agent to record something (`~/.devbrain/capture.log`).
+`devbrain hooks status` shows which of the five hook events are installed, and the last few times DevBrain asked an agent to record something or handed one a past fix (`~/.devbrain/capture.log`).
+
+### Working on DevBrain itself
+
+```bash
+npm test          # 435 tests
+npm run icons     # regenerate stack marks from simple-icons
+npm run brand     # regenerate assets/logo.svg from the one definition of the mark
+```
+
+Both generated files are checked by tests rather than trusted: add a framework to the stack detector and forget `npm run icons`, and the suite fails by name with the command to run.
 
 ### Watch it work
 
@@ -322,6 +365,8 @@ claude --plugin-dir ./mods/devbrain-live
 ## Engineering & Architectural Decisions
 
 **The coding agent writes the knowledge; DevBrain only triggers and stores it** — Earlier versions ran Gemini over commit diffs and session transcripts to write entries. A diff records what changed but rarely why, a second model reading a transcript afterwards knows less than the agent that did the work, and every extraction cost a model call (the free tier allows 20 a day). So the agent writes, and DevBrain's job is a trigger it cannot forget: a Stop hook that checks the transcript locally and asks once when a turn resolved an error or made a decision and nothing was saved, and `backfill` for history from before. Capture and recall need no AI service at all.
+
+**The read path needs mechanical triggers too** — capture was solved by a trigger the agent could not forget, and reading was left to the agent's judgement, with a tool description asking it to search before debugging. Measured over four days of real use that produced 17 saves and 2 reads: an agent absorbed in a stack trace does not stop to query memory, and the instruction is followed exactly as unevenly as "remember to save" was. Adding a callable search tool would not have helped — one already existed and was the thing going unused. So the same answer was applied to the other half: search on the user's own words before work starts, and on the error when a command fails. The lesson generalises past this project: when an integration does nothing rather than the wrong thing, suspect the trigger before the logic.
 
 **MongoDB Atlas for Cloud Scaling & Stored Vectors** — Employs a robust hosted MongoDB Atlas database for technical vector searches. High-dimensional technical embeddings (3072 dimensions) are matched against `$vectorSearch` cosine-similarity indexes directly in the cloud. For offline development, testing, and demo recording, `DEVBRAIN_MOCK=true` intercepts all Gemini calls with deterministic mock vectors and extractions — no API key or network required.
 
