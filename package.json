@@ -5,8 +5,9 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present && npm run bundle",
     "dev": "npm run dev -w packages/cli",
+    "pretest": "npm run bundle",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",

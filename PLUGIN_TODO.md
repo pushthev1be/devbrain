@@ -62,7 +62,25 @@ installs with nothing to run.
       platform `node`, externalising nothing that matters at runtime
 - [x] un-ignore those two paths specifically, not `dist/` as a whole
 - [x] a `prepare`-style script so the bundles cannot drift from source silently,
-      and a test that fails if they have (same discipline as `npm run icons`)
+      and a test that fails if they have (same discipline as `npm run icons`).
+
+      **Only the test existed when this was first ticked, and the half that was
+      missing is the half that matters.** A test that *detects* drift still
+      requires someone to remember `npm run bundle`; nothing in the repo invoked
+      it but a person typing it. Over one session that failure fired three times
+      — edit a source, run the suite, watch the staleness test fail, bundle by
+      hand. Each of those was a workaround, not a fix, and it took DevBrain's own
+      step-back prompt to say so.
+
+      Now `build` ends with `npm run bundle`, because the bundles are build
+      output, and `pretest` runs it too, so `npm test` and CI cannot see a bundle
+      older than the source. 3.4s against a 30s suite. Verified by reproducing
+      the stale state deliberately — touch a source so the bundle is provably
+      older, then `npm test` with no manual step: it rebundled and all 513
+      passed.
+
+      `npx vitest run` still bypasses npm scripts and can therefore still be
+      stale. That is what the test is for, and it is the thing I was doing.
 
 ### 2. Manifest and components
 
