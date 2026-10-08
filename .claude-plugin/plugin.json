@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin.json",
+  "name": "devbrain",
+  "displayName": "DevBrain",
+  "version": "0.1.0",
+  "description": "Persistent memory for your coding agent. It writes down what it fixes and decides as it works, and reads it back before the next task.",
+  "author": {
+    "name": "DevBrain"
+  },
+  "repository": "https://github.com/pushthev1be/devbrain",
+  "homepage": "https://github.com/pushthev1be/devbrain#readme",
+  "icon": "./assets/logo.svg",
+  "license": "MIT",
+  "keywords": [
+    "memory",
+    "knowledge",
+    "recall",
+    "mcp"
+  ],
+  "userConfig": {
+    "gemini_api_key": {
+      "type": "string",
+      "title": "Gemini API key",
+      "description": "Optional. Adds search by meaning, so a problem described in your own words finds the entry that was written about it. Without it DevBrain matches on wording alone, which still finds an exact error. Free key at aistudio.google.com.",
+      "sensitive": true
+    },
+    "mongodb_uri": {
+      "type": "string",
+      "title": "MongoDB connection string",
+      "description": "Optional. Leave empty to keep memory in a local file at ~/.devbrain/db.json. Set it to share one memory across machines or a team.",
+      "sensitive": true
+    },
+    "dashboard_token": {
+      "type": "string",
+      "title": "Dashboard token",
+      "description": "Only needed to reach the dashboard from another machine. Left empty, the dashboard answers on localhost only and needs no token.",
+      "sensitive": true
+    }
+  },
+  "mcpServers": {
+    "devbrain": {
+      "command": "node",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/dist/mcp.js"
+      ],
+      "env": {
+        "GEMINI_API_KEY": "${user_config.gemini_api_key}",
+        "MONGODB_URI": "${user_config.mongodb_uri}",
+        "DEVBRAIN_TOKEN": "${user_config.dashboard_token}"
+      }
+    }
+  }
+}

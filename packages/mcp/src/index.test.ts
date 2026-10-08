@@ -52,6 +52,9 @@ vi.mock('@devbrain/core', async importOriginal => {
   const real = await importOriginal<typeof import('@devbrain/core')>();
 
   return {
+  // Stubbed, not real: index.ts calls this at module load, and the real one
+  // would read the developer's own ~/.devbrain/.env into process.env.
+  loadGlobalEnv:    vi.fn().mockReturnValue([]),
   ENTRY_TYPES:      real.ENTRY_TYPES,
   ENTRY_TYPE_NAMES: real.ENTRY_TYPE_NAMES,
   normalizeType:    real.normalizeType,

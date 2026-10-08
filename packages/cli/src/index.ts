@@ -26,25 +26,16 @@ import {
   looksLikeError, isReadOnlyCommand, isEchoedOutput, isGenericFailureLine, recallForFailure, formatRecallForAgent,
   withDevbrainHooks, withoutDevbrainHooks, installedDevbrainHooks,
   nextSessionChunk, formatBackfillBatch, commitExcerpt, BACKFILL_BATCH_BUDGET,
-  sameProjectPath,
+  sameProjectPath, loadGlobalEnv,
 } from '@devbrain/core';
 import type { Entry, Project, EntryCategory } from '@devbrain/core';
 import { nanoid } from 'nanoid';
 import { homedir, tmpdir } from 'os';
 
 // Load config from ~/.devbrain/.env (GEMINI_API_KEY, Vertex AI vars, MONGODB_URI, …).
-// Loaded unconditionally; real environment variables take precedence, comments skipped.
-const globalEnvPath = join(homedir(), '.devbrain', '.env');
-if (existsSync(globalEnvPath)) {
-  const lines = readFileSync(globalEnvPath, 'utf-8').replace(/^﻿/, '').split('\n');
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-    const [key, ...rest] = trimmed.split('=');
-    const k = key?.trim();
-    if (k && rest.length && process.env[k] === undefined) process.env[k] = rest.join('=').trim();
-  }
-}
+// A real environment variable takes precedence, but only when it holds a value:
+// see loadGlobalEnv on why an empty one has to count as absent here.
+loadGlobalEnv();
 
 // ─── first-run detection ──────────────────────────────────────────────────────
 

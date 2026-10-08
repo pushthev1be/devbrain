@@ -35554,12 +35554,12 @@ var require_certificatesubjecttokensupplier = __commonJS({
           }
           throw new CertificateSourceUnavailableError(`Provided certificate config path is invalid: ${overridePath}`);
         }
-        const envPath2 = process.env[exports2.CERTIFICATE_CONFIGURATION_ENV_VARIABLE];
-        if (envPath2) {
-          if (await (0, util_1.isValidFile)(envPath2)) {
-            return envPath2;
+        const envPath = process.env[exports2.CERTIFICATE_CONFIGURATION_ENV_VARIABLE];
+        if (envPath) {
+          if (await (0, util_1.isValidFile)(envPath)) {
+            return envPath;
           }
-          throw new CertificateSourceUnavailableError(`Path from environment variable "${exports2.CERTIFICATE_CONFIGURATION_ENV_VARIABLE}" is invalid: ${envPath2}`);
+          throw new CertificateSourceUnavailableError(`Path from environment variable "${exports2.CERTIFICATE_CONFIGURATION_ENV_VARIABLE}" is invalid: ${envPath}`);
         }
         const wellKnownPath = (0, util_1.getWellKnownCertificateConfigFileLocation)();
         if (await (0, util_1.isValidFile)(wellKnownPath)) {
@@ -95286,6 +95286,51 @@ var require_graph = __commonJS({
   }
 });
 
+// packages/core/dist/env.js
+var require_env = __commonJS({
+  "packages/core/dist/env.js"(exports2) {
+    "use strict";
+    Object.defineProperty(exports2, "__esModule", { value: true });
+    exports2.parseEnvFile = parseEnvFile;
+    exports2.globalEnvPath = globalEnvPath;
+    exports2.loadGlobalEnv = loadGlobalEnv2;
+    var fs_1 = require("fs");
+    var os_1 = require("os");
+    var path_1 = require("path");
+    function parseEnvFile(text) {
+      const out = {};
+      for (const line of text.replace(/^﻿/, "").split("\n")) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith("#"))
+          continue;
+        const [k, ...rest] = trimmed.split("=");
+        const key = k?.trim();
+        if (key && rest.length)
+          out[key] = rest.join("=").trim();
+      }
+      return out;
+    }
+    function unset(value) {
+      return value === void 0 || value.trim() === "";
+    }
+    function globalEnvPath() {
+      return (0, path_1.join)((0, os_1.homedir)(), ".devbrain", ".env");
+    }
+    function loadGlobalEnv2(path6 = globalEnvPath()) {
+      if (!(0, fs_1.existsSync)(path6))
+        return [];
+      const applied = [];
+      for (const [key, value] of Object.entries(parseEnvFile((0, fs_1.readFileSync)(path6, "utf-8")))) {
+        if (unset(process.env[key])) {
+          process.env[key] = value;
+          applied.push(key);
+        }
+      }
+      return applied;
+    }
+  }
+});
+
 // packages/core/dist/index.js
 var require_dist5 = __commonJS({
   "packages/core/dist/index.js"(exports2) {
@@ -95327,6 +95372,7 @@ var require_dist5 = __commonJS({
     __exportStar(require_stuck(), exports2);
     __exportStar(require_graph(), exports2);
     __exportStar(require_redact(), exports2);
+    __exportStar(require_env(), exports2);
   }
 });
 
@@ -101560,7 +101606,7 @@ var require_safe_stable_stringify = __commonJS({
               return circularValue;
             }
             let res = "";
-            let join3 = ",";
+            let join2 = ",";
             const originalIndentation = indentation;
             if (Array.isArray(value)) {
               if (value.length === 0) {
@@ -101574,7 +101620,7 @@ var require_safe_stable_stringify = __commonJS({
                 indentation += spacer;
                 res += `
 ${indentation}`;
-                join3 = `,
+                join2 = `,
 ${indentation}`;
               }
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
@@ -101582,13 +101628,13 @@ ${indentation}`;
               for (; i2 < maximumValuesToStringify - 1; i2++) {
                 const tmp2 = stringifyFnReplacer(String(i2), value, stack, replacer, spacer, indentation);
                 res += tmp2 !== void 0 ? tmp2 : "null";
-                res += join3;
+                res += join2;
               }
               const tmp = stringifyFnReplacer(String(i2), value, stack, replacer, spacer, indentation);
               res += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res += `${join3}"... ${getItemCount(removedKeys)} not stringified"`;
+                res += `${join2}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               if (spacer !== "") {
                 res += `
@@ -101609,7 +101655,7 @@ ${originalIndentation}`;
             let separator = "";
             if (spacer !== "") {
               indentation += spacer;
-              join3 = `,
+              join2 = `,
 ${indentation}`;
               whitespace = " ";
             }
@@ -101623,13 +101669,13 @@ ${indentation}`;
               const tmp = stringifyFnReplacer(key2, value, stack, replacer, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}:${whitespace}${tmp}`;
-                separator = join3;
+                separator = join2;
               }
             }
             if (keyLength > maximumBreadth) {
               const removedKeys = keyLength - maximumBreadth;
               res += `${separator}"...":${whitespace}"${getItemCount(removedKeys)} not stringified"`;
-              separator = join3;
+              separator = join2;
             }
             if (spacer !== "" && separator.length > 1) {
               res = `
@@ -101670,7 +101716,7 @@ ${originalIndentation}`;
             }
             const originalIndentation = indentation;
             let res = "";
-            let join3 = ",";
+            let join2 = ",";
             if (Array.isArray(value)) {
               if (value.length === 0) {
                 return "[]";
@@ -101683,7 +101729,7 @@ ${originalIndentation}`;
                 indentation += spacer;
                 res += `
 ${indentation}`;
-                join3 = `,
+                join2 = `,
 ${indentation}`;
               }
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
@@ -101691,13 +101737,13 @@ ${indentation}`;
               for (; i2 < maximumValuesToStringify - 1; i2++) {
                 const tmp2 = stringifyArrayReplacer(String(i2), value[i2], stack, replacer, spacer, indentation);
                 res += tmp2 !== void 0 ? tmp2 : "null";
-                res += join3;
+                res += join2;
               }
               const tmp = stringifyArrayReplacer(String(i2), value[i2], stack, replacer, spacer, indentation);
               res += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res += `${join3}"... ${getItemCount(removedKeys)} not stringified"`;
+                res += `${join2}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               if (spacer !== "") {
                 res += `
@@ -101710,7 +101756,7 @@ ${originalIndentation}`;
             let whitespace = "";
             if (spacer !== "") {
               indentation += spacer;
-              join3 = `,
+              join2 = `,
 ${indentation}`;
               whitespace = " ";
             }
@@ -101719,7 +101765,7 @@ ${indentation}`;
               const tmp = stringifyArrayReplacer(key2, value[key2], stack, replacer, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}:${whitespace}${tmp}`;
-                separator = join3;
+                separator = join2;
               }
             }
             if (spacer !== "" && separator.length > 1) {
@@ -101777,20 +101823,20 @@ ${originalIndentation}`;
               indentation += spacer;
               let res2 = `
 ${indentation}`;
-              const join4 = `,
+              const join3 = `,
 ${indentation}`;
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
               let i2 = 0;
               for (; i2 < maximumValuesToStringify - 1; i2++) {
                 const tmp2 = stringifyIndent(String(i2), value[i2], stack, spacer, indentation);
                 res2 += tmp2 !== void 0 ? tmp2 : "null";
-                res2 += join4;
+                res2 += join3;
               }
               const tmp = stringifyIndent(String(i2), value[i2], stack, spacer, indentation);
               res2 += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res2 += `${join4}"... ${getItemCount(removedKeys)} not stringified"`;
+                res2 += `${join3}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               res2 += `
 ${originalIndentation}`;
@@ -101806,16 +101852,16 @@ ${originalIndentation}`;
               return '"[Object]"';
             }
             indentation += spacer;
-            const join3 = `,
+            const join2 = `,
 ${indentation}`;
             let res = "";
             let separator = "";
             let maximumPropertiesToStringify = Math.min(keyLength, maximumBreadth);
             if (isTypedArrayWithEntries(value)) {
-              res += stringifyTypedArray(value, join3, maximumBreadth);
+              res += stringifyTypedArray(value, join2, maximumBreadth);
               keys2 = keys2.slice(value.length);
               maximumPropertiesToStringify -= value.length;
-              separator = join3;
+              separator = join2;
             }
             if (deterministic) {
               keys2 = sort(keys2, comparator);
@@ -101826,13 +101872,13 @@ ${indentation}`;
               const tmp = stringifyIndent(key2, value[key2], stack, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}: ${tmp}`;
-                separator = join3;
+                separator = join2;
               }
             }
             if (keyLength > maximumBreadth) {
               const removedKeys = keyLength - maximumBreadth;
               res += `${separator}"...": "${getItemCount(removedKeys)} not stringified"`;
-              separator = join3;
+              separator = join2;
             }
             if (separator !== "") {
               res = `
@@ -103284,7 +103330,7 @@ var require_buffer_list = __commonJS({
         }
       }, {
         key: "join",
-        value: function join3(s2) {
+        value: function join2(s2) {
           if (this.length === 0) return "";
           var p2 = this.head;
           var ret = "" + p2.data;
@@ -172445,7 +172491,7 @@ var require_view = __commonJS({
     var dirname2 = path6.dirname;
     var basename5 = path6.basename;
     var extname3 = path6.extname;
-    var join3 = path6.join;
+    var join2 = path6.join;
     var resolve2 = path6.resolve;
     module2.exports = View;
     function View(name, options) {
@@ -172507,12 +172553,12 @@ var require_view = __commonJS({
     };
     View.prototype.resolve = function resolve3(dir, file2) {
       var ext = this.ext;
-      var path7 = join3(dir, file2);
+      var path7 = join2(dir, file2);
       var stat3 = tryStat(path7);
       if (stat3 && stat3.isFile()) {
         return path7;
       }
-      path7 = join3(dir, basename5(file2, ext), "index" + ext);
+      path7 = join2(dir, basename5(file2, ext), "index" + ext);
       stat3 = tryStat(path7);
       if (stat3 && stat3.isFile()) {
         return path7;
@@ -176217,7 +176263,7 @@ var require_send = __commonJS({
     var Stream4 = require("stream");
     var util3 = require("util");
     var extname3 = path6.extname;
-    var join3 = path6.join;
+    var join2 = path6.join;
     var normalize2 = path6.normalize;
     var resolve2 = path6.resolve;
     var sep = path6.sep;
@@ -176389,7 +176435,7 @@ var require_send = __commonJS({
           return res;
         }
         parts = path7.split(sep);
-        path7 = normalize2(join3(root2, path7));
+        path7 = normalize2(join2(root2, path7));
       } else {
         if (UP_PATH_REGEXP.test(path7)) {
           debug('malicious path "%s"', path7);
@@ -176522,7 +176568,7 @@ var require_send = __commonJS({
           if (err) return self2.onStatError(err);
           return self2.error(404);
         }
-        var p2 = join3(path7, self2._index[i2]);
+        var p2 = join2(path7, self2._index[i2]);
         debug('stat "%s"', p2);
         fs6.stat(p2, function(err2, stat3) {
           if (err2) return next(err2);
@@ -191964,7 +192010,7 @@ var require_view2 = __commonJS({
     var dirname2 = path6.dirname;
     var basename5 = path6.basename;
     var extname3 = path6.extname;
-    var join3 = path6.join;
+    var join2 = path6.join;
     var resolve2 = path6.resolve;
     module2.exports = View;
     function View(name, options) {
@@ -192012,12 +192058,12 @@ var require_view2 = __commonJS({
     };
     View.prototype.resolve = function resolve3(dir, file2) {
       var ext = this.ext;
-      var path7 = join3(dir, file2);
+      var path7 = join2(dir, file2);
       var stat3 = tryStat(path7);
       if (stat3 && stat3.isFile()) {
         return path7;
       }
-      path7 = join3(dir, basename5(file2, ext), "index" + ext);
+      path7 = join2(dir, basename5(file2, ext), "index" + ext);
       stat3 = tryStat(path7);
       if (stat3 && stat3.isFile()) {
         return path7;
@@ -192353,7 +192399,7 @@ var require_send2 = __commonJS({
     var Stream4 = require("stream");
     var util3 = require("util");
     var extname3 = path6.extname;
-    var join3 = path6.join;
+    var join2 = path6.join;
     var normalize2 = path6.normalize;
     var resolve2 = path6.resolve;
     var sep = path6.sep;
@@ -192572,7 +192618,7 @@ var require_send2 = __commonJS({
           return res;
         }
         parts = path7.split(sep);
-        path7 = normalize2(join3(root2, path7));
+        path7 = normalize2(join2(root2, path7));
       } else {
         if (UP_PATH_REGEXP.test(path7)) {
           debug('malicious path "%s"', path7);
@@ -192707,7 +192753,7 @@ var require_send2 = __commonJS({
           if (err) return self2.onStatError(err);
           return self2.error(404);
         }
-        var p2 = join3(path7, self2._index[i2]);
+        var p2 = join2(path7, self2._index[i2]);
         debug('stat "%s"', p2);
         fs6.stat(p2, function(err2, stat3) {
           if (err2) return next(err2);
@@ -238047,7 +238093,7 @@ var require_jsonfile = __commonJS({
       return obj;
     }
     var readFile = universalify.fromPromise(_readFile);
-    function readFileSync2(file2, options = {}) {
+    function readFileSync(file2, options = {}) {
       if (typeof options === "string") {
         options = { encoding: options };
       }
@@ -238079,7 +238125,7 @@ var require_jsonfile = __commonJS({
     }
     module2.exports = {
       readFile,
-      readFileSync: readFileSync2,
+      readFileSync,
       writeFile: writeFile3,
       writeFileSync: writeFileSync2
     };
@@ -250360,8 +250406,8 @@ var require_main = __commonJS({
       }
       return null;
     }
-    function _resolveHome(envPath2) {
-      return envPath2[0] === "~" ? path6.join(os2.homedir(), envPath2.slice(1)) : envPath2;
+    function _resolveHome(envPath) {
+      return envPath[0] === "~" ? path6.join(os2.homedir(), envPath.slice(1)) : envPath;
     }
     function _configVault(options) {
       const debug = parseBoolean(process.env.DOTENV_CONFIG_DEBUG || options && options.debug);
@@ -329668,9 +329714,6 @@ __export(index_exports, {
   createMcpServer: () => createMcpServer
 });
 module.exports = __toCommonJS(index_exports);
-var import_fs3 = require("fs");
-var import_path = require("path");
-var import_os = require("os");
 var import_http = require("http");
 
 // node_modules/@modelcontextprotocol/sdk/dist/esm/server/index.js
@@ -333858,16 +333901,7 @@ function checkRequest(req, config3) {
 }
 
 // packages/mcp/src/index.ts
-var envPath = (0, import_path.join)((0, import_os.homedir)(), ".devbrain", ".env");
-if ((0, import_fs3.existsSync)(envPath)) {
-  for (const line of (0, import_fs3.readFileSync)(envPath, "utf-8").replace(/^﻿/, "").split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-    const [k, ...v] = trimmed.split("=");
-    const key = k?.trim();
-    if (key && v.length && process.env[key] === void 0) process.env[key] = v.join("=").trim();
-  }
-}
+(0, import_core18.loadGlobalEnv)();
 function saveConfirmation(type, title, category, causeArchetype, errorPattern) {
   const cat = category && category !== "other" ? ` ${category}` : "";
   const short = (0, import_core18.clip)(title, 65);

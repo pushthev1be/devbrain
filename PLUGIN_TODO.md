@@ -25,7 +25,7 @@ request rather than by reading:
   reload-mutate-write, stale-broken after ten seconds, with a Windows retry on
   the rename.
 
-485 tests.
+501 tests.
 
 ---
 
@@ -57,10 +57,10 @@ Installing a plugin runs neither `npm install` nor `tsc`, and `dist/` is
 gitignored with 0 built files tracked — so a plugin built from the repo as-is
 installs with nothing to run.
 
-- [ ] esbuild `cli` and `mcp` to single files at `dist/cli.js` and `dist/mcp.js`,
+- [x] esbuild `cli` and `mcp` to single files at `dist/cli.js` and `dist/mcp.js`,
       platform `node`, externalising nothing that matters at runtime
-- [ ] un-ignore those two paths specifically, not `dist/` as a whole
-- [ ] a `prepare`-style script so the bundles cannot drift from source silently,
+- [x] un-ignore those two paths specifically, not `dist/` as a whole
+- [x] a `prepare`-style script so the bundles cannot drift from source silently,
       and a test that fails if they have (same discipline as `npm run icons`)
 
 ### 2. Manifest and components
@@ -68,24 +68,40 @@ installs with nothing to run.
 Everything goes at the plugin root; only `plugin.json` lives in
 `.claude-plugin/`.
 
-- [ ] `.claude-plugin/plugin.json` — `name: "devbrain"` (kebab-case; names
+- [x] `.claude-plugin/plugin.json` — `name: "devbrain"` (kebab-case; names
       starting `claude-`/`anthropic-` are rejected, `devbrain` is clear)
-- [ ] `hooks/hooks.json` — the event map wrapped in a top-level `"hooks"` key. A
+- [x] `hooks/hooks.json` — the event map wrapped in a top-level `"hooks"` key. A
       file without that wrapper does not load. All five events:
       `SessionStart`, `UserPromptSubmit`, `PostToolUse`, `PostToolUseFailure`,
       `Stop`
-- [ ] **Use exec form with `args`**, not shell form. `${CLAUDE_PLUGIN_ROOT}`
+- [x] **Use exec form with `args`**, not shell form. `${CLAUDE_PLUGIN_ROOT}`
       resolves in both `command` and `args`, and exec form keeps a path with
       spaces as one argument — which matters immediately here, since the
       development path is `C:\Users\PUSH.DESKTOP-3JDAULT\…`
-- [ ] `.mcp.json` at the plugin root — `command: "node"`,
-      `args: ["${CLAUDE_PLUGIN_ROOT}/dist/mcp.js"]`
-- [ ] `skills/devbrain/SKILL.md` replacing the 59-line `DEV_CONTEXT.md` copied
+- [x] The MCP server, declared **inline in `plugin.json`** rather than in
+      `.mcp.json` — `command: "node"`,
+      `args: ["${CLAUDE_PLUGIN_ROOT}/dist/mcp.js"]`. The `.mcp.json` already at
+      the repo root points at `packages/mcp/dist` for `npm run dev`, and both
+      load: the plugin's server is namespaced `plugin_devbrain_devbrain`, the
+      project's stays `devbrain`. They do **not** replace each other — the
+      reference's "a server declared later replaces an earlier one" is about two
+      declarations *within one plugin*, and a session with the plugin loaded here
+      lists both. Harmless, and only ever visible in this repo, since a user
+      installing the plugin has no `.mcp.json` of their own
+- [x] `skills/devbrain/SKILL.md` replacing the 59-line `DEV_CONTEXT.md` copied
       into every repo. A skill updates with the plugin instead of going stale per
       repo. Note a `CLAUDE.md` at the plugin root is *not* loaded as context and
-      raises a validation warning — the skill is the only correct home
-- [ ] `commands/` for `/devbrain:search`, `/devbrain:backfill`, `/devbrain:dashboard`
-- [ ] **Do not add a `bin/` directory.** Files there join the Bash tool's PATH,
+      raises a validation warning — the skill is the only correct home. The CLI
+      keeps writing `DEV_CONTEXT.md` for people who installed it that way, so
+      someone with both gets the same guidance twice; worth collapsing later,
+      not worth breaking the CLI path for now
+- [x] `commands/` for `/devbrain:search`, `/devbrain:backfill`, `/devbrain:dashboard`.
+      All three hand the work to the agent rather than running it inline with
+      `` !`…` ``: the dashboard is a server that never exits, backfill's output
+      has to be read and acted on, and interpolating an error message into a
+      shell string breaks on the first quote in a stack trace. `search` lists
+      the read-only tool in `allowed-tools` so it does not prompt
+- [x] **Do not add a `bin/` directory.** Files there join the Bash tool's PATH,
       but claude.ai and Cowork refuse to install a plugin that has one — it would
       cut off the distribution channel that matters most
 
@@ -95,17 +111,30 @@ This replaces `devbrain setup` and `~/.devbrain/.env`, and is better than both:
 Claude Code prompts on enable, and `sensitive: true` values go to the platform's
 secure credential store rather than `settings.json`.
 
-- [ ] `gemini_api_key` — `sensitive: true`, optional (keyword search works
+- [x] `gemini_api_key` — `sensitive: true`, optional (keyword search works
       without it)
-- [ ] `mongodb_uri` — `sensitive: true`, optional; unset means the local JSON store
-- [ ] `dashboard_token` — `sensitive: true`, optional; only needed to expose the
+- [x] `mongodb_uri` — `sensitive: true`, optional; unset means the local JSON store
+- [x] `dashboard_token` — `sensitive: true`, optional; only needed to expose the
       dashboard beyond loopback
-- [ ] Reference them as `${user_config.KEY}` in the MCP server's `env`. Hooks
+- [x] Reference them as `${user_config.KEY}` in the MCP server's `env`. Hooks
       read `CLAUDE_PLUGIN_OPTION_<KEY>` from their environment instead —
       shell-form hook commands *reject* `${user_config.*}`, which is another
       reason to use exec form
-- [ ] Keep `~/.devbrain/.env` working as a fallback, so an existing CLI install
-      is not broken by the plugin arriving
+- [x] Keep `~/.devbrain/.env` working as a fallback, so an existing CLI install
+      is not broken by the plugin arriving. **This was broken, and the break was
+      silent.** An optional `userConfig` value the user leaves blank — the default,
+      and what the field's own description recommends — substitutes as an empty
+      string, not as nothing. Both env loaders guarded with
+      `process.env[key] === undefined`, so `""` counted as "set deliberately",
+      `~/.devbrain/.env` was never read, and `db.ts`'s own `!uri.trim()` then
+      quietly chose local JSON. The plugin installed, connected, answered every
+      call and knew nothing, with no error anywhere. Reproduced directly:
+      `MONGODB_URI="" devbrain search "Illegal return statement"` printed
+      *No matches found* where the same search without the variable found the
+      entry. Fixed in one place — `core/src/env.ts`, which both entry points now
+      call — by treating an empty or whitespace value as absent, with tests on
+      that case. Verified afterwards through the plugin's own server: 1 match,
+      with its id
 
 ### 4. Register on SessionStart
 
@@ -121,8 +150,11 @@ secure credential store rather than `settings.json`.
 
 ### 5. Validate and publish
 
-- [ ] `claude plugin validate .` — the authoritative check; `--strict` in CI so
-      warnings fail
+- [x] `claude plugin validate .` — the authoritative check; `--strict` in CI so
+      warnings fail. Passes, including `--strict`. It only reads the manifest,
+      though: it says nothing about whether `hooks/hooks.json`, the skill or the
+      commands load. For that, `claude --plugin-dir .` in a session is the real
+      check, and it is what found the empty-string defect above
 - [ ] Fix the dead instruction in `init`'s output: it tells users to run
       `npx -y @devbrain/mcp`, and that package 404s. Either publish, or print the
       plugin install line
@@ -133,6 +165,14 @@ secure credential store rather than `settings.json`.
 
 ## After
 
+- [ ] **`.env` keys read at module load are missed.** `import` statements hoist
+      above the `loadGlobalEnv()` call, so any `process.env` read at a core
+      module's top level happens before the file is loaded. That is
+      `GEMINI_MODEL`, `GEMINI_EMBED_MODEL` and `DEVBRAIN_AI_TIMEOUT_MS` in
+      `gemini.ts` — all advanced overrides that `devbrain setup` never writes, so
+      nothing in the documented path is affected. The keys that matter are read
+      lazily inside functions and do work. Fix by reading them at the point of
+      use, not by moving the call.
 - [ ] **Ranking bug**: `patternScore` is weighted 0.45 against semantic's 0.30,
       so on a plain-English query — where the pattern term degenerates into title
       word overlap — the best semantic hit can land at rank 3 and be dropped by

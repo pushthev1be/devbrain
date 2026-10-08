@@ -76419,6 +76419,51 @@ var require_graph = __commonJS({
   }
 });
 
+// packages/core/dist/env.js
+var require_env = __commonJS({
+  "packages/core/dist/env.js"(exports2) {
+    "use strict";
+    Object.defineProperty(exports2, "__esModule", { value: true });
+    exports2.parseEnvFile = parseEnvFile;
+    exports2.globalEnvPath = globalEnvPath;
+    exports2.loadGlobalEnv = loadGlobalEnv2;
+    var fs_1 = require("fs");
+    var os_1 = require("os");
+    var path_1 = require("path");
+    function parseEnvFile(text) {
+      const out = {};
+      for (const line of text.replace(/^﻿/, "").split("\n")) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith("#"))
+          continue;
+        const [k, ...rest] = trimmed.split("=");
+        const key = k?.trim();
+        if (key && rest.length)
+          out[key] = rest.join("=").trim();
+      }
+      return out;
+    }
+    function unset(value) {
+      return value === void 0 || value.trim() === "";
+    }
+    function globalEnvPath() {
+      return (0, path_1.join)((0, os_1.homedir)(), ".devbrain", ".env");
+    }
+    function loadGlobalEnv2(path2 = globalEnvPath()) {
+      if (!(0, fs_1.existsSync)(path2))
+        return [];
+      const applied = [];
+      for (const [key, value] of Object.entries(parseEnvFile((0, fs_1.readFileSync)(path2, "utf-8")))) {
+        if (unset(process.env[key])) {
+          process.env[key] = value;
+          applied.push(key);
+        }
+      }
+      return applied;
+    }
+  }
+});
+
 // packages/core/dist/index.js
 var require_dist4 = __commonJS({
   "packages/core/dist/index.js"(exports2) {
@@ -76460,6 +76505,7 @@ var require_dist4 = __commonJS({
     __exportStar(require_stuck(), exports2);
     __exportStar(require_graph(), exports2);
     __exportStar(require_redact(), exports2);
+    __exportStar(require_env(), exports2);
   }
 });
 
@@ -107073,17 +107119,7 @@ var nanoid = (size = 21) => {
 
 // packages/cli/src/index.ts
 var import_os = require("os");
-var globalEnvPath = (0, import_path.join)((0, import_os.homedir)(), ".devbrain", ".env");
-if ((0, import_fs2.existsSync)(globalEnvPath)) {
-  const lines = (0, import_fs2.readFileSync)(globalEnvPath, "utf-8").replace(/^﻿/, "").split("\n");
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-    const [key, ...rest] = trimmed.split("=");
-    const k = key?.trim();
-    if (k && rest.length && process.env[k] === void 0) process.env[k] = rest.join("=").trim();
-  }
-}
+(0, import_core.loadGlobalEnv)();
 var devbrainDir = (0, import_path.join)((0, import_os.homedir)(), ".devbrain");
 var setupPath = (0, import_path.join)(devbrainDir, "setup.json");
 function isOnboarded() {

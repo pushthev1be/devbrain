@@ -1,7 +1,5 @@
 #!/usr/bin/env node
-import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
-import { homedir } from 'os';
 import { createServer } from 'http';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -18,7 +16,7 @@ import {
   ENTRY_TYPES, ENTRY_TYPE_NAMES, normalizeType,
   buildDossier, describeStorage, findDuplicate, findTextDuplicate, clip, measureUse,
   filterUnprocessedCommits, listCommitHashes, activeSession, takeAsk,
-  buildGraph, graphSubset,
+  buildGraph, graphSubset, loadGlobalEnv,
 } from '@devbrain/core';
 import type { EntryCategory } from '@devbrain/core';
 import type { Entry } from '@devbrain/core';
@@ -33,17 +31,9 @@ import { HTML_DASHBOARD } from './dashboard';
 import { bindHost, checkRequest, startupRefusal } from './httpGuard';
 
 // Load config from ~/.devbrain/.env (GEMINI_API_KEY, Vertex AI vars, MONGODB_URI, …).
-// Loaded unconditionally; real environment variables take precedence, comments skipped.
-const envPath = join(homedir(), '.devbrain', '.env');
-if (existsSync(envPath)) {
-  for (const line of readFileSync(envPath, 'utf-8').replace(/^﻿/, '').split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-    const [k, ...v] = trimmed.split('=');
-    const key = k?.trim();
-    if (key && v.length && process.env[key] === undefined) process.env[key] = v.join('=').trim();
-  }
-}
+// A real environment variable takes precedence, but only when it holds a value:
+// see loadGlobalEnv on why an empty one has to count as absent here.
+loadGlobalEnv();
 
 function saveConfirmation(
   type: string, title: string,
