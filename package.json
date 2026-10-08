@@ -11,13 +11,15 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "icons": "node scripts/gen-stack-icons.mjs",
-    "brand": "node scripts/gen-logo.mjs"
+    "brand": "node scripts/gen-logo.mjs",
+    "bundle": "node scripts/bundle.mjs"
   },
   "dependencies": {
     "@google/adk": "^1.1.0"
   },
   "devDependencies": {
     "@vitest/coverage-v8": "^5.0.2",
+    "esbuild": "^0.28.2",
     "typescript": "5.4",
     "vitest": "^5.0.2"
   }

@@ -94,27 +94,14 @@ function getClient(): GoogleGenAI {
   return client;
 }
 
-/**
- * `config.abortSignal` as the SDK will accept it.
- *
- * @google/genai reads it in its request builder but does not declare it in
- * genai.d.ts (checked at 1.52.0), so passing it as a literal fails the excess
- * property check and collapses the call's return type to `unknown`. Spreading a
- * non-literal bypasses that check without widening anything else, which keeps
- * the rest of the params type-checked.
- */
-function abortable(signal: AbortSignal): object {
-  return { abortSignal: signal };
-}
-
 async function generateText(prompt: string): Promise<string> {
   // Bounded for the same reason embedding is: a stalled generation never
   // settles, and `devbrain search` sat for 36 seconds on a query classification
   // nobody was waiting for. Every generation path — classifyQuery,
   // autoArchetype, synthesizeSection — goes through here.
-  const res = await withAbort<GenResult>(
+  const res = await withAbort(
     signal => getClient().models.generateContent({
-      model: TEXT_MODEL, contents: redactSecrets(prompt), config: { ...abortable(signal) },
+      model: TEXT_MODEL, contents: redactSecrets(prompt), config: { abortSignal: signal },
     }),
     GEMINI_TIMEOUT_MS, 'Generation');
   return (res.text ?? '').trim();
@@ -150,10 +137,6 @@ export const GEMINI_TIMEOUT_MS = Number(process.env.DEVBRAIN_AI_TIMEOUT_MS) || 8
  * So the deadline aborts the request. The SDK takes an AbortSignal on
  * `config.abortSignal`, so the socket is closed rather than orphaned.
  */
-/** The SDK's own result types, named so withAbort does not have to infer them. */
-type GenResult = Awaited<ReturnType<GoogleGenAI['models']['generateContent']>>;
-type EmbedResult = Awaited<ReturnType<GoogleGenAI['models']['embedContent']>>;
-
 async function withAbort<T>(
   call: (signal: AbortSignal) => Promise<T>,
   ms = GEMINI_TIMEOUT_MS,
@@ -204,12 +187,12 @@ export async function getEmbedding(text: string): Promise<number[]> {
   }
 
   try {
-    const res = await withAbort<EmbedResult>(
+    const res = await withAbort(
       signal => getClient().models.embedContent({
         model: EMBED_MODEL,
         // Scrubbed before it leaves the machine — see redact.ts.
         contents: redactSecrets(text),
-        config: { outputDimensionality: EMBED_DIM, ...abortable(signal) },
+        config: { outputDimensionality: EMBED_DIM, abortSignal: signal },
       }),
       GEMINI_TIMEOUT_MS, 'Embedding');
     const values = res.embeddings?.[0]?.values;
