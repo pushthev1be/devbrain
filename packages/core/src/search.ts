@@ -239,6 +239,18 @@ export const AGREEMENT_KEYWORD  = 0.12;
  */
 export const SEMANTIC_THRESHOLD = 0.62;
 
+/**
+ * Above this, a hit is worth presenting as prior experience rather than as a
+ * candidate to go and read.
+ *
+ * SEMANTIC_THRESHOLD decides what is worth returning at all; this decides what
+ * is worth believing. The gap between them is where search is useful but not
+ * trustworthy, and saying so is the whole point: measured on a real store, an
+ * error it had never seen came back at 0.63 while a correct hit on a different
+ * query scored 0.64, and every hit at or above 0.70 was right.
+ */
+export const CONFIDENT_MATCH = 0.70;
+
 export interface PreciseSearchResult extends SearchResult {
   matchType: 'pattern' | 'semantic';
   patternScore: number;
@@ -325,13 +337,24 @@ export function preciseSearch(
   return results.slice(0, topK);
 }
 
+/**
+ * How a result matched, in words rather than a percentage.
+ *
+ * It used to print one, and rounded it up: 0.82 was shown as "90% match", 0.65
+ * as "70%". Beyond flattering the number, a percentage invites a comparison the
+ * score cannot support — on the evaluation set unrelated queries peak at 0.619
+ * and true hits bottom out at 0.626, so the band that decides relevance is
+ * 0.007 wide. Reading a list where the right answer scored 64 and a
+ * coincidental one scored 63, a reader reasonably concludes they are close to
+ * equally good. They are not comparable at that resolution at all.
+ *
+ * Three bands, each wider than the noise, and no digits to over-read. The
+ * ordering is still meaningful; the distances are not.
+ */
 export function similarityLabel(score: number): string {
-  if (score >= 0.92) return '99% match';
-  if (score >= 0.88) return '95% match';
-  if (score >= 0.82) return '90% match';
-  if (score >= 0.75) return '80% match';
-  if (score >= 0.65) return '70% match';
-  return `${Math.round(score * 100)}% match`;
+  if (score >= 0.82) return 'very close';
+  if (score >= 0.70) return 'close';
+  return 'related';
 }
 
 export function timeAgo(timestamp: number): string {

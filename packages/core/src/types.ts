@@ -155,6 +155,14 @@ export interface Entry {
   recallCount?: number;
   lastRecalledAt?: number;
   /**
+   * The last few recalls, newest last. Capped, because this rides along with
+   * every read of the entry and an unbounded log would make the common case
+   * pay for a view almost nobody opens.
+   */
+  recalls?: RecallEvent[];
+  /** Which path wrote this. See EntryOrigin. */
+  origin?: EntryOrigin;
+  /**
    * How many times this knowledge has been corrected before arriving here.
    *
    * Each correction is a new row, so without carrying the depth forward a claim
@@ -164,6 +172,24 @@ export interface Entry {
   revisionCount?: number;
   /** The entry this one corrects, so the chain can be walked backwards. */
   supersedes?: string;
+  /**
+   * The agent session this was recorded in.
+   *
+   * Entries saved in one session are almost always one episode of work, so this
+   * is what makes a sequence of them readable as progression rather than as
+   * unrelated rows that happen to share a timestamp. Captured from the hook,
+   * which knows the session; the save paths look it up by project.
+   */
+  sessionId?: string;
+  /**
+   * id of the entry this one resolves — the bug this fix fixed.
+   *
+   * Distinct from `supersedes`, which means the other entry was *wrong*. This
+   * means it was right and is now closed, so both stay true and both keep
+   * surfacing. Without it a bug and its fix are two unrelated rows and there is
+   * no answer to "where did this get fixed".
+   */
+  fixes?: string;
   /**
    * Evidence that this entry is true — never how often it was read back.
    * observation  — recorded once, unverified
@@ -181,6 +207,38 @@ export interface Entry {
    * the next run. Corrections belong in the source. See indexSource.ts.
    */
   source?: EntrySource;
+}
+
+/**
+ * How an entry came to be written.
+ *
+ * Not decoration: it is the only way to tell whether capture is working. An
+ * agent that saves nothing on its own looks identical to one that saves
+ * constantly, once the entries are in a list together — unless each one says
+ * which path put it there.
+ *
+ *   hook    DevBrain asked for it, and the agent wrote it in reply
+ *   agent   the agent saved it unprompted, which is the behaviour worth having
+ *   manual  a human typed it, in the dashboard or the REPL
+ *   indexed derived from a file by the indexer; owned by the file, not by DevBrain
+ */
+export type EntryOrigin = 'hook' | 'agent' | 'manual' | 'indexed';
+
+/**
+ * One occasion this entry was handed to an agent because something failed.
+ *
+ * `recallCount` says how often, which answers "is this earning its place" but
+ * not "on what". Without the query, an entry with 9 recalls cannot be told
+ * apart from one that matched the same flaky command nine times.
+ */
+/** How many recall events one entry keeps. Old ones fall off the front. */
+export const RECALL_LOG_MAX = 20;
+
+export interface RecallEvent {
+  at: number;
+  /** The failure text it matched, clipped — enough to recognise, not to store a log file. */
+  query: string;
+  sessionId?: string;
 }
 
 export interface EntrySource {

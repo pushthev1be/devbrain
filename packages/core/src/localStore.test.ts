@@ -25,7 +25,7 @@ import {
   upsertProject, getProjectByPath, getAllProjects,
   insertEntry, getEntriesByProject, getAllEntriesWithProjects, deleteEntry,
   isCommitProcessed, markCommitProcessed,
-  reinforceEntry, bumpRetrievalCounts, supersedeEntry,
+  reinforceEntry, bumpRetrievalCounts, bumpRecallCounts, supersedeEntry,
   vectorSearch,
 } from './localStore';
 
@@ -81,6 +81,18 @@ describe('projects', () => {
     const all = await getAllProjects();
     expect(all).toHaveLength(1);
     expect(all[0]).toMatchObject({ id: 'p2', name: 'new' });
+  });
+
+  // VS Code hands hooks `c:\…`; Node and the CLI store `C:\…`. Compared as
+  // written, a registered project was invisible to every hook the editor ran.
+  it('finds a Windows project whatever the drive-letter case or slash style', async () => {
+    await upsertProject(project({ path: 'C:\\Users\\me\\repo' }));
+    expect(await getProjectByPath('c:\\Users\\me\\repo')).toMatchObject({ id: 'p1' });
+    expect(await getProjectByPath('C:/Users/me/repo/')).toMatchObject({ id: 'p1' });
+    await upsertProject(project({ id: 'p2', path: 'c:\\Users\\me\\repo\\' }));
+    const all = await getAllProjects();
+    expect(all).toHaveLength(1);
+    expect(all[0]).toMatchObject({ id: 'p2', path: 'C:\\Users\\me\\repo' });
   });
 
   it('sorts getAllProjects by lastSeen descending', async () => {
@@ -320,5 +332,62 @@ describe('store integrity', () => {
     await insertEntry(entry({ id: 'durable' }));
     expect((await getEntriesByProject('p1')).map(e => e.id)).toEqual(['durable']);
     expect((await getAllEntriesWithProjects()).map(e => e.id)).toEqual(['durable']);
+  });
+});
+
+describe('bumpRecallCounts', () => {
+  it('counts the recall', async () => {
+    await insertEntry(entry());
+    await bumpRecallCounts(['e1'], { query: 'TokenExpiredError: jwt expired' });
+    const [e] = await getEntriesByProject('p1');
+    expect(e.recallCount).toBe(1);
+    expect(e.lastRecalledAt).toBeGreaterThan(0);
+  });
+
+  // The count alone cannot tell an entry that caught nine different failures
+  // from one that matched the same flaky command nine times.
+  it('records what matched, so the log says something', async () => {
+    await insertEntry(entry());
+    await bumpRecallCounts(['e1'], { query: 'ECONNREFUSED 127.0.0.1:27017', sessionId: 's1' });
+    const [e] = await getEntriesByProject('p1');
+    expect(e.recalls).toHaveLength(1);
+    expect(e.recalls![0].query).toBe('ECONNREFUSED 127.0.0.1:27017');
+    expect(e.recalls![0].sessionId).toBe('s1');
+  });
+
+  it('adds no blank row when there is nothing to say about what matched', async () => {
+    await insertEntry(entry());
+    await bumpRecallCounts(['e1']);
+    const [e] = await getEntriesByProject('p1');
+    expect(e.recallCount).toBe(1);
+    expect(e.recalls).toBeUndefined();
+  });
+
+  // This rides along with every read of the entry, so an entry that fires often
+  // must not grow a log file inside itself.
+  it('keeps only the most recent, oldest falling off the front', async () => {
+    await insertEntry(entry());
+    for (let i = 0; i < 25; i++) await bumpRecallCounts(['e1'], { query: `failure ${i}` });
+    const [e] = await getEntriesByProject('p1');
+    expect(e.recallCount).toBe(25);
+    expect(e.recalls).toHaveLength(20);
+    expect(e.recalls![0].query).toBe('failure 5');
+    expect(e.recalls![19].query).toBe('failure 24');
+  });
+
+  it('clips a query too long to be worth storing whole', async () => {
+    await insertEntry(entry());
+    await bumpRecallCounts(['e1'], { query: 'x'.repeat(500) });
+    const [e] = await getEntriesByProject('p1');
+    expect(e.recalls![0].query).toHaveLength(200);
+  });
+
+  it('leaves entries it was not given alone', async () => {
+    await insertEntry(entry());
+    await insertEntry({ ...entry(), id: 'e2' });
+    await bumpRecallCounts(['e1'], { query: 'boom' });
+    const other = (await getEntriesByProject('p1')).find(e => e.id === 'e2')!;
+    expect(other.recallCount).toBeUndefined();
+    expect(other.recalls).toBeUndefined();
   });
 });

@@ -6,9 +6,14 @@
 // are run by the agent's harness, not chosen by the model, so they cannot be
 // forgotten:
 //
-//   SessionStart — inject this project's briefing into the agent's context
-//   Stop         — after each turn, if the work established something and the
-//                  agent saved nothing, ask it to record it (see turnReview.ts)
+//   SessionStart     — inject this project's briefing into the agent's context
+//   UserPromptSubmit — search memory for what was just asked, before any work
+//                      starts (see recall.ts)
+//   PostToolUse      — after a shell command fails, match the error against
+//                      what is stored
+//   Stop             — after each turn, if the work established something and
+//                      the agent saved nothing, ask it to record it (see
+//                      turnReview.ts)
 //
 // Neither needs a model: the agent does all the writing, DevBrain stores it.
 //
@@ -48,24 +53,55 @@ export function briefingEntries<T extends Entry>(all: T[], projectId?: string): 
   return all.filter(e => !isAlreadyInAgentContext(e, projectId));
 }
 
-export const HOOK_EVENTS = ['SessionStart', 'PostToolUse', 'Stop'] as const;
+export const HOOK_EVENTS = ['SessionStart', 'UserPromptSubmit', 'PostToolUse', 'PostToolUseFailure', 'Stop'] as const;
 export type HookEvent = typeof HOOK_EVENTS[number];
 
 const HOOK_ARG: Record<HookEvent, string> = {
   SessionStart: 'session-start',
+  // What the user just asked for, searched against memory before the agent
+  // starts. PostToolUse only fires once something has already failed, which is
+  // late: most work begins with a sentence, not a stack trace.
+  UserPromptSubmit: 'user-prompt',
   PostToolUse: 'post-tool',
+  // Claude Code does not send a failed tool call to PostToolUse at all: a Bash
+  // command that exits non-zero arrives here, with its output in `error`. With
+  // only PostToolUse installed, the one moment recall exists for — a command
+  // failing with an error memory already holds — never reached DevBrain.
+  PostToolUseFailure: 'post-tool',
   Stop: 'stop',
 };
 
 /**
- * Tool calls PostToolUse is installed for, one group each.
+ * Tool calls PostToolUse is installed for.
  *
- * Only shell tools: the point is recalling a past fix when a command fails, and
- * a failure is something a shell reports. Written as separate matcher groups
- * rather than one alternation, because a plain tool name is the one matcher
- * spelling every Claude Code version accepts.
+ * Every tool, filtered in the hook rather than here. It used to be Bash and
+ * PowerShell only, on the reasoning that a failure is something a shell
+ * reports — but that is where it was wrong. A production error is usually found
+ * by *reading* it: a log query, a database probe, a deploy status. On a project
+ * with the Supabase connector those run as MCP tools, so DevBrain never saw the
+ * output and never nudged, while holding the exact entry for the error on
+ * screen. Reported from real use: "nudges at the moment of debugging: zero".
+ *
+ * The cost of widening is false positives from tools whose output is source
+ * code rather than a result, and those are excluded by name in isFileTool.
  */
-const POST_TOOL_MATCHERS = ['Bash', 'PowerShell'];
+const POST_TOOL_MATCHERS = ['*'];
+
+/**
+ * Tools whose output is file content, not a result.
+ *
+ * Source code is full of the word Error, so scanning it for failures produces
+ * them. For shell commands the equivalent guard is isReadOnlyCommand; this is
+ * the same rule for tools that take no command at all.
+ */
+const FILE_TOOLS = new Set([
+  'Read', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'NotebookRead',
+  'Glob', 'Grep', 'LS', 'TodoWrite', 'ExitPlanMode',
+]);
+
+export function isFileTool(name: string): boolean {
+  return FILE_TOOLS.has(name);
+}
 
 /** The CLI argument for a hook event, e.g. `devbrain hook stop`. */
 export function hookArg(event: HookEvent): string {
@@ -99,7 +135,7 @@ export function withDevbrainHooks(settings: Settings, binary = 'devbrain'): Sett
       // output even looks like a failure.
       timeout: 20,
     };
-    const groups: HookGroup[] = event === 'PostToolUse'
+    const groups: HookGroup[] = event === 'PostToolUse' || event === 'PostToolUseFailure'
       ? POST_TOOL_MATCHERS.map(matcher => ({ matcher, hooks: [handler] }))
       : [{ hooks: [handler] }];
     hooks[event] = [...(hooks[event] ?? []), ...groups];

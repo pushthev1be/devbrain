@@ -14,7 +14,7 @@
 //
 // Pure: transcript text in, decision out. No I/O, no model.
 
-import { parseTranscript, assessSegment } from './transcript';
+import { parseTranscript, assessSegment, isGenericFailureLine } from './transcript';
 import { detectStuck, formatStepBack, episodeFingerprints } from './stuck';
 import type { StuckSignal } from './stuck';
 import type { DigestEvent } from './transcript';
@@ -39,6 +39,14 @@ export interface TurnReview {
   signals?: StuckSignal[];
   /** For `step-back`: every fingerprint of this episode, to mark as already raised. */
   suppress?: string[];
+  /**
+   * For `ask`: the evidence `prompt` was built from.
+   *
+   * Returned so a caller that can reach the database — which this function
+   * deliberately cannot — can rebuild the prompt with links only it knows
+   * about, without having to re-derive which events mattered.
+   */
+  events?: DigestEvent[];
 }
 
 /** Past this, a stretch is judged now rather than accumulated further. */
@@ -67,9 +75,16 @@ function shortPath(path: string): string {
 }
 
 /** The message that asks the agent to record this stretch, built from its evidence. */
-export function buildRecordPrompt(events: DigestEvent[]): string {
+export function buildRecordPrompt(
+  events: DigestEvent[],
+  openBugs: { id: string; title: string }[] = [],
+): string {
+  // A generic line is offered to nobody as an error_pattern. "Exit code 1" is
+  // true of every failure, so stored as a pattern it would match all of them —
+  // and the prompt asks for it to be copied verbatim, so offering it is how a
+  // pattern that poisons every future query gets written down.
   const errors = unique(events.filter(e => e.kind === 'error').map(e => e.text.split('\n')[0].trim()))
-    .filter(Boolean).slice(-3);
+    .filter(line => line && !isGenericFailureLine(line)).slice(-3);
   const files = unique(events.filter(e => e.kind === 'edit').map(e => shortPath(e.text))).slice(-6);
 
   // The exact string is handed over, not described. DevBrain already has it,
@@ -87,10 +102,28 @@ export function buildRecordPrompt(events: DigestEvent[]): string {
     'You did the work, so you write the record — DevBrain only stores it. For each distinct, non-obvious item',
     '(usually one, at most three), call the DevBrain `save_entry` tool',
     ...ENTRY_GUIDE,
+    ...buildFixHint(openBugs),
     '',
     'If it was routine (a typo, an obvious change) or DevBrain already has it, save nothing.',
     'Either way, keep it brief: one short line to the user, then stop.',
   ].join('\n');
+}
+
+/**
+ * Named when this stretch resolved something already recorded.
+ *
+ * A field nobody is prompted for stays empty — error_pattern sat on 3 of 130
+ * entries for exactly that reason. So the open bugs this session recorded are
+ * put in front of the agent at the moment it is writing the fix.
+ */
+export function buildFixHint(openBugs: { id: string; title: string }[]): string[] {
+  if (!openBugs.length) return [];
+  return [
+    '',
+    'You recorded these earlier this session and nothing has closed them yet.',
+    'If this stretch fixed one, pass its id as `fixes` — both entries stay, linked:',
+    ...openBugs.slice(0, 3).map(b => `  ${b.id}  ${b.title.slice(0, 70)}`),
+  ];
 }
 
 /**
@@ -112,7 +145,11 @@ export const ENTRY_GUIDE: readonly string[] = [
  * Decide what to do after the agent's turn, given the transcript and the line
  * up to which it has already been reviewed.
  */
-export function reviewTurn(jsonl: string, fromLine: number, opts: { warned?: readonly string[] } = {}): TurnReview {
+export function reviewTurn(
+  jsonl: string,
+  fromLine: number,
+  opts: { warned?: readonly string[] } = {},
+): TurnReview {
   const segment = parseTranscript(jsonl, fromLine);
   const { events, endLine } = segment;
   if (endLine <= fromLine || events.length === 0) return { action: 'hold', cursor: fromLine };
@@ -153,5 +190,5 @@ export function reviewTurn(jsonl: string, fromLine: number, opts: { warned?: rea
     // to later — but not forever, or an old stretch would be re-read each turn.
     return tooLong ? { action: 'hold', cursor: endLine } : { action: 'hold', cursor: fromLine };
   }
-  return { action: 'ask', cursor: endLine, prompt: buildRecordPrompt(events) };
+  return { action: 'ask', cursor: endLine, prompt: buildRecordPrompt(events), events };
 }

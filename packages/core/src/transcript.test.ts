@@ -9,7 +9,7 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  parseTranscript, assessSegment, buildDigest, chunkEvents, errorExcerpt, looksLikeError, isEchoedOutput,
+  parseTranscript, assessSegment, buildDigest, chunkEvents, errorExcerpt, looksLikeError, isEchoedOutput, isGenericFailureLine,
 } from './transcript';
 import type { DigestEvent } from './transcript';
 
@@ -161,6 +161,35 @@ describe('errorExcerpt / looksLikeError', () => {
 
   it('falls back to the tail when an is_error result has no recognisable error line', () => {
     expect(errorExcerpt('line1\nline2\nsomething went sideways')).toContain('something went sideways');
+  });
+
+  it('prefers the message over the exit status that follows it', () => {
+    // The bug this fixes: a real command failed with "No Gemini credentials",
+    // an entry stored exactly that pattern, and recall searched for
+    // "Exit code 1" — which describes every failure and matches none.
+    const out = 'No Gemini credentials. Set GOOGLE_GENAI_USE_VERTEXAI=true or GEMINI_API_KEY.\nExit code 1';
+    expect(errorExcerpt(out)).toContain('No Gemini credentials');
+    expect(errorExcerpt(out)).not.toBe('Exit code 1');
+  });
+
+  it('still keeps a real error line even when an exit status follows', () => {
+    expect(errorExcerpt('src/a.ts(3,1): error TS2304: Cannot find name x.\nExit code 2'))
+      .toContain('error TS2304');
+  });
+
+  it('keeps the exit status when the command said nothing else', () => {
+    // Otherwise a silent failure produces an empty excerpt, which would make
+    // every one of them identical to every other kind of event.
+    expect(errorExcerpt('Exit code 1')).toBe('Exit code 1');
+  });
+
+  it('knows which lines describe nothing', () => {
+    for (const generic of ['Exit code 1', 'exit status 2', 'Command failed.', 'FAIL', '×']) {
+      expect(isGenericFailureLine(generic), generic).toBe(true);
+    }
+    for (const real of ['× catches the thing 9ms', 'FAILED to connect to host', 'TypeError: x']) {
+      expect(isGenericFailureLine(real), real).toBe(false);
+    }
   });
 
   it('flags failures by shape, not by the word "error" anywhere', () => {

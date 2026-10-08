@@ -89,9 +89,32 @@ async function generateText(prompt: string): Promise<string> {
 }
 
 /** True when a Gemini backend is configured (either Vertex AI or the Developer API). */
-function hasGeminiCreds(): boolean {
+export function hasGeminiCreds(): boolean {
   if (useVertex()) return Boolean(process.env.GOOGLE_CLOUD_PROJECT);
   return Boolean(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
+}
+
+/**
+ * How long any single Gemini call may take before it is abandoned.
+ *
+ * A `.catch` does not cover a hang: when the API stalls rather than fails, the
+ * promise never settles and the caller waits for ever. That is what made
+ * `devbrain search` sit there silently with no output and no error, and the
+ * same stall inside a hook would hold up the agent's turn.
+ */
+export const GEMINI_TIMEOUT_MS = Number(process.env.DEVBRAIN_AI_TIMEOUT_MS) || 8000;
+
+/** Reject rather than hang. The timer is cleared so the process can still exit. */
+export function within<T>(work: Promise<T>, ms = GEMINI_TIMEOUT_MS, label = 'Gemini'): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  return Promise.race([
+    work.finally(() => clearTimeout(timer)),
+    new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+      // Never hold the event loop open on the timer alone.
+      if (typeof timer.unref === 'function') timer.unref();
+    }),
+  ]);
 }
 
 export async function getEmbedding(text: string): Promise<number[]> {
@@ -110,11 +133,11 @@ export async function getEmbedding(text: string): Promise<number[]> {
   }
 
   try {
-    const res = await getClient().models.embedContent({
+    const res = await within<Awaited<ReturnType<typeof getClient>['models']['embedContent']>>(getClient().models.embedContent({
       model: EMBED_MODEL,
       contents: text,
       config: { outputDimensionality: EMBED_DIM },
-    });
+    }), GEMINI_TIMEOUT_MS, 'Embedding');
     const values = res.embeddings?.[0]?.values;
     if (!values || values.length === 0) {
       throw new Error('Embedding response contained no values');

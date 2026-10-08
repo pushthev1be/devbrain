@@ -2,7 +2,9 @@ import { MongoClient, Db, ServerApiVersion } from 'mongodb';
 import { join } from 'path';
 import { homedir } from 'os';
 import type { Entry, Project } from './types';
+import { RECALL_LOG_MAX } from './types';
 import * as local from './localStore';
+import { normalizeProjectPath } from './projectPath';
 
 export { getLocalDbPath } from './localStore';
 
@@ -73,14 +75,28 @@ function strip<T>(doc: Record<string, unknown>): T {
 export async function upsertProject(project: Project): Promise<void> {
   if (useLocal()) return local.upsertProject(project);
   const db = await getDb();
-  await db.collection('projects').replaceOne({ path: project.path }, project, { upsert: true });
+  const stored = { ...project, path: normalizeProjectPath(project.path) };
+  // Matching every spelling replaces a record saved before paths were
+  // normalized, rather than leaving it beside the new one.
+  await db.collection('projects').replaceOne({ path: { $in: pathSpellings(project.path) } }, stored, { upsert: true });
 }
 
 export async function getProjectByPath(path: string): Promise<Project | null> {
   if (useLocal()) return local.getProjectByPath(path);
   const db = await getDb();
-  const doc = await db.collection('projects').findOne({ path });
+  const doc = await db.collection('projects').findOne({ path: { $in: pathSpellings(path) } });
   return doc ? strip<Project>(doc as Record<string, unknown>) : null;
+}
+
+/**
+ * The ways one project path may already be stored: normalized, as given, and —
+ * on Windows — with a lowercase drive letter, which is how records written
+ * before normalization from an editor's cwd look.
+ */
+function pathSpellings(path: string): string[] {
+  const norm = normalizeProjectPath(path);
+  const lowerDrive = /^[A-Z]:/.test(norm) ? norm[0].toLowerCase() + norm.slice(1) : norm;
+  return [...new Set([norm, path, lowerDrive])];
 }
 
 export async function getAllProjects(): Promise<Project[]> {
@@ -226,13 +242,33 @@ export async function bumpRetrievalCounts(ids: string[], fromProjectId?: string)
  * that one is "how often was this shown", this is "how often did it catch
  * something". Only the second is evidence the entry was worth keeping.
  */
-export async function bumpRecallCounts(ids: string[]): Promise<void> {
+/**
+ * Record that these entries were matched to a real failure and handed over.
+ *
+ * The count alone cannot distinguish an entry that caught nine different
+ * failures from one that matched the same flaky command nine times, so the
+ * failure text is kept alongside it. Capped with $slice so the log cannot grow
+ * without bound on an entry that fires often.
+ */
+export async function bumpRecallCounts(
+  ids: string[],
+  context: { query?: string; sessionId?: string } = {},
+): Promise<void> {
   if (!ids.length) return;
-  if (useLocal()) return local.bumpRecallCounts(ids);
+  if (useLocal()) return local.bumpRecallCounts(ids, context);
   const db = await getDb();
+  const event = {
+    at: Date.now(),
+    query: (context.query ?? '').slice(0, 200),
+    ...(context.sessionId ? { sessionId: context.sessionId } : {}),
+  };
   await db.collection('entries').updateMany(
     { id: { $in: ids } },
-    { $inc: { recallCount: 1 }, $set: { lastRecalledAt: Date.now() } }
+    {
+      $inc: { recallCount: 1 },
+      $set: { lastRecalledAt: event.at },
+      ...(context.query ? { $push: { recalls: { $each: [event], $slice: -RECALL_LOG_MAX } } } : {}),
+    } as never,
   );
 }
 

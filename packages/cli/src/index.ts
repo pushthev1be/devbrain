@@ -16,13 +16,17 @@ import {
   describeStorage, getLocalDbPath, closeDb,
   ENTRY_TYPES, ENTRY_CATEGORIES, normalizeType, getAllProjects,
   buildDossier, formatDossierMarkdown, dossierFiles, measureUse, describeUse,
-  isDuplicateEntry, findTextDuplicate, clip,
+  findDuplicate, findTextDuplicate, clip,
   parseMarkdownSource, planIndex, entryForSection,
   formatSessionBriefing, briefingEntries, isAlreadyInAgentContext,
-  readCursor, writeCursor, markSurfaced, markWarned, reviewTurn, formatStepBack,
-  looksLikeError, isReadOnlyCommand, isEchoedOutput, recallForFailure, formatRecallForAgent,
+  readCursor, writeCursor, markSurfaced, markWarned, markActiveSession, activeSession,
+  markAsked, takeAsk,
+  reviewTurn, formatStepBack, buildRecordPrompt, openBugsInSession,
+  isWorthLookingUp, isFileTool,
+  looksLikeError, isReadOnlyCommand, isEchoedOutput, isGenericFailureLine, recallForFailure, formatRecallForAgent,
   withDevbrainHooks, withoutDevbrainHooks, installedDevbrainHooks,
   nextSessionChunk, formatBackfillBatch, commitExcerpt, BACKFILL_BATCH_BUDGET,
+  sameProjectPath,
 } from '@devbrain/core';
 import type { Entry, Project, EntryCategory } from '@devbrain/core';
 import { nanoid } from 'nanoid';
@@ -170,6 +174,26 @@ function spin(text: string) {
 
 // ─── project context ──────────────────────────────────────────────────────────
 
+/**
+ * Re-detect a registered project's stack, writing it back only when it changed.
+ *
+ * Detection improves — monorepo scanning and Dart/Flutter were both added after
+ * these records were written — and a stored stack is a snapshot of whatever the
+ * detector could see on the day the project was registered. Three of five real
+ * projects here held an empty stack for that reason, which showed up as a
+ * project with no marks beside it and no way to tell why.
+ */
+async function refreshStack(project: Project): Promise<void> {
+  try {
+    const stack = detectStack(project.path);
+    if (!stack.length) return;
+    const same = stack.length === project.stack.length
+      && stack.every((s, i) => s === project.stack[i]);
+    if (same) return;
+    await upsertProject({ ...project, stack });
+  } catch { /* an unreadable project must not break the hook */ }
+}
+
 async function printProjectContext(): Promise<void> {
   const cwd = process.cwd();
   const repoRoot = getRepoRoot(cwd) ?? cwd;
@@ -182,6 +206,7 @@ async function printProjectContext(): Promise<void> {
     return;
   }
 
+  await refreshStack(project);
   await upsertProject({ ...project, lastSeen: Date.now() });
   const entries = await getEntriesByProject(project.id);
   const bugs  = entries.filter(e => e.type === 'bug').length;
@@ -448,7 +473,7 @@ async function unreviewedCommits(repoRoot: string): Promise<string[]> {
 async function cleanStaleGitHooks(skip?: string): Promise<string[]> {
   const cleaned: string[] = [];
   for (const p of await getAllProjects().catch(() => [])) {
-    if (p.path === skip) continue;
+    if (skip !== undefined && sameProjectPath(p.path, skip)) continue;
     try { if (removeGitHook(p.path)) cleaned.push(p.name); } catch { /* unreadable repo */ }
   }
   return cleaned;
@@ -611,8 +636,17 @@ async function handleHook(event: string): Promise<void> {
 
     if (event === 'session-start') {
       const repoRoot = getRepoRoot(cwd) ?? cwd;
+      // Only the hooks are told the session id. Recorded here so save_entry and
+      // `devbrain note` can stamp it, which is what makes a run of entries
+      // readable as one episode instead of unrelated rows.
+      if (typeof input.session_id === 'string') markActiveSession(repoRoot, input.session_id);
       const project = await getProjectByPath(repoRoot);
       if (!project) return;
+      // Re-read the stack while we are here. It is only filesystem checks, a
+      // few milliseconds, and it is how a project registered before the
+      // detector could see monorepos or Flutter stops reporting nothing —
+      // without the user having to know to re-run anything.
+      await refreshStack(project);
       const all = await getAllEntriesWithProjects();
       // This project's own CLAUDE.md is already in the agent's context; ranking
       // it back in would restate the file in fewer words. Named, not hidden.
@@ -631,20 +665,72 @@ async function handleHook(event: string): Promise<void> {
       return;
     }
 
+    // The user just asked for something. Search memory with their own words,
+    // before any work starts.
+    //
+    // This is the trigger PostToolUse cannot be: it only fires once a command
+    // has already failed, which is late and narrow. Most work begins with a
+    // sentence — "the sidebar is stretching to full height" — and that sentence
+    // is the best description of the problem anyone will write all session.
+    // Measured before this existed: 2 recalls against 17 capture prompts in
+    // four days, because nothing read memory at the start of a task.
+    if (event === 'user-prompt') {
+      const prompt = typeof input.prompt === 'string' ? input.prompt : '';
+      if (!isWorthLookingUp(prompt)) return;
+
+      const sessionId = typeof input.session_id === 'string' ? input.session_id : '';
+      const project = await getProjectByPath(getRepoRoot(cwd) ?? cwd);
+      if (!project) return;
+
+      const embedding = await getEmbedding(prompt).catch(() => [] as number[]);
+      const hits = recallForFailure(prompt, await getAllEntriesWithProjects(), {
+        projectId: project.id,
+        embedding,
+        // Never the same entry twice in one session. A briefing that repeats
+        // itself every message is one the agent learns to skim past.
+        exclude: sessionId ? readCursor(sessionId).surfaced ?? [] : [],
+      });
+      if (!hits.length) return;
+
+      if (sessionId) markSurfaced(sessionId, hits.map(h => h.entry.id));
+      const ids = hits.map(h => h.entry.id);
+      await bumpRetrievalCounts(ids, project.id).catch(() => {});
+      // Counted as a catch: this is memory matched to a real problem someone
+      // brought, which is the same event as matching a failing command.
+      await bumpRecallCounts(ids, { query: prompt, sessionId }).catch(() => {});
+      captureLog(`${project.name} ${sessionId.slice(0, 8)}: prompt recall, ${hits.length} for "${clip(prompt, 60)}"`);
+      process.stdout.write(JSON.stringify({
+        hookSpecificOutput: {
+          hookEventName: 'UserPromptSubmit',
+          additionalContext: formatRecallForAgent(prompt, hits, { of: 'request' }) ?? '',
+        },
+      }));
+      return;
+    }
+
     // A shell command just ran. If it failed and memory holds a literal match
     // for the error, hand it to the agent now — this is the moment recall pays
     // off, and the moment an agent is least likely to go looking.
     if (event === 'post-tool') {
-      const output = typeof input.tool_output === 'string'
-        ? input.tool_output
-        : JSON.stringify(input.tool_output ?? '');
+      // Now installed for every tool, so the ones whose output is file content
+      // rather than a result are dropped here — their source is full of the
+      // word Error and scanning it would invent failures.
+      const toolName = typeof input.tool_name === 'string' ? input.tool_name : '';
+      if (isFileTool(toolName)) return;
+
+      // Installed for both PostToolUse and PostToolUseFailure; the reply must
+      // name the event it answers or Claude Code drops the context.
+      const failedCall = input.hook_event_name === 'PostToolUseFailure';
+      // A tool call the user interrupted is not a failure worth recalling for.
+      if (failedCall && input.is_interrupt === true) return;
+      const output = toolOutputText(input);
       const command = String((input.tool_input as { command?: unknown } | undefined)?.command ?? '');
 
       // Decided before touching the database: most commands succeed, and a
       // hook that runs after every one of them must cost nothing when idle.
       // The echo check matters most here: DevBrain's own recall message quotes
       // the error it matched, so without it one failure could recall itself.
-      if (!looksLikeError(output, false)
+      if (!looksLikeError(output, failedCall)
         || isReadOnlyCommand(command)
         || isEchoedOutput(output, command)) return;
       const failure = extractFailure(output);
@@ -654,8 +740,16 @@ async function handleHook(event: string): Promise<void> {
       const project = await getProjectByPath(getRepoRoot(cwd) ?? cwd);
       if (!project) return;
 
+      // Embedded so a failure worded differently from the entry can still find
+      // it — without this, only a literal match fires, and real stack traces do
+      // not quote what someone wrote down months ago. Best effort: if there is
+      // no AI configured, or the call is slow, recall falls back to literal
+      // matching rather than holding up the agent's turn.
+      const queryEmbedding = await getEmbedding(failure).catch(() => [] as number[]);
+
       const hits = recallForFailure(failure, await getAllEntriesWithProjects(), {
         projectId: project.id,
+        embedding: queryEmbedding,
         // Pushing the same past fix after every retry of a flaky command would
         // teach the agent to tune the whole channel out.
         exclude: sessionId ? readCursor(sessionId).surfaced ?? [] : [],
@@ -665,13 +759,20 @@ async function handleHook(event: string): Promise<void> {
 
       if (sessionId) markSurfaced(sessionId, hits.map(h => h.entry.id));
       const recalled = hits.map(h => h.entry.id);
-      bumpRetrievalCounts(recalled, project.id).catch(() => {});
+      // Awaited, not fired and forgotten. These race closeDb() and process exit,
+      // and against a remote store they lose: the recall was handed over and the
+      // count stayed at zero, which is worse than not measuring at all because
+      // it reads as "this never helped".
+      await bumpRetrievalCounts(recalled, project.id).catch(() => {});
       // The one surfacing that shows the entry earned its place: a command
       // failed and this entry matched it. Counted apart from being shown.
-      bumpRecallCounts(recalled).catch(() => {});
+      await bumpRecallCounts(recalled, { query: failure, sessionId }).catch(() => {});
       captureLog(`${project.name} ${sessionId.slice(0, 8)}: recalled ${hits.length} for "${clip(failure, 60)}"`);
       process.stdout.write(JSON.stringify({
-        hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: message },
+        hookSpecificOutput: {
+          hookEventName: failedCall ? 'PostToolUseFailure' : 'PostToolUse',
+          additionalContext: message,
+        },
       }));
       return;
     }
@@ -689,6 +790,7 @@ async function handleHook(event: string): Promise<void> {
     const sessionId = input.session_id;
     if (typeof transcript !== 'string' || typeof sessionId !== 'string' || !existsSync(transcript)) return;
 
+    markActiveSession(getRepoRoot(cwd) ?? cwd, sessionId);
     const cursor = readCursor(sessionId);
     const review = reviewTurn(readFileSync(transcript, 'utf-8'), cursor.line, { warned: cursor.warned ?? [] });
     const advance = () => writeCursor(sessionId, review.cursor);
@@ -705,7 +807,7 @@ async function handleHook(event: string): Promise<void> {
             projectId: project.id, topK: 2,
           });
           related = hits.map(h => `[${normalizeType(h.entry.type)}] ${h.entry.title} (id: ${h.entry.id})`);
-          if (hits.length) bumpRecallCounts(hits.map(h => h.entry.id)).catch(() => {});
+          if (hits.length) await bumpRecallCounts(hits.map(h => h.entry.id), { query: failing.subject, sessionId }).catch(() => {});
         }
       }
       markWarned(sessionId, review.suppress ?? review.signals!.map(s => s.fingerprint));
@@ -729,8 +831,18 @@ async function handleHook(event: string): Promise<void> {
     if (!project) return;
 
     advance();
-    captureLog(`${project.name} ${sessionId.slice(0, 8)}: asked the agent to record this stretch`);
-    process.stdout.write(JSON.stringify({ decision: 'block', reason: review.prompt }));
+    // The `fixes` link is offered here rather than inside reviewTurn because
+    // only this point in the hook has the database: knowing which bugs are
+    // still open is a query, and running it on every turn would make the
+    // common case (nothing to ask) pay for the rare one.
+    const open = openBugsInSession(await getEntriesByProject(project.id), sessionId);
+    const prompt = open.length ? buildRecordPrompt(review.events!, open) : review.prompt;
+    captureLog(`${project.name} ${sessionId.slice(0, 8)}: asked the agent to record this stretch` +
+      (open.length ? `, offering ${open.length} open bug(s) to close` : ''));
+    // Marked at the moment of asking, so the save that follows can tell a reply
+    // from something the agent chose to write down on its own.
+    markAsked(sessionId);
+    process.stdout.write(JSON.stringify({ decision: 'block', reason: prompt }));
   } catch (err) {
     captureLog(`hook ${event} failed: ${explainError(err)}`);
   }
@@ -893,6 +1005,33 @@ const ERROR_SIGNALS: RegExp[] = [
 ];
 
 /**
+ * The text a tool call produced, from a PostToolUse or PostToolUseFailure event.
+ *
+ * Claude Code puts a result in `tool_response` (for Bash, an object holding
+ * stdout and stderr) and a failure in `error`. This read only `tool_output`, a
+ * field Claude Code never sends, so every output arrived as '""', nothing ever
+ * looked like an error, and the hook stayed silent while the matching entry sat
+ * in memory. `tool_output` is still read for any harness that does send it.
+ */
+export function toolOutputText(input: Record<string, unknown>): string {
+  const parts: string[] = [];
+  const add = (v: unknown) => {
+    if (v === undefined || v === null || v === '') return;
+    if (typeof v === 'string') { parts.push(v); return; }
+    const o = v as { stdout?: unknown; stderr?: unknown };
+    if (typeof o === 'object' && (typeof o.stdout === 'string' || typeof o.stderr === 'string')) {
+      for (const s of [o.stdout, o.stderr]) if (typeof s === 'string' && s) parts.push(s);
+      return;
+    }
+    parts.push(JSON.stringify(v));
+  };
+  add(input.error);
+  add(input.tool_response);
+  add(input.tool_output);
+  return parts.join('\n');
+}
+
+/**
  * Pick the line most likely to be the actual failure.
  *
  * Callers pass a whole build or test log. Embedding all of it buries the signal,
@@ -907,13 +1046,19 @@ export function extractFailure(output: string): string | null {
     .filter(l => !/^\s*at\s+/.test(l));             // drop stack frames
   if (lines.length === 0) return null;
 
+  // "Exit code 1" is the last line of most failures and describes none of them.
+  // Left in, it won the fallback below and became the text every lookup
+  // searched for, which matches nothing in particular.
+  const informative = lines.filter(l => !isGenericFailureLine(l));
+  const usable = informative.length ? informative : lines;
+
   // Search the tail first: the failure is usually near the end of a log.
-  const tail = lines.slice(-80).reverse();
+  const tail = usable.slice(-80).reverse();
   for (const re of ERROR_SIGNALS) {
     const hit = tail.find(l => re.test(l));
     if (hit) return hit.slice(0, 300);
   }
-  return lines[lines.length - 1].slice(0, 300);
+  return usable[usable.length - 1].slice(0, 300);
 }
 
 /**
@@ -998,10 +1143,13 @@ async function handleRun(argv: string[]): Promise<void> {
     });
 
     const matched = hits.map(r => r.entry.id);
-    bumpRetrievalCounts(matched, project?.id).catch(() => {});
+    // Awaited before the finally block exits the process. It also leaves no
+    // write in flight at exit, which is the condition the libuv assertion noted
+    // below is about.
+    await bumpRetrievalCounts(matched, project?.id).catch(() => {});
     // `run` only looks anything up because the wrapped command failed, so every
     // hit here is a failure caught, exactly as in the PostToolUse hook.
-    bumpRecallCounts(matched).catch(() => {});
+    await bumpRecallCounts(matched, { query: failure }).catch(() => {});
     console.log(`${DIM}${'─'.repeat(W)}${RESET}\n`);
   } catch {
     // A memory lookup must never add noise to a failing build.
@@ -1103,7 +1251,7 @@ function parseQuickSave(text: string): { type: Entry['type']; content: string } 
 async function handleNote(
   text: string,
   inq?: any,
-  extra: { error?: string; category?: string; tags?: string } = {},
+  extra: { error?: string; category?: string; tags?: string; fixes?: string } = {},
 ): Promise<void> {
   if (!text.trim()) return;
   const cwd = process.cwd();
@@ -1209,9 +1357,16 @@ async function handleNote(
       : content;
 
     // With no embedding (no AI configured), compare titles instead.
-    const known = !inq && (embedding
-      ? await isDuplicateEntry(embedding, project.id)
-      : !!(await findTextDuplicate(title, project.id).catch(() => null)));
+    //
+    // The entry being closed never counts as the duplicate. A fix restates the
+    // bug it fixes almost word for word, so without this the fix is rejected as
+    // already known, the link is never written, and the bug stays open forever.
+    const dupe = !inq
+      ? await (embedding
+          ? findDuplicate(embedding, project.id)
+          : findTextDuplicate(title, project.id)).catch(() => null)
+      : null;
+    const known = !!dupe && dupe.entry.id !== extra.fixes?.trim();
     if (known) {
       s.stop();
       console.log(`  ${DIM}Already known — near-duplicate of an existing entry, not saved.${RESET}\n`);
@@ -1222,11 +1377,27 @@ async function handleNote(
     const category = ENTRY_CATEGORIES.includes(extra.category as EntryCategory)
       ? extra.category as EntryCategory
       : undefined;
+    // Read once. Looked up twice, the value could change between the check and
+    // the use and store `sessionId: undefined`.
+    const session = activeSession(project.path);
+    // `inq` is the interactive REPL, which only a person drives. Everything else
+    // reaching this command is an agent following the instruction to use the
+    // CLI when the MCP tool is not available.
+    const origin = inq ? 'manual' : (session && takeAsk(session) ? 'hook' : 'agent');
+    // An id that matches nothing would be an edge to nothing: the graph would
+    // show the bug as closed with no other end to look at. Checked, not trusted.
+    const wants = extra.fixes?.trim();
+    const closes = wants
+      ? (await getEntriesByProject(project.id)).find(e => e.id === wants)
+      : undefined;
     await insertEntry({
       id: nanoid(), projectId: project.id, type, title, content: detail, tags,
       embedding, createdAt: Date.now(), confidence: 'observation',
       ...(extra.error?.trim() ? { errorPattern: extra.error.trim() } : {}),
       ...(category ? { category } : {}),
+      ...(session ? { sessionId: session } : {}),
+      origin,
+      ...(closes ? { fixes: closes.id } : {}),
     });
     if (inq) {
       console.log(`  ${GREEN}✓${RESET} Saved  ${DIM}[${type}]${RESET}\n`);
@@ -1234,6 +1405,8 @@ async function handleNote(
       s.succeed(`Saved  ${DIM}[${type}]${RESET}`);
       console.log();
     }
+    if (closes) console.log(`  ${DIM}Closes: ${clip(closes.title, 70)}${RESET}\n`);
+    else if (wants) console.log(`  ${DIM}No entry with id ${wants}, so nothing was linked.${RESET}\n`);
   } catch (err) {
     s.fail('Failed to save');
     reportError(err);
@@ -1298,7 +1471,7 @@ async function handleProject(nameArg?: string, opts: { write?: boolean } = {}): 
     }
     project = matches[0];
   } else {
-    project = projects.find(p => p.path === repoRoot) ?? null;
+    project = projects.find(p => sameProjectPath(p.path, repoRoot)) ?? null;
     if (!project) {
       console.log(`\n  ${YELLOW}This directory isn't a registered project.${RESET}\n`);
       console.log(`  ${DIM}Run ${RESET}${CYAN}devbrain init${RESET}${DIM} here, or name one:${RESET}`);
@@ -1940,7 +2113,7 @@ async function main(): Promise<void> {
       case 'init':    await handleInit();                          break;
       case 'note': {
         const rest = args.slice(1);
-        const flags = new Set(['--error', '--category', '--tags']);
+        const flags = new Set(['--error', '--category', '--tags', '--fixes']);
         // Keep only the words that are not a flag or a flag's value, so the
         // note text can still be given unquoted.
         const words = rest.filter((a, i) => !flags.has(a) && !flags.has(rest[i - 1] ?? ''));
@@ -1948,6 +2121,7 @@ async function main(): Promise<void> {
           error: flag(rest, '--error'),
           category: flag(rest, '--category'),
           tags: flag(rest, '--tags'),
+          fixes: flag(rest, '--fixes'),
         });
         break;
       }

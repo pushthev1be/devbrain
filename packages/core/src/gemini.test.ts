@@ -115,3 +115,37 @@ describe('RateLimitError', () => {
     expect(new RateLimitError()).toBeInstanceOf(Error);
   });
 });
+
+// ── the timeout ───────────────────────────────────────────────────────────────
+//
+// A `.catch` does not cover a hang: when the API stalls rather than fails the
+// promise never settles, and the caller waits for ever. That is what made
+// `devbrain search` sit there with no output and no error, and the same stall
+// inside a hook would hold the agent's turn open.
+describe('within (the Gemini timeout)', () => {
+  it('passes a value through when the work finishes in time', async () => {
+    const { within } = await getGemini();
+    await expect(within(Promise.resolve('ok'), 500)).resolves.toBe('ok');
+  });
+
+  it('rejects rather than waiting on a promise that never settles', async () => {
+    const { within } = await getGemini();
+    const neverSettles = new Promise<string>(() => {});
+    await expect(within(neverSettles, 30, 'Embedding')).rejects.toThrow(/Embedding timed out after 30ms/);
+  });
+
+  it('keeps the original failure when the work rejects first', async () => {
+    const { within } = await getGemini();
+    await expect(within(Promise.reject(new Error('bad auth')), 500)).rejects.toThrow('bad auth');
+  });
+
+  // The timer must not keep the process alive after a fast success, or every
+  // CLI command would hang for the length of the timeout before exiting.
+  it('clears its timer once the work settles', async () => {
+    const { within } = await getGemini();
+    const before = process.getActiveResourcesInfo?.().length ?? 0;
+    await within(Promise.resolve(1), 10_000);
+    const after = process.getActiveResourcesInfo?.().length ?? 0;
+    expect(after).toBeLessThanOrEqual(before);
+  });
+});

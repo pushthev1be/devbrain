@@ -75,6 +75,11 @@ vi.mock('@devbrain/core', async importOriginal => {
   getAllEntriesWithProjects:  vi.fn().mockResolvedValue(mockEntries),
   getAllProjects:             vi.fn().mockResolvedValue([mockProject]),
   getRepoRoot:               vi.fn().mockReturnValue(process.cwd()),
+  // No hook has run in these tests, so no session is active — the same as a
+  // save made from an editor DevBrain's hooks are not installed in.
+  activeSession:             vi.fn().mockReturnValue(undefined),
+  // No ask outstanding, so a save in these tests is one the agent volunteered.
+  takeAsk:                   vi.fn().mockReturnValue(false),
   getProjectName:            vi.fn().mockReturnValue('test-project'),
   detectStack:               vi.fn().mockReturnValue(['Node.js']),
   getEmbedding:              vi.fn().mockResolvedValue(new Array(3072).fill(0.1)),
@@ -200,6 +205,70 @@ describe('MCP tool: save_entry', () => {
     })).content[0].text;
     expect(supersedeEntry).toHaveBeenCalledWith('e1', expect.any(String));
     expect(text).toContain('Retracted');
+  });
+
+  it('links the bug it closed, and keeps both entries', async () => {
+    const { insertEntry, supersedeEntry } = await import('@devbrain/core');
+    const client = await buildTestClient();
+    const text = (await callTool(client, 'save_entry', {
+      type: 'fix', title: 'Token expiry comes from the IdP exp claim',
+      content: 'Read exp from the token instead of TOKEN_EXPIRY.', fixes: 'e1',
+    })).content[0].text;
+    expect(insertEntry).toHaveBeenCalledWith(expect.objectContaining({ fixes: 'e1' }));
+    expect(text).toContain('Closes');
+    // Unlike supersedes: the bug was right, so it stays and keeps surfacing.
+    expect(supersedeEntry).not.toHaveBeenCalled();
+    expect(text).not.toContain('Retracted');
+  });
+
+  // An edge to an id that does not exist is worse than no edge: the graph shows
+  // the bug as closed and there is nothing at the other end to look at.
+  it('stores no link for an id that does not exist, and says so', async () => {
+    const { insertEntry } = await import('@devbrain/core');
+    const client = await buildTestClient();
+    const text = (await callTool(client, 'save_entry', {
+      type: 'fix', title: 'Retry the upload once on a 502 from the CDN',
+      content: 'The CDN returns 502 while a cache node restarts.', fixes: 'nope-not-an-id',
+    })).content[0].text;
+    expect(insertEntry).toHaveBeenCalledWith(expect.not.objectContaining({ fixes: expect.anything() }));
+    expect(text).toContain('nothing was linked');
+  });
+
+  it('stamps the session when a hook has recorded one, so the episode holds together', async () => {
+    const core = await import('@devbrain/core');
+    vi.mocked(core.activeSession).mockReturnValueOnce('sess-live');
+    const client = await buildTestClient();
+    await callTool(client, 'save_entry', {
+      type: 'lesson', title: 'pkill does not kill node under Git Bash on Windows',
+      content: 'Use Get-NetTCPConnection piped to Stop-Process instead.',
+    });
+    expect(core.insertEntry).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'sess-live' }));
+  });
+
+  it('leaves sessionId off entirely when no hook has run', async () => {
+    const { insertEntry } = await import('@devbrain/core');
+    const client = await buildTestClient();
+    await callTool(client, 'save_entry', {
+      type: 'note', title: 'The dashboard serves on 8080 by default',
+      content: 'devbrain-mcp --serve, or PORT to override.',
+    });
+    expect(insertEntry).toHaveBeenCalledWith(expect.not.objectContaining({ sessionId: expect.anything() }));
+  });
+
+  // The same trap as supersedes, and worse: a fix restates the bug it closes
+  // almost word for word, so counted as a duplicate the fix is never recorded,
+  // the link is never written, and the bug stays open for good.
+  it('does not let the bug being closed block its own fix as a duplicate', async () => {
+    const core = await import('@devbrain/core');
+    vi.mocked(core.findDuplicate).mockResolvedValueOnce({ entry: mockFix as never, similarity: 0.96 });
+    const client = await buildTestClient();
+    const text = (await callTool(client, 'save_entry', {
+      type: 'fix', title: 'JWT token expires in production — read exp from the IdP',
+      content: 'The IdP sets exp; TOKEN_EXPIRY was never read.', fixes: 'e1',
+    })).content[0].text;
+    expect(text).not.toContain('already known');
+    expect(text).toContain('Closes');
+    expect(core.insertEntry).toHaveBeenCalledWith(expect.objectContaining({ fixes: 'e1' }));
   });
 
   it('does not let the entry being corrected block its correction as a duplicate', async () => {
