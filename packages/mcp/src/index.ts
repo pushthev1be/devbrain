@@ -30,6 +30,7 @@ import { nanoid } from 'nanoid';
 // required at the point of use instead.
 type RunAgent = typeof import('./agent').runAgent;
 import { HTML_DASHBOARD } from './dashboard';
+import { bindHost, checkRequest, startupRefusal } from './httpGuard';
 
 // Load config from ~/.devbrain/.env (GEMINI_API_KEY, Vertex AI vars, MONGODB_URI, …).
 // Loaded unconditionally; real environment variables take precedence, comments skipped.
@@ -454,10 +455,15 @@ Note: no entry with id ${fixes}, so nothing was linked.`;
     : (process.argv.includes('--serve') ? DEFAULT_HTTP_PORT : null);
 
   if (PORT) {
-    // HTTP mode — Cloud Run
+    // HTTP mode — Cloud Run, or `--serve` locally. See httpGuard.ts for who may
+    // connect: loopback by default, same-origin only, and a token when set.
+    const HOST = bindHost();
+    const TOKEN = process.env.DEVBRAIN_TOKEN?.trim() || undefined;
+    const refusal = startupRefusal({ host: HOST, token: TOKEN });
+    if (refusal) { console.error(refusal); process.exit(1); }
 
     function json(res: import('http').ServerResponse, status: number, data: unknown) {
-      res.writeHead(status, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+      res.writeHead(status, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(data));
     }
 
@@ -557,10 +563,12 @@ const httpServer = createServer(async (req, res) => {
       const trimmed = rawUrl.length > 1 ? rawUrl.replace(/\/+$/, '') : rawUrl;
       const url = trimmed === '/sse' ? '/mcp' : (trimmed || '/');
 
-      if (req.method === 'OPTIONS') {
-        res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' });
-        res.end(); return;
-      }
+      const refused = checkRequest({ method: req.method, path: url, headers: req.headers }, { host: HOST, token: TOKEN });
+      if (refused) { json(res, refused.status, { error: refused.error }); return; }
+
+      // No CORS headers anywhere: the dashboard is served from this origin and
+      // needs none, and nothing else is meant to call this from a browser.
+      if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
 
       if (req.method === 'GET' && url === '/') {
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
@@ -873,11 +881,6 @@ const httpServer = createServer(async (req, res) => {
         return;
       }
 
-      if (url === '/agent' && req.method === 'OPTIONS') {
-        res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST', 'Access-Control-Allow-Headers': 'Content-Type' });
-        res.end(); return;
-      }
-
       if (url === '/agent' && req.method === 'POST') {
         try {
           const { query } = await readBody(req) as { query: string };
@@ -885,7 +888,7 @@ const httpServer = createServer(async (req, res) => {
           const mcpUrl = `http://localhost:${PORT}/mcp`;
           // eslint-disable-next-line @typescript-eslint/no-require-imports
           const runAgent: RunAgent = require('./agent').runAgent;
-          const response = await runAgent(query, mcpUrl);
+          const response = await runAgent(query, mcpUrl, TOKEN);
           json(res, 200, { response, powered_by: 'Google ADK + Gemini 2.5 Flash (Vertex AI) + DevBrain MCP' });
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
@@ -923,7 +926,7 @@ const httpServer = createServer(async (req, res) => {
       res.writeHead(404); res.end('Not found');
     });
 
-    httpServer.listen(PORT, '0.0.0.0', () => {
+    httpServer.listen(PORT, HOST, () => {
       console.log(`DevBrain dashboard  http://localhost:${PORT}`);
       console.log(`DevBrain MCP        http://localhost:${PORT}/mcp`);
     });

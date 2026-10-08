@@ -152,7 +152,7 @@ gcloud auth application-default login
 
 When `GOOGLE_GENAI_USE_VERTEXAI` is unset or `false`, DevBrain falls back to the Gemini Developer API using `GEMINI_API_KEY` — convenient for offline/local work. Either way the model IDs and 3072-dim embedding schema are identical, so your MongoDB Atlas Vector Search index is unchanged across backends.
 
-> Deploy: `gcloud run deploy` builds the included [`Dockerfile`](Dockerfile) and serves the MCP SSE endpoint on `:8080`. Set the four env vars above on the service.
+> Deploy: `gcloud run deploy` builds the included [`Dockerfile`](Dockerfile) and serves the MCP SSE endpoint on `:8080`. Set the four env vars above on the service, plus `DEVBRAIN_TOKEN` — the server will not start exposed without one.
 
 ---
 
@@ -340,12 +340,16 @@ node packages/mcp/dist/index.js --serve     # dashboard at :8080, MCP at :8080/m
 
 HTTP is opt-in: the default launch is a stdio MCP server, one per agent session, and binding a port on every launch would make the second session fail with `EADDRINUSE`. Set `PORT` to override.
 
+The server listens on `127.0.0.1` only, answers only requests addressed to localhost, and refuses requests from any other web origin, so a page open in your browser cannot read or write your memory. To reach it from another machine, set both `DEVBRAIN_HOST=0.0.0.0` and `DEVBRAIN_TOKEN=<long random value>`. Without a token it refuses to start, because an exposed, writable memory is never what anyone meant. With a token, clients send `Authorization: Bearer <token>`, and the dashboard is opened once as `http://host:port/#token=<token>`. Cloud Run (detected by `K_SERVICE`) binds all interfaces automatically but still needs the token.
+
+Credentials are scrubbed before anything is stored or sent to Gemini: API keys and tokens of known shapes, JWTs, private keys, passwords in connection strings, and the values of `*_SECRET` / `*_PASSWORD` / `*_API_KEY` / `*_TOKEN` lines. Names are kept, so an entry still says *which* credential was wrong.
+
 `devbrain hooks status` shows which of the five hook events are installed, and the last few times DevBrain asked an agent to record something or handed one a past fix (`~/.devbrain/capture.log`).
 
 ### Working on DevBrain itself
 
 ```bash
-npm test          # 435 tests
+npm test          # 485 tests
 npm run icons     # regenerate stack marks from simple-icons
 npm run brand     # regenerate assets/logo.svg from the one definition of the mark
 ```

@@ -7,6 +7,7 @@
 // when something is actually embedded or generated, which most runs never do.
 import type { GoogleGenAI } from '@google/genai';
 import type { EntryCategory } from './types';
+import { redactSecrets } from './redact';
 import { ENTRY_CATEGORIES } from './types';
 
 // Model is overridable via GEMINI_MODEL. Default is gemini-2.5-flash — the current
@@ -113,7 +114,7 @@ async function generateText(prompt: string): Promise<string> {
   // autoArchetype, synthesizeSection — goes through here.
   const res = await withAbort<GenResult>(
     signal => getClient().models.generateContent({
-      model: TEXT_MODEL, contents: prompt, config: { ...abortable(signal) },
+      model: TEXT_MODEL, contents: redactSecrets(prompt), config: { ...abortable(signal) },
     }),
     GEMINI_TIMEOUT_MS, 'Generation');
   return (res.text ?? '').trim();
@@ -206,7 +207,8 @@ export async function getEmbedding(text: string): Promise<number[]> {
     const res = await withAbort<EmbedResult>(
       signal => getClient().models.embedContent({
         model: EMBED_MODEL,
-        contents: text,
+        // Scrubbed before it leaves the machine — see redact.ts.
+        contents: redactSecrets(text),
         config: { outputDimensionality: EMBED_DIM, ...abortable(signal) },
       }),
       GEMINI_TIMEOUT_MS, 'Embedding');

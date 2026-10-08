@@ -5,13 +5,15 @@
 // choose (for team sharing and server-side vector search) rather than a
 // prerequisite for using DevBrain at all.
 //
-// Concurrency: writes reload from disk and then replace the file via an atomic
-// rename, so a reader never observes a half-written file. Two writers landing in
-// the same few milliseconds — an interactive save racing the post-commit hook —
-// can still lose one update. Acceptable for a single-developer store; a shared
-// team knowledge base is what MONGODB_URI is for.
+// Concurrency: writes replace the file via an atomic rename, so a reader never
+// observes a half-written file. Writers take an exclusive lock file around
+// reload-mutate-write, because without it two writers landing in the same few
+// milliseconds each reload, each change, and the second rename silently drops
+// the first's update. That was tolerable with one session; with several Claude
+// Code sessions in parallel, every one running hooks that save and bump
+// counters, it is how saves go missing. See withLock().
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync, openSync, closeSync, unlinkSync, statSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import type { Entry, Project } from './types';
@@ -63,17 +65,87 @@ function write(data: LocalData): void {
   const path = getLocalDbPath();
   const dir = join(homedir(), '.devbrain');
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  const tmp = `${path}.tmp`;
+  const tmp = `${path}.${process.pid}.tmp`;
   writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf-8');
-  renameSync(tmp, path);
+  // Windows refuses to rename over a file another process has open for that
+  // instant (a reader mid-readFileSync) with EPERM/EBUSY. It clears in
+  // milliseconds; retry briefly rather than fail the save.
+  for (let attempt = 0; ; attempt++) {
+    try { renameSync(tmp, path); return; }
+    catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if ((code !== 'EPERM' && code !== 'EBUSY' && code !== 'EACCES') || attempt >= 20) {
+        try { unlinkSync(tmp); } catch { /* already gone */ }
+        throw err;
+      }
+      sleepSync(10 + attempt * 5);
+    }
+  }
 }
 
-// Reload-then-mutate, so concurrent processes work from current state rather
-// than whatever this process last saw.
+/** Block this thread briefly. mutate() is synchronous, so the lock wait must be too. */
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/** How long a lock may be held before it is presumed abandoned by a crashed process. */
+export const LOCK_STALE_MS = 10_000;
+/** How long a writer waits for the lock before giving up. */
+const LOCK_WAIT_MS = 5_000;
+
+/**
+ * Run fn holding ~/.devbrain/db.json.lock.
+ *
+ * The lock is a file created with O_EXCL ('wx'), which is atomic on every
+ * platform Node supports, including Windows. A lock older than LOCK_STALE_MS
+ * belonged to a process that died mid-write — no write takes seconds — and is
+ * broken rather than waited on forever.
+ */
+function withLock<T>(fn: () => T): T {
+  const lock = `${getLocalDbPath()}.lock`;
+  const dir = join(homedir(), '.devbrain');
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+
+  const deadline = Date.now() + LOCK_WAIT_MS;
+  let fd: number | undefined;
+  for (let attempt = 0; fd === undefined; attempt++) {
+    try {
+      fd = openSync(lock, 'wx');
+    } catch (err) {
+      // Windows answers EPERM, not EEXIST, when the lock is being deleted by the
+      // writer that just released it. Both mean "held — wait".
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code !== 'EEXIST' && code !== 'EPERM' && code !== 'EACCES') throw err;
+      if (code !== 'EEXIST' && Date.now() > deadline) throw err;
+      try {
+        if (Date.now() - statSync(lock).mtimeMs > LOCK_STALE_MS) { unlinkSync(lock); continue; }
+      } catch { continue; /* released between our open and stat — try again */ }
+      if (Date.now() > deadline) {
+        throw new Error(
+          `DevBrain's local database is locked by another process (${lock}). ` +
+          `If no other DevBrain is running, delete that file.`
+        );
+      }
+      sleepSync(Math.min(5 + attempt * 5, 50));
+    }
+  }
+
+  try {
+    return fn();
+  } finally {
+    closeSync(fd);
+    try { unlinkSync(lock); } catch { /* broken as stale by another process */ }
+  }
+}
+
+// Reload-then-mutate under the lock, so concurrent processes each work from
+// the state the previous writer left rather than overwrite it.
 function mutate(fn: (data: LocalData) => void): void {
-  const data = read();
-  fn(data);
-  write(data);
+  withLock(() => {
+    const data = read();
+    fn(data);
+    write(data);
+  });
 }
 
 function projectFor(projects: Project[], projectId: string): Project {

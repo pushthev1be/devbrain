@@ -6,6 +6,7 @@ import type { MongoClient, Db } from 'mongodb';
 import { join } from 'path';
 import { homedir } from 'os';
 import type { Entry, Project } from './types';
+import { redactSecrets } from './redact';
 import { RECALL_LOG_MAX } from './types';
 import * as local from './localStore';
 import { normalizeProjectPath } from './projectPath';
@@ -126,7 +127,21 @@ export async function getAllProjects(): Promise<Project[]> {
 
 // ── entries ───────────────────────────────────────────────────────────────────
 
+/**
+ * Every path that writes an entry comes through here, whichever backend is
+ * active, so this is where credentials are scrubbed. See redact.ts.
+ */
+function scrubEntry(entry: Entry): Entry {
+  return {
+    ...entry,
+    title: redactSecrets(entry.title),
+    content: redactSecrets(entry.content),
+    ...(entry.errorPattern !== undefined ? { errorPattern: redactSecrets(entry.errorPattern) } : {}),
+  };
+}
+
 export async function insertEntry(entry: Entry): Promise<void> {
+  entry = scrubEntry(entry);
   if (useLocal()) return local.insertEntry(entry);
   const db = await getDb();
   await db.collection('entries').insertOne({ ...entry });
@@ -198,6 +213,7 @@ export async function markCommitProcessed(hash: string, projectId: string): Prom
 // ── retrieval & confidence ────────────────────────────────────────────────────
 
 export async function reinforceEntry(id: string, contentUpdate?: string): Promise<void> {
+  contentUpdate = redactSecrets(contentUpdate);
   if (useLocal()) return local.reinforceEntry(id, contentUpdate);
   const db = await getDb();
   const doc = await db.collection('entries').findOne({ id });
@@ -273,6 +289,8 @@ export async function bumpRecallCounts(
   context: { query?: string; sessionId?: string } = {},
 ): Promise<void> {
   if (!ids.length) return;
+  // The failure text a recall matched is kept in the entry's log — scrub it too.
+  if (context.query) context = { ...context, query: redactSecrets(context.query) };
   if (useLocal()) return local.bumpRecallCounts(ids, context);
   const db = await getDb();
   const event = {
