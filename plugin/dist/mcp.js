@@ -94795,6 +94795,7 @@ var require_turnReview = __commonJS({
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.ENTRY_GUIDE = void 0;
     exports2.buildRecordPrompt = buildRecordPrompt;
+    exports2.buildNoErrorHint = buildNoErrorHint;
     exports2.buildFixHint = buildFixHint;
     exports2.reviewTurn = reviewTurn;
     var transcript_1 = require_transcript();
@@ -94827,11 +94828,31 @@ var require_turnReview = __commonJS({
         "You did the work, so you write the record \u2014 DevBrain only stores it. For each distinct, non-obvious item",
         "(usually one, at most three), call the DevBrain `save_entry` tool",
         ...exports2.ENTRY_GUIDE,
+        ...buildNoErrorHint(events),
         ...buildFixHint(openBugs),
         "",
         "If it was routine (a typo, an obvious change) or DevBrain already has it, save nothing.",
         "Either way, keep it brief: one short line to the user, then stop."
       ].join("\n");
+    }
+    function buildNoErrorHint(events) {
+      if (events.some((e2) => e2.kind === "error"))
+        return [];
+      const edited = events.some((e2) => e2.kind === "edit");
+      return [
+        "",
+        edited ? "Nothing failed in this stretch, so there is no root cause to write and no error to quote." : "No code changed and nothing failed in this stretch, so there is nothing here to write up as a fix.",
+        "If something is worth keeping it is one of these, and each needs a different thing from you:",
+        "- `decision` \u2014 what you chose, **what you turned down, and why**. The rejected option is the",
+        "  part that cannot be recovered later: without it the entry cannot be re-judged when the",
+        "  trade-off changes, and it reads as though nothing else was considered.",
+        "- `lesson` \u2014 what looked true and was not, and what is actually true.",
+        "- `pattern` / `anti-pattern` \u2014 the shape worth repeating, or the one to stop reaching for.",
+        "Leave `error_pattern` off entirely. There was no error, and a plausible-looking one invented",
+        "here would match every future failure of that shape and identify none of them.",
+        "If the choice was obvious, or forced, or already recorded, save nothing \u2014 this is the case",
+        "where saving nothing is the common answer."
+      ];
     }
     function buildFixHint(openBugs) {
       if (!openBugs.length)

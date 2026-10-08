@@ -102,11 +102,58 @@ export function buildRecordPrompt(
     'You did the work, so you write the record — DevBrain only stores it. For each distinct, non-obvious item',
     '(usually one, at most three), call the DevBrain `save_entry` tool',
     ...ENTRY_GUIDE,
+    ...buildNoErrorHint(events),
     ...buildFixHint(openBugs),
     '',
     'If it was routine (a typo, an obvious change) or DevBrain already has it, save nothing.',
     'Either way, keep it brief: one short line to the user, then stop.',
   ].join('\n');
+}
+
+/**
+ * What to ask for when the stretch contains no error at all.
+ *
+ * The ask itself was fix-shaped. It leads with error lines to copy verbatim and
+ * the files changed, and `ENTRY_GUIDE` opens with "the root cause, then the
+ * exact fix". An agent reading that writes a fix, or writes nothing — and the
+ * type distribution shows it: of 224 entries, 88 are `fix` and 11 are
+ * `decision`.
+ *
+ * It is not that decisions go undetected. Measured over 52 chunks of real
+ * transcript, 20 of the 37 stretches that trigger the ask reach it through the
+ * two decision-shaped paths in `assessSegment` rather than the error-and-edit
+ * one. The trigger fires; the prompt then asks the wrong question.
+ *
+ * Keyed off `errors === 0`, which is a fact about the stretch, not a guess about
+ * its prose. An earlier attempt matched decision vocabulary and quoted the
+ * sentence back — the same trick that made `error_pattern` get filled in. It was
+ * abandoned because it could not be made precise: at chunk scale the loose form
+ * fired on 92% of nudges, and the tightened form still quoted "All eight saved,
+ * none rejected as duplicates" and "the headline number to be skeptical of is
+ * 83% vs 60%" as though they were choices. A hint that quotes the wrong sentence
+ * is worse than none: it teaches the agent the hint is noise, and it invites an
+ * entry about a decision nobody made.
+ */
+export function buildNoErrorHint(events: DigestEvent[]): string[] {
+  if (events.some(e => e.kind === 'error')) return [];
+  const edited = events.some(e => e.kind === 'edit');
+
+  return [
+    '',
+    edited
+      ? 'Nothing failed in this stretch, so there is no root cause to write and no error to quote.'
+      : 'No code changed and nothing failed in this stretch, so there is nothing here to write up as a fix.',
+    'If something is worth keeping it is one of these, and each needs a different thing from you:',
+    '- `decision` — what you chose, **what you turned down, and why**. The rejected option is the',
+    '  part that cannot be recovered later: without it the entry cannot be re-judged when the',
+    '  trade-off changes, and it reads as though nothing else was considered.',
+    '- `lesson` — what looked true and was not, and what is actually true.',
+    '- `pattern` / `anti-pattern` — the shape worth repeating, or the one to stop reaching for.',
+    'Leave `error_pattern` off entirely. There was no error, and a plausible-looking one invented',
+    'here would match every future failure of that shape and identify none of them.',
+    'If the choice was obvious, or forced, or already recorded, save nothing — this is the case',
+    'where saving nothing is the common answer.',
+  ];
 }
 
 /**
