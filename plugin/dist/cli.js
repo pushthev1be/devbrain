@@ -75325,9 +75325,10 @@ var require_transcript = __commonJS({
       const text = (keep.length ? keep : informative.length ? informative : anything).join("\n").trim();
       return text.length > max ? text.slice(0, max) : text;
     }
-    var GENERIC_FAILURE = /^\s*(?:exit (?:code|status) \d+|command failed[.:]?|FAIL|✗|×)\s*$/i;
+    var GENERIC_FAILURE = /^\s*(?:exit (?:code|status) \d+|command failed(?: with exit code \d+)?[.:]?|traceback \(most recent call last\):|build failed|tests? failed|error[.:]?|FAIL|✗|×)\s*$/i;
+    var TABLE_ROW = / \| .* \| /;
     function isGenericFailureLine2(line2) {
-      return GENERIC_FAILURE.test(line2);
+      return GENERIC_FAILURE.test(line2) || TABLE_ROW.test(line2);
     }
     function looksLikeError2(output, isError) {
       if (isError)

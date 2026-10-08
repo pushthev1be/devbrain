@@ -140,10 +140,25 @@ export function errorExcerpt(output: string, max = 600): string {
  * "Exit code 1". It also makes unrelated failures fingerprint identically, so
  * the loop detector sees a repeat that never happened.
  */
-const GENERIC_FAILURE = /^\s*(?:exit (?:code|status) \d+|command failed[.:]?|FAIL|✗|×)\s*$/i;
+const GENERIC_FAILURE = /^\s*(?:exit (?:code|status) \d+|command failed(?: with exit code \d+)?[.:]?|traceback \(most recent call last\):|build failed|tests? failed|error[.:]?|FAIL|✗|×)\s*$/i;
+
+/**
+ * A row of a printed table, which is output ABOUT failures rather than one.
+ *
+ * A benchmark that tests error handling prints rows like
+ * `npm ERR! ERESOLVE unable to resolve dependen | ok | ok` — a deliberately
+ * unrelated fixture beside its pass/fail columns. That is error-shaped text
+ * quoted as data, and offering it verbatim as an error_pattern stores a pattern
+ * that matches the benchmark's own output, so every later run of it reads as the
+ * same failure recurring.
+ *
+ * Two separators is the test. A real message rarely carries two, and the lines
+ * that do — an echoed shell pipeline, a table — are not the error either.
+ */
+const TABLE_ROW = / \| .* \| /;
 
 export function isGenericFailureLine(line: string): boolean {
-  return GENERIC_FAILURE.test(line);
+  return GENERIC_FAILURE.test(line) || TABLE_ROW.test(line);
 }
 
 /** True when a tool result reports a failure. */

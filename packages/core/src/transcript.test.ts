@@ -184,12 +184,31 @@ describe('errorExcerpt / looksLikeError', () => {
   });
 
   it('knows which lines describe nothing', () => {
-    for (const generic of ['Exit code 1', 'exit status 2', 'Command failed.', 'FAIL', '×']) {
-      expect(isGenericFailureLine(generic), generic).toBe(true);
-    }
-    for (const real of ['× catches the thing 9ms', 'FAILED to connect to host', 'TypeError: x']) {
-      expect(isGenericFailureLine(real), real).toBe(false);
-    }
+    const generic = [
+      'Exit code 1', 'exit status 2', 'Command failed.', 'FAIL', '×',
+      'command failed with exit code 1',
+      // The Python header: true of every Python failure there has ever been,
+      // and the real error is the LAST line of a traceback, not the first.
+      'Traceback (most recent call last):',
+      'Build failed', 'Tests failed', 'Test failed', 'Error', 'error:',
+      // Output about failures rather than a failure: a benchmark row quoting a
+      // fixture beside its pass/fail columns. Stored as a pattern it would
+      // match that benchmark's own output on every later run.
+      'npm ERR! ERESOLVE unable to resolve dependen | ok | ok',
+    ];
+    for (const line of generic) expect(isGenericFailureLine(line), line).toBe(true);
+
+    const real = [
+      '× catches the thing 9ms', 'FAILED to connect to host', 'TypeError: x',
+      // The informative line of a traceback, which is the one worth storing.
+      "ValueError: invalid literal for int() with base 10: 'abc'",
+      'Error: connect ECONNREFUSED 127.0.0.1:5432',
+      'error TS2305: Module has no exported member',
+      'Build failed: missing module left-pad',
+      // One separator is not a table, and this is a real message.
+      'EPERM: operation not permitted, symlink | retry',
+    ];
+    for (const line of real) expect(isGenericFailureLine(line), line).toBe(false);
   });
 
   it('flags failures by shape, not by the word "error" anywhere', () => {

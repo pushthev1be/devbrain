@@ -293,9 +293,20 @@ secure credential store rather than `settings.json`.
       Not done, and deliberately: backfilling `supersedes` onto those 8. It
       would make the data uniform, but it is a migration over someone's store to
       fix nothing — the graph already reads both directions.
-- [ ] **Stop offering generic lines as error patterns** — `Traceback (most recent
+- [x] **Stop offering generic lines as error patterns** — `Traceback (most recent
       call last):`, benchmark table rows. Same class already fixed for
-      `Exit code 1`.
+      `Exit code 1`. `isGenericFailureLine` now also rejects the Python header
+      (the real error is a traceback's *last* line, not its first), bare
+      `Error`/`error:`, `Build failed`, `Test(s) failed`, `command failed with
+      exit code N`, and any line carrying two ` | ` separators — a printed table
+      row is output *about* failures, not one, and a pattern taken from a
+      benchmark's own output matches that benchmark on every later run.
+
+      Every addition is anchored to the whole line, so the informative lines
+      stay: `ValueError: invalid literal for int()`, `Error: connect
+      ECONNREFUSED 127.0.0.1:5432`, `error TS2305: ...` and `Build failed:
+      missing module left-pad` are all still offered, and the tests assert that
+      in both directions.
 - [ ] **Open the PR.** 55 commits ahead of `main`, so the repo's landing page
       still shows the old README.
 - [ ] **Redeploy or retire the hosted demo.** It answers on `/` and `/agent`,
