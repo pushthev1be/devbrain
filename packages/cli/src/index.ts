@@ -1192,7 +1192,9 @@ async function handleSearch(query: string): Promise<void> {
       return;
     }
 
-    bumpRetrievalCounts(results.map(r => r.entry.id), currentProject?.id).catch(() => {});
+    // Awaited: fired and forgotten it races closeDb() at the end of main(), and
+    // the in-flight write kept the process alive long after the results printed.
+    await bumpRetrievalCounts(results.map(r => r.entry.id), currentProject?.id).catch(() => {});
 
     const catLabel = classification.category !== 'other'
       ? `  ${DIM}[${classification.category}]${RESET}` : '';
@@ -2188,6 +2190,30 @@ async function main(): Promise<void> {
   // An open MongoClient holds the event loop open, so a one-shot command would
   // print its result and then sit there until killed. Release it and exit.
   await closeDb();
+
+  // Then leave, explicitly.
+  //
+  // closeDb() releases what DevBrain owns, but the Mongo driver and the Gemini
+  // SDK both leave timers and keep-alive sockets behind that nothing public
+  // closes. Measured after a completed `devbrain search`: two referenced
+  // timeouts and three sockets still held the loop, so the command printed its
+  // results and then sat there until it was killed.
+  //
+  // Exiting here is safe in a way it would not have been before: every network
+  // call is now awaited and every deadline aborts its request, so nothing is in
+  // flight. (Calling process.exit over an in-flight HTTPS request is what trips
+  // the libuv assertion recorded elsewhere — hence the flush first, and hence
+  // this being the last line rather than a shortcut taken earlier.)
+  await flushStdout();
+  process.exit(process.exitCode ?? 0);
+}
+
+/** Let buffered output reach the terminal before the process goes away. */
+function flushStdout(): Promise<void> {
+  return new Promise(resolve => {
+    if (process.stdout.writableLength === 0) { resolve(); return; }
+    process.stdout.write('', () => resolve());
+  });
 }
 
 // Only run the CLI when this file is the process entry point. Calling main() at

@@ -1,4 +1,8 @@
-import { MongoClient, Db, ServerApiVersion } from 'mongodb';
+// Types only: `import type` is erased at compile time, so requiring this module
+// does not load the driver. The driver itself costs 199ms to load, and the
+// common case — a hook that decides locally and returns — never opens a
+// connection at all. See loadMongo() below.
+import type { MongoClient, Db } from 'mongodb';
 import { join } from 'path';
 import { homedir } from 'os';
 import type { Entry, Project } from './types';
@@ -30,10 +34,24 @@ export function describeStorage(): { kind: StorageKind; location: string } {
 let client: MongoClient | null = null;
 let _db: Db | null = null;
 
+/**
+ * The mongodb driver, loaded on first use rather than at import.
+ *
+ * Measured: requiring it costs 199ms of the 316ms it took to load core at all,
+ * and a PostToolUse hook runs on every single tool call — so every Read and
+ * Edit was paying for a database driver it would never use. Cached by the
+ * module system after the first call, so repeat use is free.
+ */
+function loadMongo(): typeof import('mongodb') {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  return require('mongodb') as typeof import('mongodb');
+}
+
 async function getDb(): Promise<Db> {
   if (_db) return _db;
   const uri = process.env.MONGODB_URI;
   if (!uri) throw new Error('MONGODB_URI is not set. Add it to ~/.devbrain/.env');
+  const { MongoClient, ServerApiVersion } = loadMongo();
   client = new MongoClient(uri, {
     serverApi: { version: ServerApiVersion.v1, strict: false, deprecationErrors: true },
     // The driver default is 30s, which reads as a hang on a typo'd URI or an

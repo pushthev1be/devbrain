@@ -3,7 +3,9 @@
 // semantic search and a few refinements (archetypes, section summaries, query
 // routing); without it each of these quietly does nothing.
 
-import { GoogleGenAI } from '@google/genai';
+// Types only — see loadGenAI(). The SDK costs 103ms to load and is needed only
+// when something is actually embedded or generated, which most runs never do.
+import type { GoogleGenAI } from '@google/genai';
 import type { EntryCategory } from './types';
 import { ENTRY_CATEGORIES } from './types';
 
@@ -54,6 +56,12 @@ function useVertex(): boolean {
 
 let client: GoogleGenAI | null = null;
 
+/** The genai SDK, loaded on first use. Cached by the module system thereafter. */
+function loadGenAI(): typeof import('@google/genai') {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  return require('@google/genai') as typeof import('@google/genai');
+}
+
 function getClient(): GoogleGenAI {
   if (!client) {
     if (useVertex()) {
@@ -67,6 +75,7 @@ function getClient(): GoogleGenAI {
           '(gcloud auth application-default login, or a service account on Cloud Run).'
         );
       }
+      const { GoogleGenAI } = loadGenAI();
       client = new GoogleGenAI({ vertexai: true, project, location });
     } else {
       // Gemini Developer API path (AI Studio) — used for local/offline dev.
@@ -77,14 +86,36 @@ function getClient(): GoogleGenAI {
           'for Vertex AI, or GEMINI_API_KEY for the Gemini Developer API.'
         );
       }
+      const { GoogleGenAI } = loadGenAI();
       client = new GoogleGenAI({ vertexai: false, apiKey });
     }
   }
   return client;
 }
 
+/**
+ * `config.abortSignal` as the SDK will accept it.
+ *
+ * @google/genai reads it in its request builder but does not declare it in
+ * genai.d.ts (checked at 1.52.0), so passing it as a literal fails the excess
+ * property check and collapses the call's return type to `unknown`. Spreading a
+ * non-literal bypasses that check without widening anything else, which keeps
+ * the rest of the params type-checked.
+ */
+function abortable(signal: AbortSignal): object {
+  return { abortSignal: signal };
+}
+
 async function generateText(prompt: string): Promise<string> {
-  const res = await getClient().models.generateContent({ model: TEXT_MODEL, contents: prompt });
+  // Bounded for the same reason embedding is: a stalled generation never
+  // settles, and `devbrain search` sat for 36 seconds on a query classification
+  // nobody was waiting for. Every generation path — classifyQuery,
+  // autoArchetype, synthesizeSection — goes through here.
+  const res = await withAbort<GenResult>(
+    signal => getClient().models.generateContent({
+      model: TEXT_MODEL, contents: prompt, config: { ...abortable(signal) },
+    }),
+    GEMINI_TIMEOUT_MS, 'Generation');
   return (res.text ?? '').trim();
 }
 
@@ -103,6 +134,45 @@ export function hasGeminiCreds(): boolean {
  * same stall inside a hook would hold up the agent's turn.
  */
 export const GEMINI_TIMEOUT_MS = Number(process.env.DEVBRAIN_AI_TIMEOUT_MS) || 8000;
+
+/**
+ * Run a Gemini call with a deadline that actually cancels it.
+ *
+ * `within` below stops *waiting*; it does not stop the request. That is enough
+ * to unblock a caller but not to let the process exit: an abandoned HTTPS call
+ * holds the event loop open long after the result was printed, which is why
+ * `devbrain search` returned its answer and then sat there until it was killed.
+ * Exiting out from under it is not the answer either — process.exit over an
+ * in-flight request trips a libuv assertion and replaces the output with a
+ * crash.
+ *
+ * So the deadline aborts the request. The SDK takes an AbortSignal on
+ * `config.abortSignal`, so the socket is closed rather than orphaned.
+ */
+/** The SDK's own result types, named so withAbort does not have to infer them. */
+type GenResult = Awaited<ReturnType<GoogleGenAI['models']['generateContent']>>;
+type EmbedResult = Awaited<ReturnType<GoogleGenAI['models']['embedContent']>>;
+
+async function withAbort<T>(
+  call: (signal: AbortSignal) => Promise<T>,
+  ms = GEMINI_TIMEOUT_MS,
+  label = 'Gemini',
+): Promise<T> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      reject(new Error(`${label} timed out after ${ms}ms`));
+    }, ms);
+    if (typeof timer.unref === 'function') timer.unref();
+  });
+  try {
+    return await Promise.race<T>([call(controller.signal), deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 /** Reject rather than hang. The timer is cleared so the process can still exit. */
 export function within<T>(work: Promise<T>, ms = GEMINI_TIMEOUT_MS, label = 'Gemini'): Promise<T> {
@@ -133,11 +203,13 @@ export async function getEmbedding(text: string): Promise<number[]> {
   }
 
   try {
-    const res = await within<Awaited<ReturnType<typeof getClient>['models']['embedContent']>>(getClient().models.embedContent({
-      model: EMBED_MODEL,
-      contents: text,
-      config: { outputDimensionality: EMBED_DIM },
-    }), GEMINI_TIMEOUT_MS, 'Embedding');
+    const res = await withAbort<EmbedResult>(
+      signal => getClient().models.embedContent({
+        model: EMBED_MODEL,
+        contents: text,
+        config: { outputDimensionality: EMBED_DIM, ...abortable(signal) },
+      }),
+      GEMINI_TIMEOUT_MS, 'Embedding');
     const values = res.embeddings?.[0]?.values;
     if (!values || values.length === 0) {
       throw new Error('Embedding response contained no values');
