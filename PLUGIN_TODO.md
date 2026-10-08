@@ -309,5 +309,14 @@ secure credential store rather than `settings.json`.
       in both directions.
 - [ ] **Open the PR.** 55 commits ahead of `main`, so the repo's landing page
       still shows the old README.
-- [ ] **Redeploy or retire the hosted demo.** It answers on `/` and `/agent`,
-      404s on `/api/*`, and its database is unreachable.
+- [x] **Redeploy or retire the hosted demo.** It answers on `/` and `/agent`,
+      404s on `/api/*`, and its database is unreachable. **Retired from the
+      docs.** The README's "Live demo" banner and the `curl .../agent` example
+      are gone, replaced by a note saying so and pointing at the plugin install
+      — a half-working instance is worse than none, because what it showed was
+      not what the repo does. The claim that Gemini is needed by "the hosted
+      agent" now reads "the `/agent` route, if you deploy one".
+
+      The deployment itself is untouched: that is infrastructure, and taking it
+      down is the owner's call, not a documentation change. Cloud Run support
+      stays — the Dockerfile and the HTTP transport are tested.

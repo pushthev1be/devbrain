@@ -4,18 +4,18 @@
 
 Persistent developer memory for you and your AI agents. Your coding agent writes down what it fixes and decides as it works, and reads it back before the next task — so it already knows what broke before, what was decided, and why. DevBrain notices when something worth keeping happened, stores it, and ranks it back; it needs no AI service of its own.
 
-**🚀 Live demo:** **https://devbrain-oujuoveyvq-uc.a.run.app** — dashboard and the agent at `POST /agent`, on **Gemini 2.5 Flash (Vertex AI)** + **MongoDB Atlas** on **Google Cloud Run**.
-
-> The hosted instance is an older build than this repo and its database is not currently reachable, so parts of it answer and parts do not. Run it locally for the current thing — `npm install` through `devbrain setup` below takes a couple of minutes and needs no cloud account.
-
-```bash
-# Ask the deployed agent (Gemini 2.5 Flash on Vertex AI) anything in your team's memory:
-curl -X POST https://devbrain-oujuoveyvq-uc.a.run.app/agent \
-  -H "Content-Type: application/json" \
-  -d '{"query":"any fixes for mobile safe-area overlap?"}'
-```
+> **The hosted demo is retired.** It ran an older build against a database that
+> is no longer reachable, so it answered some requests and not others — which is
+> worse than not being there, because what it showed was not what this repo does.
+> Install the plugin below instead: one command, on your own machine, no cloud
+> account.
+>
+> DevBrain still deploys to Cloud Run — the Dockerfile and the HTTP transport are
+> here and tested. There just is not a public instance to point at.
 
 <img src="assets/dashboard.png" alt="The DevBrain dashboard: entries listed beside a detail pane, with counts for active, caught, never surfaced and retracted" width="900">
+
+<sub>The dashboard, running locally — `/devbrain:dashboard`, or `node plugin/dist/mcp.js --serve`.</sub>
 
 ---
 
@@ -97,7 +97,7 @@ Switching is just the env var — the two backends are interchangeable at runtim
 
 ### Gemini credentials (optional)
 
-Nothing in DevBrain needs a model: the agent writes every entry, and search, context and duplicate detection match keywords. Gemini is an upgrade — embeddings make search match by meaning, and it adds root-cause archetypes and summarised context sections. The hosted agent at `/agent` does need it. DevBrain runs Gemini on one of two backends: **Vertex AI** (Google Cloud) for hosted/production, or the **Gemini Developer API** (AI Studio) for local dev.
+Nothing in DevBrain needs a model: the agent writes every entry, and search, context and duplicate detection match keywords. Gemini is an upgrade — embeddings make search match by meaning, and it adds root-cause archetypes and summarised context sections. The `/agent` route does need it, if you deploy one. DevBrain runs Gemini on one of two backends: **Vertex AI** (Google Cloud) for hosted/production, or the **Gemini Developer API** (AI Studio) for local dev.
 
 For local dev, get a free key at [aistudio.google.com](https://aistudio.google.com):
 
