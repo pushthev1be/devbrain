@@ -15,10 +15,14 @@ import { HTML_DASHBOARD } from './dashboard';
 const REPO_ROOT = join(__dirname, '..', '..', '..');
 
 describe('the mark', () => {
-  it('is the same geometry in the file on disk — run `npm run brand` if this fails', () => {
-    const onDisk = readFileSync(join(REPO_ROOT, 'assets', 'logo.svg'), 'utf-8').trim();
-    expect(onDisk).toBe(logoSvg().trim());
-  });
+  // Both copies: the README embeds the repo one, and plugin.json's `icon` points
+  // at the plugin one, which has to be inside the plugin root to validate.
+  it.each([['assets'], ['plugin/assets']])(
+    'is the same geometry in %s/logo.svg — run `npm run brand` if this fails',
+    dir => {
+      const onDisk = readFileSync(join(REPO_ROOT, ...dir.split('/'), 'logo.svg'), 'utf-8').trim();
+      expect(onDisk).toBe(logoSvg().trim());
+    });
 
   it('is drawn in the dashboard from the same source, not a copy', () => {
     expect(HTML_DASHBOARD).toContain(LOGO_MARK);

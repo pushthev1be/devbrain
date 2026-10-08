@@ -1,9 +1,14 @@
 /**
  * The committed plugin bundles must not be older than the source they came from.
  *
- * `dist/cli.js` and `dist/mcp.js` are in git because installing a Claude Code
- * plugin copies the repo and runs neither `npm install` nor `tsc` — whatever
- * the hooks and `.mcp.json` point at has to be runnable as it stands. That
+ * `plugin/dist/cli.js` and `plugin/dist/mcp.js` are in git because installing a
+ * Claude Code plugin copies the plugin root and runs neither `npm install` nor
+ * `tsc` — whatever the hooks and `plugin.json` point at has to be runnable as it
+ * stands. They sit under `plugin/` rather than at the repo root because a plugin
+ * root holding a `package.json` makes Claude Code install its Node
+ * dependencies, which for this workspace means recreating the `packages/*`
+ * symlinks and failing on Windows with `EPERM: operation not permitted,
+ * symlink`. That
  * makes them the one kind of artifact that can silently ship last week's code:
  * everything builds, every test passes, and the plugin runs something nobody
  * wrote today.
@@ -17,7 +22,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';
 
 const REPO = join(__dirname, '..', '..', '..');
-const DIST = join(REPO, 'dist');
+const DIST = join(REPO, 'plugin', 'dist');
 const BUNDLES = ['cli.js', 'mcp.js'];
 
 /** Newest mtime among the TypeScript sources the bundles are built from. */

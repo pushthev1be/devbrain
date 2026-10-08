@@ -107459,25 +107459,18 @@ async function handleInit() {
     const bar2 = `${DIM}${"\u2500".repeat(W2)}${RESET}`;
     console.log(bar2);
     console.log(`
-  ${BOLD}${CYAN}Connect DevBrain to your AI Agent / MCP Host${RESET}  ${DIM}(one-time setup per machine)${RESET}
+  ${BOLD}${CYAN}Give your agent the memory tools${RESET}  ${DIM}(one-time, per machine)${RESET}
 `);
-    console.log(`  Add this to your MCP settings or Google Cloud Agent Builder so the agent`);
-    console.log(`  calls DevBrain tools automatically \u2014 without needing to be asked:
+    console.log(`  The hooks above brief each session and ask the agent to record what it`);
+    console.log(`  fixes. The three tools \u2014 get_context, search_knowledge, save_entry \u2014 come`);
+    console.log(`  from the plugin. In Claude Code:
 `);
-    console.log(`${CYAN}  \u250C\u2500 MCP Client Configuration JSON \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510${RESET}`);
-    console.log(`  ${DIM}{${RESET}`);
-    console.log(`    ${DIM}"mcpServers": {${RESET}`);
-    console.log(`      ${CYAN}"devbrain"${RESET}${DIM}: {${RESET}`);
-    console.log(`        ${CYAN}"type"${RESET}${DIM}: ${RESET}${GREEN}"stdio"${RESET}${DIM},${RESET}`);
-    console.log(`        ${CYAN}"command"${RESET}${DIM}: ${RESET}${GREEN}"npx"${RESET}${DIM},${RESET}`);
-    console.log(`        ${CYAN}"args"${RESET}${DIM}: ${RESET}${GREEN}["-y", "@devbrain/mcp"]${RESET}`);
-    console.log(`      ${DIM}}${RESET}`);
-    console.log(`    ${DIM}}${RESET}`);
-    console.log(`  ${DIM}}${RESET}`);
-    console.log(`${CYAN}  \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518${RESET}
+    console.log(`    ${CYAN}/plugin marketplace add pushthev1be/devbrain${RESET}`);
+    console.log(`    ${CYAN}/plugin install devbrain@devbrain${RESET}
 `);
-    console.log(`  ${DIM}Your knowledge stays on this machine. To point at a server you host${RESET}`);
-    console.log(`  ${DIM}yourself instead, use {"type": "http", "url": "<your-host>/mcp"}.${RESET}
+    console.log(`  ${DIM}It brings its own hooks, so you can skip ${RESET}${CYAN}devbrain init${RESET}${DIM} in your other repos.${RESET}`);
+    console.log(`  ${DIM}For any other MCP host, point it at a clone:${RESET}`);
+    console.log(`  ${DIM}{"command": "node", "args": ["<clone>/plugin/dist/mcp.js"]}${RESET}
 `);
     console.log(bar2);
     console.log();

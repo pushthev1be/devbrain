@@ -52,21 +52,38 @@ Every registered project writes to one knowledge base — local by default, or a
 
 ## Install
 
+As a Claude Code plugin, which is the whole of it — the five triggers, the three tools and the dashboard:
+
+```
+/plugin marketplace add pushthev1be/devbrain
+/plugin install devbrain@devbrain
+```
+
+There is no setup step. The plugin carries its own hooks, and the first session in a repo registers it with its detected stack. Memory lands in `~/.devbrain/db.json`, so nothing is provisioned and nothing leaves the machine.
+
+Two optional values, which Claude Code prompts for on enable and keeps in the platform's credential store rather than in `settings.json`: a **Gemini API key**, which adds search by meaning, and a **MongoDB connection string**, for sharing one memory across machines or a team. Both are safe to leave blank — without them, search matches on wording, which still finds an exact error.
+
+### Or the CLI
+
+The CLI is the same memory from a terminal, and the two share one store, so installing both shows the same entries. It is not published yet, so it is built from source:
+
 ```bash
 git clone https://github.com/pushthev1be/devbrain.git
 cd devbrain
 npm install --ignore-scripts
 npm run build          # builds core, then cli and mcp
 cd packages/cli && npm link
-```
-
-Then run the setup wizard:
-
-```bash
 devbrain setup
 ```
 
-It asks where to keep your memory, offers optional semantic search, and sets up the current project (the same as `devbrain init`). Settings go to `~/.devbrain/.env`; re-run it anytime.
+`setup` asks where to keep your memory, offers optional semantic search, and sets up the current project (the same as `devbrain init`). Settings go to `~/.devbrain/.env`; re-run it anytime.
+
+To install the plugin from a clone rather than from GitHub — which is also how to try a change to it — point the marketplace at the checkout:
+
+```
+/plugin marketplace add ./path/to/devbrain
+/plugin install devbrain@devbrain
+```
 
 ### Storage: local by default
 

@@ -3,10 +3,19 @@
  *
  *   npm run bundle
  *
- * Installing a Claude Code plugin copies the repo and runs neither `npm
- * install` nor `tsc`, so whatever the hooks and `.mcp.json` point at has to be
+ * Installing a Claude Code plugin copies the plugin root and runs neither `npm
+ * install` nor `tsc`, so whatever the hooks and `plugin.json` point at has to be
  * runnable as it stands in git. These two files are therefore committed, which
- * is why `.gitignore` un-ignores exactly them and nothing else under `dist/`.
+ * is why `.gitignore` un-ignores exactly them and nothing else under
+ * `plugin/dist/`.
+ *
+ * They go to `plugin/dist/`, not `dist/`, because the plugin root cannot be the
+ * repo root: a plugin root with a `package.json` makes Claude Code install its
+ * Node dependencies, and for this workspace root that means recreating the
+ * `packages/*` symlinks, which fails on Windows with `EPERM: operation not
+ * permitted, symlink`. Confirmed both ways — installing from the repo root
+ * failed, and installing the same files from a staged directory with no
+ * `package.json` succeeded.
  *
  * `bundles.test.ts` fails when they are older than the source they came from,
  * so a forgotten `npm run bundle` cannot ship stale code — the same rule the
@@ -69,10 +78,11 @@ const targets = [
   { name: 'mcp', entry: 'packages/mcp/src/index.ts' },
 ];
 
-mkdirSync(join(root, 'dist'), { recursive: true });
+const outDir = join(root, 'plugin', 'dist');
+mkdirSync(outDir, { recursive: true });
 
 for (const { name, entry } of targets) {
-  const outfile = join(root, 'dist', `${name}.js`);
+  const outfile = join(outDir, `${name}.js`);
   const result = await build({
     entryPoints: [join(root, entry)],
     outfile,
@@ -94,13 +104,13 @@ for (const { name, entry } of targets) {
 
   const bytes = statSync(outfile).size;
   const inputs = Object.keys(result.metafile.inputs).length;
-  console.log(`dist/${name}.js  ${(bytes / 1024 / 1024).toFixed(2)} MB from ${inputs} files`);
+  console.log(`plugin/dist/${name}.js  ${(bytes / 1024 / 1024).toFixed(2)} MB from ${inputs} files`);
 }
 
 // A stamp the test compares against the newest source file, so "the bundles are
 // stale" is a failing test rather than something noticed in production.
 writeFileSync(
-  join(root, 'dist', 'BUILD'),
+  join(outDir, 'BUILD'),
   JSON.stringify({ builtAt: Date.now() }, null, 2) + '\n',
 );
-console.log('dist/BUILD stamped');
+console.log('plugin/dist/BUILD stamped');

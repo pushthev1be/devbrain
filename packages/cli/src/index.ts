@@ -396,27 +396,24 @@ async function handleInit(): Promise<void> {
       });
     }
 
-    // Print MCP server config so standard AI tools see devbrain tools natively
+    // How to give the agent the MCP tools, which the hooks alone do not.
+    //
+    // This used to print a config block with `npx -y @devbrain/mcp`. That
+    // package has never been published, so it 404s: anyone who followed the
+    // instruction got an MCP server that would not start, and nothing said why.
+    // The plugin is the one install that exists, so it is the one named here.
     const W2  = Math.min(process.stdout.columns || 80, 80);
     const bar2 = `${DIM}${'─'.repeat(W2)}${RESET}`;
     console.log(bar2);
-    console.log(`\n  ${BOLD}${CYAN}Connect DevBrain to your AI Agent / MCP Host${RESET}  ${DIM}(one-time setup per machine)${RESET}\n`);
-    console.log(`  Add this to your MCP settings or Google Cloud Agent Builder so the agent`);
-    console.log(`  calls DevBrain tools automatically — without needing to be asked:\n`);
-    console.log(`${CYAN}  ┌─ MCP Client Configuration JSON ─────────────────────────────────────┐${RESET}`);
-    console.log(`  ${DIM}{${RESET}`);
-    console.log(`    ${DIM}"mcpServers": {${RESET}`);
-    console.log(`      ${CYAN}"devbrain"${RESET}${DIM}: {${RESET}`);
-    console.log(`        ${CYAN}"type"${RESET}${DIM}: ${RESET}${GREEN}"stdio"${RESET}${DIM},${RESET}`);
-    console.log(`        ${CYAN}"command"${RESET}${DIM}: ${RESET}${GREEN}"npx"${RESET}${DIM},${RESET}`);
-    console.log(`        ${CYAN}"args"${RESET}${DIM}: ${RESET}${GREEN}["-y", "@devbrain/mcp"]${RESET}`);
-    console.log(`      ${DIM}}${RESET}`);
-    console.log(`    ${DIM}}${RESET}`);
-    console.log(`  ${DIM}}${RESET}`);
-    console.log(`${CYAN}  └────────────────────────────────────────────────────────────────────┘${RESET}\n`);
-    console.log(`  ${DIM}Your knowledge stays on this machine. To point at a server you host${RESET}`);
-    console.log(`  ${DIM}yourself instead, use {"type": "http", "url": "<your-host>/mcp"}.${RESET}
-`);
+    console.log(`\n  ${BOLD}${CYAN}Give your agent the memory tools${RESET}  ${DIM}(one-time, per machine)${RESET}\n`);
+    console.log(`  The hooks above brief each session and ask the agent to record what it`);
+    console.log(`  fixes. The three tools — get_context, search_knowledge, save_entry — come`);
+    console.log(`  from the plugin. In Claude Code:\n`);
+    console.log(`    ${CYAN}/plugin marketplace add pushthev1be/devbrain${RESET}`);
+    console.log(`    ${CYAN}/plugin install devbrain@devbrain${RESET}\n`);
+    console.log(`  ${DIM}It brings its own hooks, so you can skip ${RESET}${CYAN}devbrain init${RESET}${DIM} in your other repos.${RESET}`);
+    console.log(`  ${DIM}For any other MCP host, point it at a clone:${RESET}`);
+    console.log(`  ${DIM}{"command": "node", "args": ["<clone>/plugin/dist/mcp.js"]}${RESET}\n`);
     console.log(bar2);
     console.log();
 

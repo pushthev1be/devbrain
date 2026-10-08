@@ -25,7 +25,7 @@ request rather than by reading:
   reload-mutate-write, stale-broken after ten seconds, with a Windows retry on
   the rename.
 
-507 tests.
+508 tests.
 
 ---
 
@@ -57,7 +57,8 @@ Installing a plugin runs neither `npm install` nor `tsc`, and `dist/` is
 gitignored with 0 built files tracked — so a plugin built from the repo as-is
 installs with nothing to run.
 
-- [x] esbuild `cli` and `mcp` to single files at `dist/cli.js` and `dist/mcp.js`,
+- [x] esbuild `cli` and `mcp` to single files at `plugin/dist/cli.js` and
+      `plugin/dist/mcp.js` (at `dist/` until step 5 moved the plugin root),
       platform `node`, externalising nothing that matters at runtime
 - [x] un-ignore those two paths specifically, not `dist/` as a whole
 - [x] a `prepare`-style script so the bundles cannot drift from source silently,
@@ -170,11 +171,44 @@ secure credential store rather than `settings.json`.
       though: it says nothing about whether `hooks/hooks.json`, the skill or the
       commands load. For that, `claude --plugin-dir .` in a session is the real
       check, and it is what found the empty-string defect above
-- [ ] Fix the dead instruction in `init`'s output: it tells users to run
+- [x] Fix the dead instruction in `init`'s output: it tells users to run
       `npx -y @devbrain/mcp`, and that package 404s. Either publish, or print the
-      plugin install line
-- [ ] Marketplace entry, then `/plugin marketplace add pushthev1be/devbrain`
-      and `/plugin install devbrain` as the documented install
+      plugin install line. Prints the plugin install line — nothing is published,
+      and `devbrain-workspace` is `private: true`, so the plugin is the only
+      install that exists
+- [x] Marketplace entry, then `/plugin marketplace add pushthev1be/devbrain`
+      and `/plugin install devbrain@devbrain` as the documented install.
+      `.claude-plugin/marketplace.json` at the repo root, plugin source
+      `./plugin`.
+
+      **The plugin root had to move out of the repo root.** Installing from the
+      repo root failed outright on Windows:
+
+          EPERM: operation not permitted, symlink '..\..\packages\core'
+            -> ...\plugins\cache\temp_local_...\node_modules\@devbrain\core
+
+      A plugin root holding a `package.json` makes Claude Code install the
+      plugin's Node dependencies, and for an npm workspace root that means
+      recreating the `packages/*` symlinks — which needs privileges a normal
+      Windows user does not have. Confirmed both ways: the same files staged into
+      a directory with no `package.json` installed first time. So `hooks/`,
+      `commands/`, `skills/`, `.claude-plugin/plugin.json` and the bundles now
+      live under `plugin/`, away from `package.json`.
+
+      It also fixed what the install carried. From the repo root the plugin was
+      the whole repository — sources, tests, `node_modules`. Installed now: 20 MB
+      and seven directories, nothing else.
+
+      Verified as a user, not by reading: `marketplace add` → `install` →
+      `plugin details` reports 4 commands/skills, 5 hooks, 1 MCP server, ~216
+      always-on tokens → `/devbrain:search` in a plain session (no
+      `--plugin-dir`) returned the right entry with its id. Then uninstalled, so
+      nothing was left installed on the machine that tested it.
+
+      **Not live until this branch is on `main`.** `marketplace add
+      pushthev1be/devbrain` fetches the default branch, and the README and
+      `marketplace.json` land there together — so opening the PR below is what
+      makes the documented install true
 
 ---
 
