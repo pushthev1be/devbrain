@@ -16,7 +16,7 @@ vi.mock('os', async importOriginal => {
   return { ...actual, homedir: () => process.env.__DEVBRAIN_TEST_HOME as string };
 });
 
-import { reviewTurn, buildRecordPrompt } from './turnReview';
+import { reviewTurn, buildRecordPrompt, buildNoErrorHint } from './turnReview';
 import { parseTranscript } from './transcript';
 import { keywordScore, keywordTerms, preciseSearch, buildContext } from './search';
 import { findTextDuplicate, titleOverlap } from './dedupe';
@@ -149,5 +149,66 @@ describe('text duplicate check', () => {
     expect(titleOverlap('Atlas login fails if the password contains @', stored.title)).toBeGreaterThanOrEqual(0.75);
     expect((await findTextDuplicate('Atlas login fails if the password contains @', 'p1'))?.entry.id).toBe('x');
     expect(await findTextDuplicate('Atlas cluster paused after inactivity', 'p1')).toBeNull();
+  });
+});
+
+// ── the ask, when nothing failed ──────────────────────────────────────────
+//
+// The prompt was fix-shaped whatever reached it: error lines to copy verbatim,
+// files changed, "the root cause, then the exact fix". Measured over 52 chunks
+// of real transcript, 20 of the 37 stretches that trigger the ask get there
+// through the decision-shaped paths in assessSegment — so the trigger fires and
+// the prompt then asks the wrong question. Of 224 entries in a real store, 88
+// are `fix` and 11 are `decision`.
+
+describe('buildNoErrorHint', () => {
+  const say = (text: string) => ({ kind: 'say' as const, text });
+  const edit = (text: string) => ({ kind: 'edit' as const, text });
+  const err = (text: string) => ({ kind: 'error' as const, text });
+
+  it('stays out of the way when something actually failed', () => {
+    expect(buildNoErrorHint([err('TypeError: x'), edit('a.ts'), say('Fixed.')])).toEqual([]);
+  });
+
+  // Keyed on errors === 0, which is a fact about the stretch. An earlier version
+  // matched decision vocabulary in the prose and quoted it back; it fired on 92%
+  // of nudges, and tightening it still quoted "All eight saved, none rejected as
+  // duplicates" as a choice. Dropped: a hint that quotes the wrong sentence
+  // teaches the agent to skim it.
+  it('reframes a stretch that changed code but broke nothing', () => {
+    const hint = buildNoErrorHint([edit('a.ts'), edit('b.ts'), say('Kept the retry in the caller.')]).join('\n');
+    expect(hint).toContain('Nothing failed in this stretch');
+    expect(hint).toContain('decision');
+  });
+
+  it('says so plainly when no code changed either', () => {
+    const hint = buildNoErrorHint([say('We went with Postgres.')]).join('\n');
+    expect(hint).toContain('No code changed');
+  });
+
+  // The rejected alternative is the part that cannot be reconstructed later.
+  it('asks for the option that was turned down, not just the one chosen', () => {
+    const hint = buildNoErrorHint([say('x')]).join('\n');
+    expect(hint).toMatch(/turned down/);
+  });
+
+  // The other half of today's generic-pattern work, from the opposite side: an
+  // invented error_pattern matches every failure of its shape and identifies none.
+  it('tells the agent to leave error_pattern off rather than invent one', () => {
+    const hint = buildNoErrorHint([say('x')]).join('\n');
+    expect(hint).toContain('Leave `error_pattern` off');
+  });
+
+  it('names saving nothing as the common answer, so the ask is not pressure to write', () => {
+    expect(buildNoErrorHint([say('x')]).join('\n')).toContain('save nothing');
+  });
+
+  it('reaches the prompt only for a stretch with no error', () => {
+    const noError = buildRecordPrompt([edit('a.ts'), say('Picked the simpler shape.')]);
+    const withError = buildRecordPrompt([err('TypeError: x'), edit('a.ts'), say('Fixed.')]);
+    expect(noError).toContain('Nothing failed in this stretch');
+    expect(withError).not.toContain('Nothing failed in this stretch');
+    // And the fix framing survives untouched where it belongs.
+    expect(withError).toContain('use this verbatim as error_pattern');
   });
 });

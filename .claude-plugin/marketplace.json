@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "devbrain",
+  "description": "DevBrain — persistent memory for your coding agent.",
+  "owner": {
+    "name": "DevBrain",
+    "url": "https://github.com/pushthev1be/devbrain"
+  },
+  "plugins": [
+    {
+      "name": "devbrain",
+      "source": "./plugin",
+      "category": "knowledge",
+      "tags": [
+        "memory",
+        "knowledge",
+        "recall",
+        "mcp",
+        "hooks"
+      ]
+    }
+  ]
+}

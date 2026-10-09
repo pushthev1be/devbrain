@@ -137,3 +137,23 @@ export function getProjectName(projectPath: string): string {
   }
   return projectPath.split(/[\\/]/).filter(Boolean).pop() ?? 'unknown';
 }
+
+/**
+ * Whether a directory is worth registering as a project on its own.
+ *
+ * The plugin has no setup step, so the SessionStart hook registers whatever
+ * repo it wakes up in — and that means it also wakes up in directories nobody
+ * would call a project. A session started in a home directory, a Downloads
+ * folder or a scratch path would otherwise add a row to the project list and a
+ * place for entries to accumulate where nobody will look for them.
+ *
+ * Two signals are enough. A git repository is a project by definition, whatever
+ * is in it. Failing that, a recognised stack means there is at least a manifest
+ * — a package.json, a pubspec.yaml, a Cargo.toml — which no incidental folder
+ * has. A directory with neither is left alone; `devbrain init` still registers
+ * it explicitly, which is the right way to ask for something this declines to
+ * assume.
+ */
+export function looksLikeProject(signals: { isGitRepo: boolean; stack: string[] }): boolean {
+  return signals.isGitRepo || signals.stack.length > 0;
+}

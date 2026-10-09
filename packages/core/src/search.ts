@@ -52,6 +52,9 @@ function specificEnough(normalized: string): boolean {
   return words.length >= 2 || (words[0]?.length ?? 0) >= 8;
 }
 
+/** A word worth counting as overlap: long enough to carry meaning, and not a stopword. */
+const content = (w: string): boolean => w.length > 2 && !STOPWORDS.has(w);
+
 function patternOverlap(query: string, pattern: string): number {
   const q = normalizeText(query);
   const p = normalizeText(pattern);
@@ -60,9 +63,18 @@ function patternOverlap(query: string, pattern: string): number {
   // enough to identify the failure on its own.
   const [needle, haystack] = q.length <= p.length ? [q, p] : [p, q];
   if (haystack.includes(needle) && specificEnough(needle)) return 1;
-  // word overlap score
-  const qWords = new Set(q.split(' ').filter(w => w.length > 2));
-  const pWords = p.split(' ').filter(w => w.length > 2);
+  // Word overlap, over content words only.
+  //
+  // STOPWORDS matters here more than it looks. This function is also called
+  // against an entry's *title*, and the result is weighted as a pattern match,
+  // so a query phrased as a sentence used to score on "the", "not", "when",
+  // "with", "that" — all longer than two characters, all meaningless. Two
+  // entries that merely shared common words with a question outranked the one
+  // that meant the same thing: measured, the correct entry had the highest
+  // semantic similarity of any candidate (0.719 against 0.647) and came back
+  // third, which unprompted recall drops because it takes only the top two.
+  const qWords = new Set(q.split(' ').filter(content));
+  const pWords = p.split(' ').filter(content);
   if (qWords.size === 0 || pWords.length === 0) return 0;
   const matches = pWords.filter(w => qWords.has(w)).length;
   return matches / Math.max(qWords.size, pWords.length);
@@ -259,6 +271,17 @@ export interface PreciseSearchResult extends SearchResult {
   sameProject: boolean;
   /** BM25 relevance, 0..1. Scored even when a vector match drove the hit. */
   lexical: number;
+  /**
+   * Overlap with the entry's stored errorPattern alone, 0..1.
+   *
+   * Kept apart from `patternScore` because the two are not the same kind of
+   * evidence. This one means the query and a recorded failure share their
+   * actual text. `patternScore` falls back to title overlap, which is a
+   * lexical signal wearing a pattern's weight — see the ranking note below.
+   */
+  errorScore: number;
+  /** Overlap with the entry's title alone, 0..1. */
+  titleScore: number;
 }
 
 export function preciseSearch(
@@ -311,6 +334,8 @@ export function preciseSearch(
       // match percentage show the one that found it.
       similarity: byVector ? semantic : lexical,
       patternScore: bestPattern,
+      errorScore: patternScore,
+      titleScore,
       categoryMatch,
       matchType: bestPattern >= 0.5 ? 'pattern' : 'semantic',
       sameProject: !!projectId && e.projectId === projectId,
@@ -329,8 +354,23 @@ export function preciseSearch(
   // Lexical relevance is its own term rather than folded into `similarity`, so
   // an entry that matches on both wording and meaning outranks one that matches
   // on either — the same agreement idea that gates admission, applied to order.
+  //
+  // errorScore and titleScore are weighted apart, and that is the point. They
+  // used to be one term, `max(errorScore, titleScore * 0.6)`, paid 0.45 — so a
+  // query carrying no error text was ranked mostly on title word overlap at an
+  // effective 0.27, against semantic's 0.30. Measured on the query "the command
+  // line tool dies with an unhelpful message when no API key is configured":
+  // the correct entry had the highest semantic similarity of any candidate,
+  // 0.719 against 0.647, and came back third, because two entries that merely
+  // shared the words "line" and "message" with the question were paid as though
+  // their stored error text had matched. Unprompted recall takes the top two,
+  // so third is dropped entirely.
+  //
+  // Title overlap is a lexical signal, so it is paid like one, at BM25's 0.15.
+  // Real error-text overlap keeps the 0.45: that one is the strongest evidence
+  // there is, and it is what `devbrain search "<exact error>"` runs on.
   const score = (r: PreciseSearchResult) =>
-    r.patternScore * 0.45 + r.similarity * 0.30 + r.lexical * 0.15
+    r.errorScore * 0.45 + r.titleScore * 0.15 + r.similarity * 0.30 + r.lexical * 0.15
     + (r.categoryMatch ? 0.12 : 0) + (r.sameProject ? 0.10 : 0);
   results.sort((a, b) => score(b) - score(a));
 

@@ -220,10 +220,20 @@ export function buildGraph(entries: readonly Entry[], opts: GraphOptions = {}): 
   for (const e of ordered) {
     if (e.fixes && byId.has(e.fixes)) add({ from: e.id, to: e.fixes, kind: 'fixes' });
   }
-  // Both directions of the same fact. `supersededBy` is the one actually
-  // written — supersedeEntry stamps the retracted entry and nothing fills in
-  // `supersedes` on the correction — so reading only the forward field found
-  // none of the 8 retractions in a real store.
+  // Both directions of the same fact, and both are needed.
+  //
+  // supersedeEntry does write `supersedes` on the correction, along with
+  // `revisionCount` — checked by running it, not by reading it: old1 came back
+  // with supersededBy=new1, and new1 with supersedes=old1, revisionCount=1, on
+  // both the local and the Mongo path. An earlier version of this comment said
+  // the forward field was never filled in, which was wrong about the code.
+  //
+  // What is true is that the 8 retractions in a real store carry only
+  // `supersededBy`, because they were made by a one-off script that set the
+  // field directly rather than through supersedeEntry. So reading the forward
+  // field alone finds none of them, and reading both is not a workaround for a
+  // missing write — it is how the history stays visible alongside what the
+  // code writes now.
   for (const e of ordered) {
     if (e.supersedes && byId.has(e.supersedes)) add({ from: e.id, to: e.supersedes, kind: 'supersedes' });
     if (e.supersededBy && byId.has(e.supersededBy)) add({ from: e.supersededBy, to: e.id, kind: 'supersedes' });

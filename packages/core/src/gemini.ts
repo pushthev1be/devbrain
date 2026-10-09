@@ -3,15 +3,28 @@
 // semantic search and a few refinements (archetypes, section summaries, query
 // routing); without it each of these quietly does nothing.
 
-import { GoogleGenAI } from '@google/genai';
+// Types only — see loadGenAI(). The SDK costs 103ms to load and is needed only
+// when something is actually embedded or generated, which most runs never do.
+import type { GoogleGenAI } from '@google/genai';
 import type { EntryCategory } from './types';
+import { redactSecrets } from './redact';
 import { ENTRY_CATEGORIES } from './types';
 
 // Model is overridable via GEMINI_MODEL. Default is gemini-2.5-flash — the current
 // Flash model, available on both the Gemini Developer API and Vertex AI (incl. the
 // `global` location used by AI-Studio-origin projects, where 2.0-flash is unavailable).
-const TEXT_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
-const EMBED_MODEL = process.env.GEMINI_EMBED_MODEL || 'gemini-embedding-001';
+//
+// Read at the point of use, not at module load. `import` statements hoist above
+// the `loadGlobalEnv()` call in the CLI and MCP entry points, so a constant
+// initialised here is bound before ~/.devbrain/.env has been read — and these
+// three were, which meant GEMINI_MODEL, GEMINI_EMBED_MODEL and
+// DEVBRAIN_AI_TIMEOUT_MS set in that file were silently ignored. Nothing in the
+// documented path was affected, because `devbrain setup` never writes them and
+// the keys that matter (GEMINI_API_KEY, MONGODB_URI) are read inside functions
+// already. Still wrong, and invisible in exactly the way a config override
+// should never be.
+const textModel = () => process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+const embedModel = () => process.env.GEMINI_EMBED_MODEL || 'gemini-embedding-001';
 const EMBED_DIM = 3072;
 
 export class RateLimitError extends Error {
@@ -54,7 +67,20 @@ function useVertex(): boolean {
 
 let client: GoogleGenAI | null = null;
 
+/** The genai SDK, loaded on first use. Cached by the module system thereafter. */
+function loadGenAI(): typeof import('@google/genai') {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  return require('@google/genai') as typeof import('@google/genai');
+}
+
 function getClient(): GoogleGenAI {
+  if (isNoAiBuild()) {
+    throw new Error(
+      'This build of DevBrain has no model in it. Semantic search, archetypes and ' +
+      'context synthesis are unavailable; matching on wording and exact error text ' +
+      'still works. Install the `devbrain` CLI for the full build.',
+    );
+  }
   if (!client) {
     if (useVertex()) {
       // Google Cloud AI path — Gemini on Vertex AI, authenticated via ADC.
@@ -67,6 +93,7 @@ function getClient(): GoogleGenAI {
           '(gcloud auth application-default login, or a service account on Cloud Run).'
         );
       }
+      const { GoogleGenAI } = loadGenAI();
       client = new GoogleGenAI({ vertexai: true, project, location });
     } else {
       // Gemini Developer API path (AI Studio) — used for local/offline dev.
@@ -77,6 +104,7 @@ function getClient(): GoogleGenAI {
           'for Vertex AI, or GEMINI_API_KEY for the Gemini Developer API.'
         );
       }
+      const { GoogleGenAI } = loadGenAI();
       client = new GoogleGenAI({ vertexai: false, apiKey });
     }
   }
@@ -84,12 +112,47 @@ function getClient(): GoogleGenAI {
 }
 
 async function generateText(prompt: string): Promise<string> {
-  const res = await getClient().models.generateContent({ model: TEXT_MODEL, contents: prompt });
+  // Bounded for the same reason embedding is: a stalled generation never
+  // settles, and `devbrain search` sat for 36 seconds on a query classification
+  // nobody was waiting for. Every generation path — classifyQuery,
+  // autoArchetype, synthesizeSection — goes through here.
+  const res = await withAbort(
+    signal => getClient().models.generateContent({
+      model: textModel(), contents: redactSecrets(prompt), config: { abortSignal: signal },
+    }),
+    geminiTimeoutMs(), 'Generation');
   return (res.text ?? '').trim();
+}
+
+/**
+ * True when this build has no model in it at all.
+ *
+ * The Claude Code plugin ships as committed single-file bundles, because
+ * installing a plugin runs neither `npm install` nor `tsc`. Anthropic's plugin
+ * directory refuses a plugin folder with any file over 5 MiB, and bundling
+ * `@google/adk` brought in `@mikro-orm/core`, `@google-cloud/storage`,
+ * `@grpc/grpc-js`, `protobufjs` and `esprima` — 14.54 MB in total, so validation
+ * would not even produce a report. Measured: dropping the ADK agent route alone
+ * leaves 3.91 MB, and dropping Gemini with it leaves 2.35 MB.
+ *
+ * So the plugin build omits both, and `scripts/bundle.mjs` sets this flag.
+ * Checked everywhere a model would otherwise be reached, so the absence is
+ * reported rather than discovered: every `getEmbedding` call site catches, which
+ * is exactly how an earlier build "worked" while silently finding nothing after
+ * `gcp-metadata` was marked external by mistake.
+ *
+ * The cost, measured and not hidden: without embeddings a paraphrased query
+ * matched 0 of 5 stored entries where the semantic route matched 4 of 5. Literal
+ * error text still matches, which is the route that fires when a command fails.
+ * `devbrain` from npm keeps both.
+ */
+export function isNoAiBuild(): boolean {
+  return process.env.DEVBRAIN_NO_AI === '1';
 }
 
 /** True when a Gemini backend is configured (either Vertex AI or the Developer API). */
 export function hasGeminiCreds(): boolean {
+  if (isNoAiBuild()) return false;
   if (useVertex()) return Boolean(process.env.GOOGLE_CLOUD_PROJECT);
   return Boolean(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
 }
@@ -102,10 +165,45 @@ export function hasGeminiCreds(): boolean {
  * `devbrain search` sit there silently with no output and no error, and the
  * same stall inside a hook would hold up the agent's turn.
  */
-export const GEMINI_TIMEOUT_MS = Number(process.env.DEVBRAIN_AI_TIMEOUT_MS) || 8000;
+export const geminiTimeoutMs = (): number => Number(process.env.DEVBRAIN_AI_TIMEOUT_MS) || 8000;
+
+/**
+ * Run a Gemini call with a deadline that actually cancels it.
+ *
+ * `within` below stops *waiting*; it does not stop the request. That is enough
+ * to unblock a caller but not to let the process exit: an abandoned HTTPS call
+ * holds the event loop open long after the result was printed, which is why
+ * `devbrain search` returned its answer and then sat there until it was killed.
+ * Exiting out from under it is not the answer either — process.exit over an
+ * in-flight request trips a libuv assertion and replaces the output with a
+ * crash.
+ *
+ * So the deadline aborts the request. The SDK takes an AbortSignal on
+ * `config.abortSignal`, so the socket is closed rather than orphaned.
+ */
+async function withAbort<T>(
+  call: (signal: AbortSignal) => Promise<T>,
+  ms = geminiTimeoutMs(),
+  label = 'Gemini',
+): Promise<T> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      reject(new Error(`${label} timed out after ${ms}ms`));
+    }, ms);
+    if (typeof timer.unref === 'function') timer.unref();
+  });
+  try {
+    return await Promise.race<T>([call(controller.signal), deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 /** Reject rather than hang. The timer is cleared so the process can still exit. */
-export function within<T>(work: Promise<T>, ms = GEMINI_TIMEOUT_MS, label = 'Gemini'): Promise<T> {
+export function within<T>(work: Promise<T>, ms = geminiTimeoutMs(), label = 'Gemini'): Promise<T> {
   let timer: ReturnType<typeof setTimeout>;
   return Promise.race([
     work.finally(() => clearTimeout(timer)),
@@ -118,6 +216,10 @@ export function within<T>(work: Promise<T>, ms = GEMINI_TIMEOUT_MS, label = 'Gem
 }
 
 export async function getEmbedding(text: string): Promise<number[]> {
+  // Before the mock check and before any require: in a build with no model, an
+  // empty vector is the honest answer, and callers already treat it as "match on
+  // wording instead".
+  if (isNoAiBuild()) return [];
   if (process.env.DEVBRAIN_MOCK === 'true') {
     // Return a reproducible pseudo-random vector of 3072 dimensions
     const vec = new Array(3072).fill(0);
@@ -133,11 +235,14 @@ export async function getEmbedding(text: string): Promise<number[]> {
   }
 
   try {
-    const res = await within<Awaited<ReturnType<typeof getClient>['models']['embedContent']>>(getClient().models.embedContent({
-      model: EMBED_MODEL,
-      contents: text,
-      config: { outputDimensionality: EMBED_DIM },
-    }), GEMINI_TIMEOUT_MS, 'Embedding');
+    const res = await withAbort(
+      signal => getClient().models.embedContent({
+        model: embedModel(),
+        // Scrubbed before it leaves the machine — see redact.ts.
+        contents: redactSecrets(text),
+        config: { outputDimensionality: EMBED_DIM, abortSignal: signal },
+      }),
+      geminiTimeoutMs(), 'Embedding');
     const values = res.embeddings?.[0]?.values;
     if (!values || values.length === 0) {
       throw new Error('Embedding response contained no values');

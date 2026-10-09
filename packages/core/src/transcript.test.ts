@@ -184,12 +184,31 @@ describe('errorExcerpt / looksLikeError', () => {
   });
 
   it('knows which lines describe nothing', () => {
-    for (const generic of ['Exit code 1', 'exit status 2', 'Command failed.', 'FAIL', '×']) {
-      expect(isGenericFailureLine(generic), generic).toBe(true);
-    }
-    for (const real of ['× catches the thing 9ms', 'FAILED to connect to host', 'TypeError: x']) {
-      expect(isGenericFailureLine(real), real).toBe(false);
-    }
+    const generic = [
+      'Exit code 1', 'exit status 2', 'Command failed.', 'FAIL', '×',
+      'command failed with exit code 1',
+      // The Python header: true of every Python failure there has ever been,
+      // and the real error is the LAST line of a traceback, not the first.
+      'Traceback (most recent call last):',
+      'Build failed', 'Tests failed', 'Test failed', 'Error', 'error:',
+      // Output about failures rather than a failure: a benchmark row quoting a
+      // fixture beside its pass/fail columns. Stored as a pattern it would
+      // match that benchmark's own output on every later run.
+      'npm ERR! ERESOLVE unable to resolve dependen | ok | ok',
+    ];
+    for (const line of generic) expect(isGenericFailureLine(line), line).toBe(true);
+
+    const real = [
+      '× catches the thing 9ms', 'FAILED to connect to host', 'TypeError: x',
+      // The informative line of a traceback, which is the one worth storing.
+      "ValueError: invalid literal for int() with base 10: 'abc'",
+      'Error: connect ECONNREFUSED 127.0.0.1:5432',
+      'error TS2305: Module has no exported member',
+      'Build failed: missing module left-pad',
+      // One separator is not a table, and this is a real message.
+      'EPERM: operation not permitted, symlink | retry',
+    ];
+    for (const line of real) expect(isGenericFailureLine(line), line).toBe(false);
   });
 
   it('flags failures by shape, not by the word "error" anywhere', () => {
@@ -220,6 +239,56 @@ describe('assessSegment', () => {
   it('a long design discussion with a stated reason counts, even without edits', () => {
     const text = 'We should use a cursor file rather than a database row because '.repeat(50);
     expect(assessSegment([ev('prompt'), ev('say', text)]).worth).toBe(true);
+  });
+
+  // ── a decision stated in one sentence ──────────────────────────────────────
+  //
+  // The prose bars were 800 and 2500, so a decision stated crisply was invisible
+  // while a rambling one was caught — backwards, since a clear decision is easier
+  // to record and no less worth keeping. Lowered to sentence scale, with the
+  // precision coming from requiring a phrase that states a choice rather than
+  // DECISION_CUE's catch-all "because".
+
+  it('catches a decision stated in one sentence beside a couple of edits', () => {
+    const a = assessSegment([
+      ev('edit', 'a.ts'), ev('edit', 'b.ts'),
+      ev('say', 'We chose Postgres instead of Mongo for the ledger.'),
+    ]);
+    expect(a.worth).toBe(true);
+  });
+
+  // The hole that was not a threshold at all: `edits >= 2` and `edits === 0`
+  // leave no branch for exactly one edit, so a one-file decision could never be
+  // asked about at any prose length. 2 of 52 real chunks sat in it.
+  it('catches a one-file decision, which cleared neither branch before', () => {
+    const a = assessSegment([
+      ev('edit', 'a.ts'),
+      ev('say', 'Kept the retry in the caller rather than the client, deliberately.'),
+    ]);
+    expect(a.worth).toBe(true);
+  });
+
+  it('stays quiet on short chatter that merely contains "because"', () => {
+    const a = assessSegment([ev('say', 'I read the file because you asked me to check it, and it looks fine.')]);
+    expect(a.worth).toBe(false);
+  });
+
+  it('stays quiet on one routine edit with no choice stated', () => {
+    const a = assessSegment([ev('edit', 'a.ts'), ev('say', 'Renamed the variable for clarity.')]);
+    expect(a.worth).toBe(false);
+  });
+
+  it('needs more than a fragment when nothing was edited and nothing failed', () => {
+    // An edit is evidence that work happened; with neither, the prose is all
+    // there is, so a few words are not enough.
+    expect(assessSegment([ev('say', 'Chose B.')]).worth).toBe(false);
+  });
+
+  it('still lets a long stretch through on the loose cue alone', () => {
+    // Above SHORT_PROSE the original cue still applies, so lowering the bar did
+    // not make long stretches harder to admit.
+    const text = 'I updated the handler and then checked the view because the layout shifted. '.repeat(20);
+    expect(assessSegment([ev('edit', 'a.ts'), ev('say', text)]).worth).toBe(true);
   });
 });
 

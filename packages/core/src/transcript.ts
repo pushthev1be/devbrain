@@ -140,10 +140,25 @@ export function errorExcerpt(output: string, max = 600): string {
  * "Exit code 1". It also makes unrelated failures fingerprint identically, so
  * the loop detector sees a repeat that never happened.
  */
-const GENERIC_FAILURE = /^\s*(?:exit (?:code|status) \d+|command failed[.:]?|FAIL|✗|×)\s*$/i;
+const GENERIC_FAILURE = /^\s*(?:exit (?:code|status) \d+|command failed(?: with exit code \d+)?[.:]?|traceback \(most recent call last\):|build failed|tests? failed|error[.:]?|FAIL|✗|×)\s*$/i;
+
+/**
+ * A row of a printed table, which is output ABOUT failures rather than one.
+ *
+ * A benchmark that tests error handling prints rows like
+ * `npm ERR! ERESOLVE unable to resolve dependen | ok | ok` — a deliberately
+ * unrelated fixture beside its pass/fail columns. That is error-shaped text
+ * quoted as data, and offering it verbatim as an error_pattern stores a pattern
+ * that matches the benchmark's own output, so every later run of it reads as the
+ * same failure recurring.
+ *
+ * Two separators is the test. A real message rarely carries two, and the lines
+ * that do — an echoed shell pipeline, a table — are not the error either.
+ */
+const TABLE_ROW = / \| .* \| /;
 
 export function isGenericFailureLine(line: string): boolean {
-  return GENERIC_FAILURE.test(line);
+  return GENERIC_FAILURE.test(line) || TABLE_ROW.test(line);
 }
 
 /** True when a tool result reports a failure. */
@@ -252,7 +267,54 @@ export interface SegmentAssessment {
   errors: number;
 }
 
+/**
+ * Might this stretch have established something? Deliberately loose.
+ *
+ * "because" is in here and is a catch-all: measured over 52 chunks of real
+ * transcript it is present in 81% of them. That is right for "worth a second
+ * look" and far too loose to carry a short stretch on its own — see
+ * STRONG_DECISION_CUE.
+ */
 const DECISION_CUE = /\b(instead of|rather than|decided|chose|trade-?off|root cause|the cause|turns out|because)\b/i;
+
+/**
+ * A phrase in which a choice is actually stated, rather than merely explained.
+ *
+ * Required instead of DECISION_CUE when there is little prose. A two-line
+ * message containing "because" is not a decision; one saying "we went with X
+ * rather than Y" is. Measured: swapping this in below SHORT_PROSE changed the
+ * rate not at all at chunk scale (42/52 either way), because real 14k chunks
+ * always carry plenty of prose — it exists for the short stretches the Stop hook
+ * actually sees between asks, which that measurement cannot reach.
+ */
+const STRONG_DECISION_CUE =
+  /\b(instead of|rather than|decided|we chose|chose to|chose the|opted for|opted to|went with|going with|settled on|ruled out|rejected|trade-?off|in favour of|in favor of|on purpose|deliberately)\b/i;
+
+/**
+ * How much prose a stretch needs before a stated choice counts.
+ *
+ * These were 800 and 2500, which meant a decision stated in one clear sentence
+ * was invisible while a rambling one was caught — backwards, since a crisply
+ * stated decision is easier to record and no less worth keeping. Asked for
+ * explicitly, and measured first: at chunk scale, dropping them to zero moved
+ * the nudge rate only from 71% to 77%, because a 14k chunk nearly always clears
+ * any prose bar. The bar binds on the short segments the hook sees between
+ * asks, which is exactly the case this change is for.
+ *
+ * Below SHORT_PROSE the stronger cue is required, so lowering the bar does not
+ * turn "because" in a two-line message into a nudge.
+ */
+//
+// Set from the sentences they have to admit, not from a round number. "We chose
+// Postgres instead of Mongo for the ledger." is 50 characters; at 200 it was
+// still invisible, which was the whole complaint. Below SHORT_PROSE the strong
+// cue is what provides precision, so the length here only has to be long enough
+// to be a sentence.
+const DECISION_PROSE_MIN = 40;      // a stretch that also changed code
+// Higher, because with no edits and no errors nothing but the prose is evidence
+// that anything happened at all.
+const DISCUSSION_PROSE_MIN = 120;   // a design call with no edits at all
+const SHORT_PROSE = 800;            // the old bar; beneath it, demand the strong cue
 
 /**
  * Cheap gate before any model call. Most turns are reading, answering and
@@ -262,15 +324,27 @@ const DECISION_CUE = /\b(instead of|rather than|decided|chose|trade-?off|root ca
 export function assessSegment(events: DigestEvent[]): SegmentAssessment {
   let edits = 0, errors = 0, lastEdit = -1, lastError = -1, said = 0;
   let cue = false;
+  let strongCue = false;
   events.forEach((e, i) => {
     if (e.kind === 'edit') { edits++; lastEdit = i; }
     if (e.kind === 'error') { errors++; lastError = i; }
-    if (e.kind === 'say') { said += e.text.length; if (DECISION_CUE.test(e.text)) cue = true; }
+    if (e.kind === 'say') {
+      said += e.text.length;
+      if (DECISION_CUE.test(e.text)) cue = true;
+      if (STRONG_DECISION_CUE.test(e.text)) strongCue = true;
+    }
   });
 
+  // Little was said, so the phrasing has to carry more weight.
+  const stated = said < SHORT_PROSE ? strongCue : cue;
+
   const debugged = errors > 0 && edits > 0;
-  const substantialWork = edits >= 2 && said >= 800 && cue;
-  const discussion = edits === 0 && said >= 2500 && cue;   // a design call made in conversation
+  // `edits >= 1`, not 2. At 2 a stretch that changed one file and broke nothing
+  // cleared neither this nor `discussion`, so a one-file decision could never be
+  // asked about at any prose length — 2 of 52 real chunks sat in that hole, both
+  // carrying a cue. Not a threshold, a gap between two branches.
+  const substantialWork = edits >= 1 && said >= DECISION_PROSE_MIN && stated;
+  const discussion = edits === 0 && said >= DISCUSSION_PROSE_MIN && stated;
 
   return {
     worth: debugged || substantialWork || discussion,

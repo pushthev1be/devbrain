@@ -1,7 +1,12 @@
-import { MongoClient, Db, ServerApiVersion } from 'mongodb';
+// Types only: `import type` is erased at compile time, so requiring this module
+// does not load the driver. The driver itself costs 199ms to load, and the
+// common case — a hook that decides locally and returns — never opens a
+// connection at all. See loadMongo() below.
+import type { MongoClient, Db } from 'mongodb';
 import { join } from 'path';
 import { homedir } from 'os';
 import type { Entry, Project } from './types';
+import { redactSecrets } from './redact';
 import { RECALL_LOG_MAX } from './types';
 import * as local from './localStore';
 import { normalizeProjectPath } from './projectPath';
@@ -30,10 +35,24 @@ export function describeStorage(): { kind: StorageKind; location: string } {
 let client: MongoClient | null = null;
 let _db: Db | null = null;
 
+/**
+ * The mongodb driver, loaded on first use rather than at import.
+ *
+ * Measured: requiring it costs 199ms of the 316ms it took to load core at all,
+ * and a PostToolUse hook runs on every single tool call — so every Read and
+ * Edit was paying for a database driver it would never use. Cached by the
+ * module system after the first call, so repeat use is free.
+ */
+function loadMongo(): typeof import('mongodb') {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  return require('mongodb') as typeof import('mongodb');
+}
+
 async function getDb(): Promise<Db> {
   if (_db) return _db;
   const uri = process.env.MONGODB_URI;
   if (!uri) throw new Error('MONGODB_URI is not set. Add it to ~/.devbrain/.env');
+  const { MongoClient, ServerApiVersion } = loadMongo();
   client = new MongoClient(uri, {
     serverApi: { version: ServerApiVersion.v1, strict: false, deprecationErrors: true },
     // The driver default is 30s, which reads as a hang on a typo'd URI or an
@@ -108,7 +127,21 @@ export async function getAllProjects(): Promise<Project[]> {
 
 // ── entries ───────────────────────────────────────────────────────────────────
 
+/**
+ * Every path that writes an entry comes through here, whichever backend is
+ * active, so this is where credentials are scrubbed. See redact.ts.
+ */
+function scrubEntry(entry: Entry): Entry {
+  return {
+    ...entry,
+    title: redactSecrets(entry.title),
+    content: redactSecrets(entry.content),
+    ...(entry.errorPattern !== undefined ? { errorPattern: redactSecrets(entry.errorPattern) } : {}),
+  };
+}
+
 export async function insertEntry(entry: Entry): Promise<void> {
+  entry = scrubEntry(entry);
   if (useLocal()) return local.insertEntry(entry);
   const db = await getDb();
   await db.collection('entries').insertOne({ ...entry });
@@ -180,6 +213,7 @@ export async function markCommitProcessed(hash: string, projectId: string): Prom
 // ── retrieval & confidence ────────────────────────────────────────────────────
 
 export async function reinforceEntry(id: string, contentUpdate?: string): Promise<void> {
+  contentUpdate = redactSecrets(contentUpdate);
   if (useLocal()) return local.reinforceEntry(id, contentUpdate);
   const db = await getDb();
   const doc = await db.collection('entries').findOne({ id });
@@ -255,6 +289,8 @@ export async function bumpRecallCounts(
   context: { query?: string; sessionId?: string } = {},
 ): Promise<void> {
   if (!ids.length) return;
+  // The failure text a recall matched is kept in the entry's log — scrub it too.
+  if (context.query) context = { ...context, query: redactSecrets(context.query) };
   if (useLocal()) return local.bumpRecallCounts(ids, context);
   const db = await getDb();
   const event = {

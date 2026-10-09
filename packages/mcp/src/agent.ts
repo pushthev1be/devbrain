@@ -21,7 +21,9 @@ Always ground your answers in what is actually stored — do not invent knowledg
 
 export async function runAgent(
   query: string,
-  mcpUrl: string
+  mcpUrl: string,
+  /** DEVBRAIN_TOKEN, when the server requires one — the agent calls back into it over HTTP. */
+  token?: string,
 ): Promise<string> {
   // Prefer Gemini on Vertex AI (Google Cloud). ADK reads GOOGLE_GENAI_USE_VERTEXAI
   // together with GOOGLE_CLOUD_PROJECT / GOOGLE_CLOUD_LOCATION and authenticates via ADC
@@ -43,6 +45,7 @@ export async function runAgent(
   const mcpToolset = new MCPToolset({
     type: 'StreamableHTTPConnectionParams',
     url: mcpUrl,
+    ...(token ? { transportOptions: { requestInit: { headers: { Authorization: `Bearer ${token}` } } } } : {}),
   });
 
   const agent = new LlmAgent({

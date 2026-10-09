@@ -18,7 +18,7 @@ vi.mock('os', async importOriginal => {
 
 import {
   withDevbrainHooks, withoutDevbrainHooks, installedDevbrainHooks, formatSessionBriefing, HOOK_EVENTS,
-  briefingEntries, isAlreadyInAgentContext, isFileTool } from './agentHooks';
+  briefingEntries, isAlreadyInAgentContext, isFileTool, formatFirstSession } from './agentHooks';
 import type { Entry } from './types';
 import { readCursor, writeCursor } from './sessionCursor';
 import { buildContext } from './search';
@@ -196,5 +196,28 @@ describe('session cursor', () => {
     writeCursor('../../evil', 3);
     expect(readCursor('../../evil').line).toBe(3);
     expect(existsSync(join(home, '.devbrain', 'sessions', '______evil.json'))).toBe(true);
+  });
+});
+
+describe('formatFirstSession', () => {
+  // formatSessionBriefing returns null with nothing stored, which is why this
+  // exists: a project registered automatically has nothing stored by
+  // definition, so its first session would otherwise be silent.
+  it('names the project and its stack, and says nothing is stored yet', () => {
+    const out = formatFirstSession({ name: 'checkout-api', stack: ['Node.js', 'Express'] });
+    expect(out).toContain('checkout-api');
+    expect(out).toContain('Node.js, Express');
+    expect(out).toContain('Nothing is stored for it yet');
+  });
+
+  it('says so plainly when no stack was detected, rather than printing an empty pair of brackets', () => {
+    const out = formatFirstSession({ name: 'scratch', stack: [] });
+    expect(out).toContain('(no stack detected)');
+  });
+
+  // It is the only confirmation a plugin user gets, so it has to say what to do
+  // next rather than just announcing itself.
+  it('points at the tool that fills it', () => {
+    expect(formatFirstSession({ name: 'x', stack: [] })).toContain('save_entry');
   });
 });

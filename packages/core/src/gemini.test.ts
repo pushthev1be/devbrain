@@ -149,3 +149,29 @@ describe('within (the Gemini timeout)', () => {
     expect(after).toBeLessThanOrEqual(before);
   });
 });
+
+// ── configuration read at the point of use ────────────────────────────────────
+//
+// The defect these pin: `import` statements hoist above the `loadGlobalEnv()`
+// call in the CLI and MCP entry points, so anything initialised at this
+// module's top level was bound before ~/.devbrain/.env had been read. The model
+// names and the timeout were, so setting them in that file did nothing — with
+// no error, because each has a working default.
+describe('configuration read at the point of use', () => {
+  afterEach(() => {
+    delete process.env.DEVBRAIN_AI_TIMEOUT_MS;
+  });
+
+  it('picks up a timeout set after the module was imported', async () => {
+    const { geminiTimeoutMs } = await getGemini();
+    expect(geminiTimeoutMs()).toBe(8000);          // the default
+    process.env.DEVBRAIN_AI_TIMEOUT_MS = '2500';   // as ~/.devbrain/.env would, late
+    expect(geminiTimeoutMs()).toBe(2500);
+  });
+
+  it('falls back to the default for a value that is not a number', async () => {
+    const { geminiTimeoutMs } = await getGemini();
+    process.env.DEVBRAIN_AI_TIMEOUT_MS = 'soon';
+    expect(geminiTimeoutMs()).toBe(8000);
+  });
+});

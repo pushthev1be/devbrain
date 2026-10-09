@@ -26,25 +26,16 @@ import {
   looksLikeError, isReadOnlyCommand, isEchoedOutput, isGenericFailureLine, recallForFailure, formatRecallForAgent,
   withDevbrainHooks, withoutDevbrainHooks, installedDevbrainHooks,
   nextSessionChunk, formatBackfillBatch, commitExcerpt, BACKFILL_BATCH_BUDGET,
-  sameProjectPath,
+  sameProjectPath, loadGlobalEnv, looksLikeProject, formatFirstSession,
 } from '@devbrain/core';
 import type { Entry, Project, EntryCategory } from '@devbrain/core';
 import { nanoid } from 'nanoid';
 import { homedir, tmpdir } from 'os';
 
 // Load config from ~/.devbrain/.env (GEMINI_API_KEY, Vertex AI vars, MONGODB_URI, …).
-// Loaded unconditionally; real environment variables take precedence, comments skipped.
-const globalEnvPath = join(homedir(), '.devbrain', '.env');
-if (existsSync(globalEnvPath)) {
-  const lines = readFileSync(globalEnvPath, 'utf-8').replace(/^﻿/, '').split('\n');
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-    const [key, ...rest] = trimmed.split('=');
-    const k = key?.trim();
-    if (k && rest.length && process.env[k] === undefined) process.env[k] = rest.join('=').trim();
-  }
-}
+// A real environment variable takes precedence, but only when it holds a value:
+// see loadGlobalEnv on why an empty one has to count as absent here.
+loadGlobalEnv();
 
 // ─── first-run detection ──────────────────────────────────────────────────────
 
@@ -405,27 +396,24 @@ async function handleInit(): Promise<void> {
       });
     }
 
-    // Print MCP server config so standard AI tools see devbrain tools natively
+    // How to give the agent the MCP tools, which the hooks alone do not.
+    //
+    // This used to print a config block with `npx -y @devbrain/mcp`. That
+    // package has never been published, so it 404s: anyone who followed the
+    // instruction got an MCP server that would not start, and nothing said why.
+    // The plugin is the one install that exists, so it is the one named here.
     const W2  = Math.min(process.stdout.columns || 80, 80);
     const bar2 = `${DIM}${'─'.repeat(W2)}${RESET}`;
     console.log(bar2);
-    console.log(`\n  ${BOLD}${CYAN}Connect DevBrain to your AI Agent / MCP Host${RESET}  ${DIM}(one-time setup per machine)${RESET}\n`);
-    console.log(`  Add this to your MCP settings or Google Cloud Agent Builder so the agent`);
-    console.log(`  calls DevBrain tools automatically — without needing to be asked:\n`);
-    console.log(`${CYAN}  ┌─ MCP Client Configuration JSON ─────────────────────────────────────┐${RESET}`);
-    console.log(`  ${DIM}{${RESET}`);
-    console.log(`    ${DIM}"mcpServers": {${RESET}`);
-    console.log(`      ${CYAN}"devbrain"${RESET}${DIM}: {${RESET}`);
-    console.log(`        ${CYAN}"type"${RESET}${DIM}: ${RESET}${GREEN}"stdio"${RESET}${DIM},${RESET}`);
-    console.log(`        ${CYAN}"command"${RESET}${DIM}: ${RESET}${GREEN}"npx"${RESET}${DIM},${RESET}`);
-    console.log(`        ${CYAN}"args"${RESET}${DIM}: ${RESET}${GREEN}["-y", "@devbrain/mcp"]${RESET}`);
-    console.log(`      ${DIM}}${RESET}`);
-    console.log(`    ${DIM}}${RESET}`);
-    console.log(`  ${DIM}}${RESET}`);
-    console.log(`${CYAN}  └────────────────────────────────────────────────────────────────────┘${RESET}\n`);
-    console.log(`  ${DIM}Your knowledge stays on this machine. To point at a server you host${RESET}`);
-    console.log(`  ${DIM}yourself instead, use {"type": "http", "url": "<your-host>/mcp"}.${RESET}
-`);
+    console.log(`\n  ${BOLD}${CYAN}Give your agent the memory tools${RESET}  ${DIM}(one-time, per machine)${RESET}\n`);
+    console.log(`  The hooks above brief each session and ask the agent to record what it`);
+    console.log(`  fixes. The three tools — get_context, search_knowledge, save_entry — come`);
+    console.log(`  from the plugin. In Claude Code:\n`);
+    console.log(`    ${CYAN}/plugin marketplace add pushthev1be/devbrain${RESET}`);
+    console.log(`    ${CYAN}/plugin install devbrain@devbrain${RESET}\n`);
+    console.log(`  ${DIM}It brings its own hooks, so you can skip ${RESET}${CYAN}devbrain init${RESET}${DIM} in your other repos.${RESET}`);
+    console.log(`  ${DIM}For any other MCP host, point it at a clone:${RESET}`);
+    console.log(`  ${DIM}{"command": "node", "args": ["<clone>/plugin/dist/mcp.js"]}${RESET}\n`);
     console.log(bar2);
     console.log();
 
@@ -640,8 +628,39 @@ async function handleHook(event: string): Promise<void> {
       // `devbrain note` can stamp it, which is what makes a run of entries
       // readable as one episode instead of unrelated rows.
       if (typeof input.session_id === 'string') markActiveSession(repoRoot, input.session_id);
-      const project = await getProjectByPath(repoRoot);
-      if (!project) return;
+      let project = await getProjectByPath(repoRoot);
+
+      // Register the project here when it is not known yet.
+      //
+      // This was job 1 of `devbrain init`, and the plugin has no setup step to
+      // put it in: an install copies files and runs nothing. Without this, every
+      // hook bailed on `if (!project) return` in any repo nobody had run `init`
+      // in, so the plugin loaded, connected, and did nothing at all — the same
+      // shape of silence as the empty MONGODB_URI, reached a different way.
+      //
+      // This is the right moment regardless of the plugin: the hook already runs
+      // once per session, at the start, knowing the repo root.
+      if (!project) {
+        const stack = detectStack(repoRoot);
+        if (!looksLikeProject({ isGitRepo: isGitRepo(repoRoot), stack })) return;
+        project = {
+          id: nanoid(), name: getProjectName(repoRoot), path: repoRoot, stack,
+          createdAt: Date.now(), lastSeen: Date.now(),
+        };
+        await upsertProject(project);
+        captureLog(`registered ${project.name} from the session-start hook`);
+        // Say so once. Nothing is stored for a project on its first session, so
+        // the briefing below is empty and the agent would otherwise have no way
+        // to know memory is live — which, for someone who installed a plugin and
+        // ran no command, is the only confirmation they get that it works.
+        process.stdout.write(JSON.stringify({
+          hookSpecificOutput: {
+            hookEventName: 'SessionStart',
+            additionalContext: formatFirstSession(project),
+          },
+        }));
+        return;
+      }
       // Re-read the stack while we are here. It is only filesystem checks, a
       // few milliseconds, and it is how a project registered before the
       // detector could see monorepos or Flutter stops reporting nothing —
@@ -1192,7 +1211,9 @@ async function handleSearch(query: string): Promise<void> {
       return;
     }
 
-    bumpRetrievalCounts(results.map(r => r.entry.id), currentProject?.id).catch(() => {});
+    // Awaited: fired and forgotten it races closeDb() at the end of main(), and
+    // the in-flight write kept the process alive long after the results printed.
+    await bumpRetrievalCounts(results.map(r => r.entry.id), currentProject?.id).catch(() => {});
 
     const catLabel = classification.category !== 'other'
       ? `  ${DIM}[${classification.category}]${RESET}` : '';
@@ -2188,6 +2209,30 @@ async function main(): Promise<void> {
   // An open MongoClient holds the event loop open, so a one-shot command would
   // print its result and then sit there until killed. Release it and exit.
   await closeDb();
+
+  // Then leave, explicitly.
+  //
+  // closeDb() releases what DevBrain owns, but the Mongo driver and the Gemini
+  // SDK both leave timers and keep-alive sockets behind that nothing public
+  // closes. Measured after a completed `devbrain search`: two referenced
+  // timeouts and three sockets still held the loop, so the command printed its
+  // results and then sat there until it was killed.
+  //
+  // Exiting here is safe in a way it would not have been before: every network
+  // call is now awaited and every deadline aborts its request, so nothing is in
+  // flight. (Calling process.exit over an in-flight HTTPS request is what trips
+  // the libuv assertion recorded elsewhere — hence the flush first, and hence
+  // this being the last line rather than a shortcut taken earlier.)
+  await flushStdout();
+  process.exit(process.exitCode ?? 0);
+}
+
+/** Let buffered output reach the terminal before the process goes away. */
+function flushStdout(): Promise<void> {
+  return new Promise(resolve => {
+    if (process.stdout.writableLength === 0) { resolve(); return; }
+    process.stdout.write('', () => resolve());
+  });
 }
 
 // Only run the CLI when this file is the process entry point. Calling main() at

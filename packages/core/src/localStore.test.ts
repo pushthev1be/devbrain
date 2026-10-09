@@ -391,3 +391,28 @@ describe('bumpRecallCounts', () => {
     expect(other.recalls).toBeUndefined();
   });
 });
+
+// ── write lock ────────────────────────────────────────────────────────────────
+
+describe('write lock', () => {
+  it('is released after every write', async () => {
+    await insertEntry(entry());
+    expect(existsSync(`${getLocalDbPath()}.lock`)).toBe(false);
+  });
+
+  it('breaks a lock abandoned by a crashed process instead of waiting forever', async () => {
+    const { utimesSync } = await import('fs');
+    const { LOCK_STALE_MS } = await import('./localStore');
+    const lock = `${getLocalDbPath()}.lock`;
+    mkdirSync(join(home, '.devbrain'), { recursive: true });
+    writeFileSync(lock, '');
+    const old = (Date.now() - LOCK_STALE_MS - 5_000) / 1000;
+    utimesSync(lock, old, old);
+
+    const started = Date.now();
+    await insertEntry(entry({ id: 'after-crash' }));
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect((await getEntriesByProject('p1')).map(e => e.id)).toContain('after-crash');
+    expect(existsSync(lock)).toBe(false);
+  });
+});

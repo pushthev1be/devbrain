@@ -638,7 +638,27 @@ export const HTML_DASHBOARD = `<!DOCTYPE html>
       return '<div class="fail">' + esc(msg) + (detail ? ' &mdash; ' + esc(detail) : '') + '</div>';
     }
 
+    // When the server runs with DEVBRAIN_TOKEN, open the dashboard as
+    // /#token=<value>. The fragment never reaches the server or its logs; it is
+    // moved into sessionStorage and cleared from the address bar at once.
+    var apiToken = (function () {
+      var m = /[#&]token=([^&]+)/.exec(location.hash);
+      try {
+        if (m) {
+          sessionStorage.setItem('devbrain-token', decodeURIComponent(m[1]));
+          history.replaceState(null, '', location.pathname + location.search);
+        }
+        return sessionStorage.getItem('devbrain-token') || '';
+      } catch (e) { return m ? decodeURIComponent(m[1]) : ''; }
+    })();
+
     async function getJSON(url, opts) {
+      opts = opts || {};
+      if (apiToken) {
+        var h = opts.headers || {};
+        h['Authorization'] = 'Bearer ' + apiToken;
+        opts.headers = h;
+      }
       var r = await fetch(url, opts);
       var body = await r.json().catch(function () { return {}; });
       if (!r.ok) throw new Error(body.error || ('HTTP ' + r.status));

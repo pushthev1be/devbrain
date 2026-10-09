@@ -4,18 +4,18 @@
 
 Persistent developer memory for you and your AI agents. Your coding agent writes down what it fixes and decides as it works, and reads it back before the next task — so it already knows what broke before, what was decided, and why. DevBrain notices when something worth keeping happened, stores it, and ranks it back; it needs no AI service of its own.
 
-**🚀 Live demo:** **https://devbrain-oujuoveyvq-uc.a.run.app** — dashboard and the agent at `POST /agent`, on **Gemini 2.5 Flash (Vertex AI)** + **MongoDB Atlas** on **Google Cloud Run**.
-
-> The hosted instance is an older build than this repo and its database is not currently reachable, so parts of it answer and parts do not. Run it locally for the current thing — `npm install` through `devbrain setup` below takes a couple of minutes and needs no cloud account.
-
-```bash
-# Ask the deployed agent (Gemini 2.5 Flash on Vertex AI) anything in your team's memory:
-curl -X POST https://devbrain-oujuoveyvq-uc.a.run.app/agent \
-  -H "Content-Type: application/json" \
-  -d '{"query":"any fixes for mobile safe-area overlap?"}'
-```
+> **The hosted demo is retired.** It ran an older build against a database that
+> is no longer reachable, so it answered some requests and not others — which is
+> worse than not being there, because what it showed was not what this repo does.
+> Install the plugin below instead: one command, on your own machine, no cloud
+> account.
+>
+> DevBrain still deploys to Cloud Run — the Dockerfile and the HTTP transport are
+> here and tested. There just is not a public instance to point at.
 
 <img src="assets/dashboard.png" alt="The DevBrain dashboard: entries listed beside a detail pane, with counts for active, caught, never surfaced and retracted" width="900">
+
+<sub>The dashboard, running locally — `/devbrain:dashboard`, or `node plugin/dist/mcp.js --serve`.</sub>
 
 ---
 
@@ -52,21 +52,38 @@ Every registered project writes to one knowledge base — local by default, or a
 
 ## Install
 
+As a Claude Code plugin, which is the whole of it — the five triggers, the three tools and the dashboard:
+
+```
+/plugin marketplace add pushthev1be/devbrain
+/plugin install devbrain@devbrain
+```
+
+There is no setup step. The plugin carries its own hooks, and the first session in a repo registers it with its detected stack. Memory lands in `~/.devbrain/db.json`, so nothing is provisioned and nothing leaves the machine.
+
+Two optional values, which Claude Code prompts for on enable and keeps in the platform's credential store rather than in `settings.json`: a **Gemini API key**, which adds search by meaning, and a **MongoDB connection string**, for sharing one memory across machines or a team. Both are safe to leave blank — without them, search matches on wording, which still finds an exact error.
+
+### Or the CLI
+
+The CLI is the same memory from a terminal, and the two share one store, so installing both shows the same entries. It is not published yet, so it is built from source:
+
 ```bash
 git clone https://github.com/pushthev1be/devbrain.git
 cd devbrain
 npm install --ignore-scripts
 npm run build          # builds core, then cli and mcp
 cd packages/cli && npm link
-```
-
-Then run the setup wizard:
-
-```bash
 devbrain setup
 ```
 
-It asks where to keep your memory, offers optional semantic search, and sets up the current project (the same as `devbrain init`). Settings go to `~/.devbrain/.env`; re-run it anytime.
+`setup` asks where to keep your memory, offers optional semantic search, and sets up the current project (the same as `devbrain init`). Settings go to `~/.devbrain/.env`; re-run it anytime.
+
+To install the plugin from a clone rather than from GitHub — which is also how to try a change to it — point the marketplace at the checkout:
+
+```
+/plugin marketplace add ./path/to/devbrain
+/plugin install devbrain@devbrain
+```
 
 ### Storage: local by default
 
@@ -80,7 +97,7 @@ Switching is just the env var — the two backends are interchangeable at runtim
 
 ### Gemini credentials (optional)
 
-Nothing in DevBrain needs a model: the agent writes every entry, and search, context and duplicate detection match keywords. Gemini is an upgrade — embeddings make search match by meaning, and it adds root-cause archetypes and summarised context sections. The hosted agent at `/agent` does need it. DevBrain runs Gemini on one of two backends: **Vertex AI** (Google Cloud) for hosted/production, or the **Gemini Developer API** (AI Studio) for local dev.
+Nothing in DevBrain needs a model: the agent writes every entry, and search, context and duplicate detection match keywords. Gemini is an upgrade — embeddings make search match by meaning, and it adds root-cause archetypes and summarised context sections. The `/agent` route does need it, if you deploy one. DevBrain runs Gemini on one of two backends: **Vertex AI** (Google Cloud) for hosted/production, or the **Gemini Developer API** (AI Studio) for local dev.
 
 For local dev, get a free key at [aistudio.google.com](https://aistudio.google.com):
 
@@ -152,7 +169,7 @@ gcloud auth application-default login
 
 When `GOOGLE_GENAI_USE_VERTEXAI` is unset or `false`, DevBrain falls back to the Gemini Developer API using `GEMINI_API_KEY` — convenient for offline/local work. Either way the model IDs and 3072-dim embedding schema are identical, so your MongoDB Atlas Vector Search index is unchanged across backends.
 
-> Deploy: `gcloud run deploy` builds the included [`Dockerfile`](Dockerfile) and serves the MCP SSE endpoint on `:8080`. Set the four env vars above on the service.
+> Deploy: `gcloud run deploy` builds the included [`Dockerfile`](Dockerfile) and serves the MCP SSE endpoint on `:8080`. Set the four env vars above on the service, plus `DEVBRAIN_TOKEN` — the server will not start exposed without one.
 
 ---
 
@@ -340,12 +357,16 @@ node packages/mcp/dist/index.js --serve     # dashboard at :8080, MCP at :8080/m
 
 HTTP is opt-in: the default launch is a stdio MCP server, one per agent session, and binding a port on every launch would make the second session fail with `EADDRINUSE`. Set `PORT` to override.
 
+The server listens on `127.0.0.1` only, answers only requests addressed to localhost, and refuses requests from any other web origin, so a page open in your browser cannot read or write your memory. To reach it from another machine, set both `DEVBRAIN_HOST=0.0.0.0` and `DEVBRAIN_TOKEN=<long random value>`. Without a token it refuses to start, because an exposed, writable memory is never what anyone meant. With a token, clients send `Authorization: Bearer <token>`, and the dashboard is opened once as `http://host:port/#token=<token>`. Cloud Run (detected by `K_SERVICE`) binds all interfaces automatically but still needs the token.
+
+Credentials are scrubbed before anything is stored or sent to Gemini: API keys and tokens of known shapes, JWTs, private keys, passwords in connection strings, and the values of `*_SECRET` / `*_PASSWORD` / `*_API_KEY` / `*_TOKEN` lines. Names are kept, so an entry still says *which* credential was wrong.
+
 `devbrain hooks status` shows which of the five hook events are installed, and the last few times DevBrain asked an agent to record something or handed one a past fix (`~/.devbrain/capture.log`).
 
 ### Working on DevBrain itself
 
 ```bash
-npm test          # 435 tests
+npm test          # 485 tests
 npm run icons     # regenerate stack marks from simple-icons
 npm run brand     # regenerate assets/logo.svg from the one definition of the mark
 ```

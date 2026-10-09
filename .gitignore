@@ -1,5 +1,20 @@
 node_modules/
 dist/
+# ...except the plugin's two bundles, which have to be in git: installing a
+# Claude Code plugin copies the plugin root and runs neither npm install nor
+# tsc, so whatever hooks.json and plugin.json point at must already be runnable.
+#
+# They live under plugin/, not at the repo root, and that is deliberate: a
+# plugin root holding a package.json makes Claude Code install its Node
+# dependencies, and for this workspace root that means recreating the
+# packages/* symlinks — which fails outright on Windows with
+# `EPERM: operation not permitted, symlink`. plugin/ has no package.json, so
+# there is nothing to install and nothing to link.
+!/plugin/dist/
+/plugin/dist/*
+!/plugin/dist/cli.js
+!/plugin/dist/mcp.js
+!/plugin/dist/BUILD
 *.js.map
 .env
 *.db
