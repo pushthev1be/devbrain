@@ -94292,9 +94292,14 @@ var require_transcript = __commonJS({
       return { events, endLine: complete, sessionId, cwd };
     }
     var DECISION_CUE = /\b(instead of|rather than|decided|chose|trade-?off|root cause|the cause|turns out|because)\b/i;
+    var STRONG_DECISION_CUE = /\b(instead of|rather than|decided|we chose|chose to|chose the|opted for|opted to|went with|going with|settled on|ruled out|rejected|trade-?off|in favour of|in favor of|on purpose|deliberately)\b/i;
+    var DECISION_PROSE_MIN = 40;
+    var DISCUSSION_PROSE_MIN = 120;
+    var SHORT_PROSE = 800;
     function assessSegment(events) {
       let edits = 0, errors = 0, lastEdit = -1, lastError = -1, said = 0;
       let cue = false;
+      let strongCue = false;
       events.forEach((e2, i2) => {
         if (e2.kind === "edit") {
           edits++;
@@ -94308,11 +94313,14 @@ var require_transcript = __commonJS({
           said += e2.text.length;
           if (DECISION_CUE.test(e2.text))
             cue = true;
+          if (STRONG_DECISION_CUE.test(e2.text))
+            strongCue = true;
         }
       });
+      const stated = said < SHORT_PROSE ? strongCue : cue;
       const debugged = errors > 0 && edits > 0;
-      const substantialWork = edits >= 2 && said >= 800 && cue;
-      const discussion = edits === 0 && said >= 2500 && cue;
+      const substantialWork = edits >= 1 && said >= DECISION_PROSE_MIN && stated;
+      const discussion = edits === 0 && said >= DISCUSSION_PROSE_MIN && stated;
       return {
         worth: debugged || substantialWork || discussion,
         unresolved: lastError > lastEdit,

@@ -240,6 +240,56 @@ describe('assessSegment', () => {
     const text = 'We should use a cursor file rather than a database row because '.repeat(50);
     expect(assessSegment([ev('prompt'), ev('say', text)]).worth).toBe(true);
   });
+
+  // ── a decision stated in one sentence ──────────────────────────────────────
+  //
+  // The prose bars were 800 and 2500, so a decision stated crisply was invisible
+  // while a rambling one was caught — backwards, since a clear decision is easier
+  // to record and no less worth keeping. Lowered to sentence scale, with the
+  // precision coming from requiring a phrase that states a choice rather than
+  // DECISION_CUE's catch-all "because".
+
+  it('catches a decision stated in one sentence beside a couple of edits', () => {
+    const a = assessSegment([
+      ev('edit', 'a.ts'), ev('edit', 'b.ts'),
+      ev('say', 'We chose Postgres instead of Mongo for the ledger.'),
+    ]);
+    expect(a.worth).toBe(true);
+  });
+
+  // The hole that was not a threshold at all: `edits >= 2` and `edits === 0`
+  // leave no branch for exactly one edit, so a one-file decision could never be
+  // asked about at any prose length. 2 of 52 real chunks sat in it.
+  it('catches a one-file decision, which cleared neither branch before', () => {
+    const a = assessSegment([
+      ev('edit', 'a.ts'),
+      ev('say', 'Kept the retry in the caller rather than the client, deliberately.'),
+    ]);
+    expect(a.worth).toBe(true);
+  });
+
+  it('stays quiet on short chatter that merely contains "because"', () => {
+    const a = assessSegment([ev('say', 'I read the file because you asked me to check it, and it looks fine.')]);
+    expect(a.worth).toBe(false);
+  });
+
+  it('stays quiet on one routine edit with no choice stated', () => {
+    const a = assessSegment([ev('edit', 'a.ts'), ev('say', 'Renamed the variable for clarity.')]);
+    expect(a.worth).toBe(false);
+  });
+
+  it('needs more than a fragment when nothing was edited and nothing failed', () => {
+    // An edit is evidence that work happened; with neither, the prose is all
+    // there is, so a few words are not enough.
+    expect(assessSegment([ev('say', 'Chose B.')]).worth).toBe(false);
+  });
+
+  it('still lets a long stretch through on the loose cue alone', () => {
+    // Above SHORT_PROSE the original cue still applies, so lowering the bar did
+    // not make long stretches harder to admit.
+    const text = 'I updated the handler and then checked the view because the layout shifted. '.repeat(20);
+    expect(assessSegment([ev('edit', 'a.ts'), ev('say', text)]).worth).toBe(true);
+  });
 });
 
 describe('buildDigest / chunkEvents', () => {
