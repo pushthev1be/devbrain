@@ -44,16 +44,22 @@ const OPTIONAL = [
   'bufferutil', 'utf-8-validate',
 ];
 
-// Not in the list, deliberately: gcp-metadata. It reads like one more cloud
-// credential helper, and marking it external broke embeddings outright —
-// google-auth-library requires it unconditionally, and @google/genai goes
-// through that for Application Default Credentials. The damage was invisible
-// because every getEmbedding call site catches: the hook simply stopped
-// finding anything by meaning and fell back to literal matching. Only a probe
-// that printed the rejection showed "Cannot find module 'gcp-metadata'".
+// The rule this list follows, and the mistake that produced it: gcp-metadata
+// once looked like one more cloud credential helper and was marked external.
+// That broke embeddings outright — google-auth-library requires it
+// unconditionally, and @google/genai reaches it for Application Default
+// Credentials. The damage was invisible because every getEmbedding call site
+// catches: recall simply stopped finding anything by meaning and fell back to
+// literal matching. Only a probe that printed the rejection showed
+// "Cannot find module 'gcp-metadata'".
 //
-// So: a module belongs here only when the code that requires it already
+// So a module belongs in this list only when the code requiring it already
 // handles its absence. Guessing from the name is how a code path goes quiet.
+//
+// Gemini is now omitted from this build altogether — see OMITTED_FROM_PLUGIN,
+// which stubs it rather than externalising it for exactly the reason above. The
+// rule still governs this list, which is only the Mongo driver's optional
+// probes, each already wrapped in a try/catch where it is required.
 
 /**
  * On V8's compile cache, and why it is not wired in here.
@@ -73,6 +79,76 @@ const OPTIONAL = [
  * than left in as a line that looks like an optimisation and is not.
  */
 
+/**
+ * Packages the plugin build leaves out, and why it has to.
+ *
+ * Anthropic's plugin directory stops validating a repository outright if any
+ * file in the plugin folder is over 5 MiB — the report is "Repository too large
+ * to validate", with no findings. Measured on this bundle:
+ *
+ *   as shipped with both           14.54 MB   over
+ *   without @google/adk             3.91 MB   under
+ *   without both                    2.35 MB   under
+ *
+ * @google/adk is 0.34 MB of itself and brings @mikro-orm/core,
+ * @google-cloud/storage, @grpc/grpc-js, protobufjs and esprima with it. It backs
+ * only the HTTP POST /agent route, which no plugin component calls.
+ *
+ * Stubbed rather than marked `external`. External leaves a real
+ * `require('@google/genai')` in the output, which throws MODULE_NOT_FOUND at
+ * runtime — and every getEmbedding call site catches, so the whole semantic path
+ * would go quiet with nothing to show why. That exact mistake was made once
+ * already with gcp-metadata. A stub cannot be reached at all, because
+ * isNoAiBuild() short-circuits every path above it; it exists so that if one is
+ * ever missed the message says what happened.
+ */
+const OMITTED_FROM_PLUGIN = [
+  // The HTTP POST /agent route. 0.34 MB of itself, and it brings
+  // @mikro-orm/core, @google-cloud/storage, @grpc/grpc-js, protobufjs and
+  // esprima with it. Stubbed at `./agent` rather than at `@google/adk`, so
+  // agent.ts is not bundled either and nothing is left importing named bindings
+  // from a stub -- doing it the other way round built fine but printed three
+  // "will always be undefined" warnings on every run, which is how a real
+  // warning gets missed.
+  { filter: '^[.]/agent$', why: 'the ADK agent route' },
+  // Embeddings, archetypes and context synthesis. Reached only through a
+  // runtime require inside loadGenAI(), so no static import refers to it.
+  { filter: '^@google/genai($|/)', why: 'Gemini' },
+];
+
+/**
+ * Replace the omitted modules with one that explains itself.
+ *
+ * Stubbed rather than marked `external`. External leaves a real require in the
+ * output, which throws MODULE_NOT_FOUND at run time -- and every getEmbedding
+ * call site catches, so the semantic path would go silent with nothing to say
+ * why. That exact mistake was made once already with gcp-metadata, and it cost
+ * a session to find. A stub is unreachable anyway, because isNoAiBuild()
+ * short-circuits every path above it; it is here so that if a path is ever
+ * missed, the message names what happened.
+ */
+const stubOmitted = {
+  name: 'stub-omitted',
+  setup(build) {
+    for (const { filter, why } of OMITTED_FROM_PLUGIN) {
+      // A character class instead of an escape: a backslash in a generated
+      // string is one more thing to get wrong.
+      build.onResolve({ filter: new RegExp(filter) }, args => ({
+        path: args.path, namespace: 'omitted', pluginData: { why },
+      }));
+    }
+    build.onLoad({ filter: /.*/, namespace: 'omitted' }, args => ({
+      contents: `throw new Error(${JSON.stringify(
+        `DevBrain was built without ${args.pluginData.why}, so the plugin stays under ` +
+        `the 5 MiB per-file limit Anthropic's plugin directory enforces. Matching on ` +
+        `wording and on exact error text still works. Install the devbrain CLI for ` +
+        `the full build.`,
+      )});`,
+      loader: 'js',
+    }));
+  },
+};
+
 const targets = [
   { name: 'cli', entry: 'packages/cli/src/index.ts' },
   { name: 'mcp', entry: 'packages/mcp/src/index.ts' },
@@ -91,6 +167,10 @@ for (const { name, entry } of targets) {
     format: 'cjs',
     target: 'node20',
     external: OPTIONAL,
+    plugins: [stubOmitted],
+    // Read by isNoAiBuild() in core. Set here rather than at run time because it
+    // is a property of the artifact, not of the machine running it.
+    define: { 'process.env.DEVBRAIN_NO_AI': '"1"' },
     // Kept readable on purpose: this file is committed, so a reviewer should be
     // able to see what changed, and minifying would make every diff opaque.
     minify: false,

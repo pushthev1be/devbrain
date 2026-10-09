@@ -230,6 +230,79 @@ secure credential store rather than `settings.json`.
 
 ---
 
+## Submitting to Anthropic's directory
+
+Audited against the pre-submission checklist and the component support table on
+2026-10-09, not recalled.
+
+- [x] **The one hard stop: a file over 5 MiB.** `plugin/dist/mcp.js` was 14.54 MB,
+      so validation never produced a report at all — "Repository too large to
+      validate", no findings. Almost none of it was DevBrain: `@google/adk` is
+      0.34 MB itself and brings `@mikro-orm/core`, `@google-cloud/storage`,
+      `@grpc/grpc-js`, `protobufjs` and `esprima`. It backs only HTTP
+      `POST /agent`, which no plugin component calls.
+
+      | bundle | size |
+      |---|---|
+      | both included | 14.54 MB — over |
+      | without the ADK agent route | 3.91 MB |
+      | without ADK and Gemini | **2.35 MB** |
+
+      Both omitted, as asked. Now `cli.js` 3.10 MB and `mcp.js` 2.35 MB, and a
+      test fails if either passes 5 MiB again.
+
+      Stubbed, not marked `external`: external leaves a real `require` that throws
+      MODULE_NOT_FOUND, and every `getEmbedding` call site catches, so the whole
+      semantic path would go quiet with nothing to say why — the gcp-metadata
+      mistake exactly. `isNoAiBuild()` short-circuits above each stub, `/agent`
+      answers 501 with the reason, and tests pin the flag, the stub message and
+      the absence of the Gemini client.
+
+      **The cost, measured and documented rather than buried:** a paraphrased
+      query matched 0 of 5 stored entries where the semantic route matched 4 of 5.
+      Literal error text still matches, which is the route that fires when a
+      command fails. The skill and `plugin/README.md` both say so, and point at
+      the CLI for semantic search over the same `~/.devbrain` store.
+- [x] **README in the plugin folder.** The directory reads the folder holding
+      `.claude-plugin/plugin.json`, which is `plugin/`, so the 3,967-word README at
+      the repo root was invisible and the check blocks on it. `plugin/README.md` is
+      504 words outside code blocks, against a 40-word minimum.
+- [x] **Cowork would have had no tools.** Cowork ignores an MCP server whose
+      `${user_config.*}` reference has no default and never prompts for values, so
+      the skill and commands would have loaded there with nothing behind them.
+      `mongodb_uri` and `dashboard_token` now carry `"default": ""`.
+- [x] **The Gemini key prompt is gone**, with its `env` entry — a
+      `${user_config.KEY}` naming an option the manifest no longer declares is a
+      validation error, and prompting for a key this build cannot use is a lie.
+- [ ] **Move the plugin to its own repository.** Two findings share one fix. The
+      validator holds "scripts the validator couldn't follow" because the plugin
+      folder is a subfolder and the hooks run `node dist/cli.js`, a non-shell file;
+      the documented remedy is to keep the plugin at the root of its own
+      repository. That is also where the subfolder came from — `package.json` at the
+      plugin root made Claude Code install Node dependencies and fail on Windows
+      with `EPERM: operation not permitted, symlink`. Its own repo is at a root
+      *and* has no `package.json`.
+- [ ] **Two reviewer holds that remain by design.** `cli.js` and `mcp.js` are over
+      the 256 KiB non-image limit, and "commit readable source instead of compiled,
+      packed, or minified code" is held for a reviewer. Committed bundles are
+      load-bearing: a plugin install runs neither `npm install` nor `tsc`. Not
+      blocking, but a human reads each version.
+- [ ] **Submit.** Needs a paid claude.ai plan, from claude.ai/directory/manage. The
+      portal runs checks the CLI does not, so a clean local run is not a guarantee.
+
+Passing already: name `devbrain` (lowercase, no reserved word, nothing that reads
+as official) · `version`, `description`, `author`, `license` set · repo 5.0 MiB
+zipped against 50 · 105 tracked files against 10,000 · 11 files in the plugin folder
+against 512 · no `.DS_Store`/`Thumbs.db`/`desktop.ini` · no symlinks, submodules or
+`.gitattributes` · no `package.json` or lockfile in the plugin folder, which avoids
+the lockfile-install hold · MCP server started as `node` with plain
+`${CLAUDE_PLUGIN_ROOT}` arguments · no `npx`/`uvx` launchers anywhere · every
+credential through `userConfig` with `sensitive: true` · `hooks.json` valid, real
+events only, not declared in `plugin.json` · skill and command front matter parse
+with `description` as text.
+
+---
+
 ## After
 
 - [x] **`.env` keys read at module load are missed.** `import` statements hoist

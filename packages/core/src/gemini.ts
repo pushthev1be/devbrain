@@ -74,6 +74,13 @@ function loadGenAI(): typeof import('@google/genai') {
 }
 
 function getClient(): GoogleGenAI {
+  if (isNoAiBuild()) {
+    throw new Error(
+      'This build of DevBrain has no model in it. Semantic search, archetypes and ' +
+      'context synthesis are unavailable; matching on wording and exact error text ' +
+      'still works. Install the `devbrain` CLI for the full build.',
+    );
+  }
   if (!client) {
     if (useVertex()) {
       // Google Cloud AI path — Gemini on Vertex AI, authenticated via ADC.
@@ -117,8 +124,35 @@ async function generateText(prompt: string): Promise<string> {
   return (res.text ?? '').trim();
 }
 
+/**
+ * True when this build has no model in it at all.
+ *
+ * The Claude Code plugin ships as committed single-file bundles, because
+ * installing a plugin runs neither `npm install` nor `tsc`. Anthropic's plugin
+ * directory refuses a plugin folder with any file over 5 MiB, and bundling
+ * `@google/adk` brought in `@mikro-orm/core`, `@google-cloud/storage`,
+ * `@grpc/grpc-js`, `protobufjs` and `esprima` — 14.54 MB in total, so validation
+ * would not even produce a report. Measured: dropping the ADK agent route alone
+ * leaves 3.91 MB, and dropping Gemini with it leaves 2.35 MB.
+ *
+ * So the plugin build omits both, and `scripts/bundle.mjs` sets this flag.
+ * Checked everywhere a model would otherwise be reached, so the absence is
+ * reported rather than discovered: every `getEmbedding` call site catches, which
+ * is exactly how an earlier build "worked" while silently finding nothing after
+ * `gcp-metadata` was marked external by mistake.
+ *
+ * The cost, measured and not hidden: without embeddings a paraphrased query
+ * matched 0 of 5 stored entries where the semantic route matched 4 of 5. Literal
+ * error text still matches, which is the route that fires when a command fails.
+ * `devbrain` from npm keeps both.
+ */
+export function isNoAiBuild(): boolean {
+  return process.env.DEVBRAIN_NO_AI === '1';
+}
+
 /** True when a Gemini backend is configured (either Vertex AI or the Developer API). */
 export function hasGeminiCreds(): boolean {
+  if (isNoAiBuild()) return false;
   if (useVertex()) return Boolean(process.env.GOOGLE_CLOUD_PROJECT);
   return Boolean(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
 }
@@ -182,6 +216,10 @@ export function within<T>(work: Promise<T>, ms = geminiTimeoutMs(), label = 'Gem
 }
 
 export async function getEmbedding(text: string): Promise<number[]> {
+  // Before the mock check and before any require: in a build with no model, an
+  // empty vector is the honest answer, and callers already treat it as "match on
+  // wording instead".
+  if (isNoAiBuild()) return [];
   if (process.env.DEVBRAIN_MOCK === 'true') {
     // Return a reproducible pseudo-random vector of 3072 dimensions
     const vec = new Array(3072).fill(0);

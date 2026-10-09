@@ -20,9 +20,12 @@ Three tools, one per thing you do with memory:
 
 ## Reading
 
-Search the exact error first. Literal text finds the specific past fix even when
-the surrounding words differ; describing the problem in your own words works too,
-and finds things the literal route cannot.
+Search the exact error first, and prefer it: this build matches on wording and
+on literal text, not by meaning. Describing a problem in your own words still
+works when you happen to reuse the entry's vocabulary, but it is the weaker
+route here — measured, a paraphrase matched 0 of 5 stored entries that the
+semantic route found 4 of 5 times. So when there is an error message, use it
+verbatim rather than summarising it.
 
 Results say how confident they are. A hit marked **pattern match**, or one not
 flagged otherwise, is worth acting on. When the results say *none of these is a
@@ -84,6 +87,9 @@ pause, save what matters, and repeat until it says history is fully reviewed.
 Installed separately from this plugin, and not required by it — the three tools
 above are the whole interface. Where it is on PATH: `devbrain search "<error>"`,
 `devbrain context "<task>"`, `devbrain backfill`, `devbrain note "fix: … — …"`.
+
+It also adds search by meaning, which this build does not have. Both read the
+same `~/.devbrain` store, so entries saved here are the ones it searches.
 
 The dashboard is a separate process rather than a CLI flag. Use
 `/devbrain:dashboard`, which starts it and tells you the URL.

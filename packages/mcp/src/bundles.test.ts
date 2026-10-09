@@ -67,16 +67,48 @@ describe('the committed plugin bundles', () => {
     }
   });
 
-  // Marking a dependency external that the code requires unconditionally breaks
-  // it at runtime, and every getEmbedding call site catches, so the damage shows
-  // up as "found nothing" rather than as an error. gcp-metadata did exactly
-  // that: google-auth-library requires it for Application Default Credentials.
-  it.each(BUNDLES)('%s inlines the credential helpers the Gemini client needs', file => {
-    // Checked by a string from inside gcp-metadata rather than by its name:
-    // the name appears either way, so it cannot tell "bundled" from "left
-    // external and about to fail at runtime".
+  // Anthropic's plugin directory stops validating a repository outright when any
+  // file in the plugin folder exceeds 5 MiB — the report reads "Repository too
+  // large to validate", with no findings to work from. mcp.js was 14.54 MB,
+  // almost all of it @google/adk's dependency tree, so the plugin could not be
+  // submitted at all. This is the guard that keeps it submittable: re-adding a
+  // heavy dependency fails here instead of in the portal.
+  it.each(BUNDLES)('%s stays under the 5 MiB the plugin directory allows', file => {
+    const mb = statSync(join(DIST, file)).size / 1024 / 1024;
+    expect(mb, `${file} is ${mb.toFixed(2)} MB — the directory refuses any plugin file over 5 MiB`)
+      .toBeLessThan(5);
+  });
+
+  // Replaces a guard that asserted the opposite. It checked that gcp-metadata
+  // was inlined, because marking it external once broke embeddings silently —
+  // every getEmbedding call site catches, so the damage showed up as "found
+  // nothing" rather than as an error. The plugin build now omits Gemini on
+  // purpose, so the old assertion was inverted by that decision, not made
+  // irrelevant by it: the same silent-failure risk is why the omission has to be
+  // verifiable rather than assumed.
+  it.each(BUNDLES)('%s really does leave the Gemini client out', file => {
     const code = readFileSync(join(DIST, file), 'utf-8');
-    expect(code, 'gcp-metadata is not inlined — is it in the external list?')
-      .toContain('metadata.google.internal');
+    // A string from inside gcp-metadata, which google-auth-library requires
+    // unconditionally and @google/genai reaches through. Present means the whole
+    // Gemini tree came back, and with it the file size that blocks submission.
+    expect(code, 'the Gemini client is bundled again — check the stub in scripts/bundle.mjs')
+      .not.toContain('metadata.google.internal');
+  });
+
+  // The omission must announce itself. isNoAiBuild() short-circuits every path
+  // above these stubs, so they should be unreachable — but if one is ever missed,
+  // the failure has to name the cause instead of surfacing as MODULE_NOT_FOUND
+  // inside a catch.
+  it.each(BUNDLES)('%s carries a stub that explains itself if it is ever reached', file => {
+    const code = readFileSync(join(DIST, file), 'utf-8');
+    expect(code).toContain('DevBrain was built without');
+  });
+
+  // The flag the short-circuits read, compiled in by esbuild's define. If this
+  // is false the stubs become reachable, and the first symptom would be the
+  // silent "found nothing" the test above exists to prevent.
+  it.each(BUNDLES)('%s compiles isNoAiBuild to true', file => {
+    const code = readFileSync(join(DIST, file), 'utf-8');
+    expect(code).toMatch(/function isNoAiBuild\d*\(\)\s*\{\s*return true;/);
   });
 });

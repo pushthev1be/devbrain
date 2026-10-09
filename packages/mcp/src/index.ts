@@ -16,7 +16,7 @@ import {
   ENTRY_TYPES, ENTRY_TYPE_NAMES, normalizeType,
   buildDossier, describeStorage, findDuplicate, findTextDuplicate, clip, measureUse,
   filterUnprocessedCommits, listCommitHashes, activeSession, takeAsk,
-  buildGraph, graphSubset, loadGlobalEnv,
+  buildGraph, graphSubset, loadGlobalEnv, isNoAiBuild,
 } from '@devbrain/core';
 import type { EntryCategory } from '@devbrain/core';
 import type { Entry } from '@devbrain/core';
@@ -872,6 +872,20 @@ const httpServer = createServer(async (req, res) => {
       }
 
       if (url === '/agent' && req.method === 'POST') {
+        // Answered before the require, not by letting it fail. The plugin build
+        // omits @google/adk — it dragged in @mikro-orm/core, @google-cloud/storage,
+        // @grpc/grpc-js, protobufjs and esprima, 14.54 MB in all, past the 5 MiB
+        // per-file ceiling Anthropic's plugin directory enforces. Left to fail on
+        // its own this would surface as MODULE_NOT_FOUND inside a 500.
+        if (isNoAiBuild()) {
+          json(res, 501, {
+            error: 'The agent is not in this build of DevBrain. It needs Google ADK and ' +
+              'Gemini, which are left out so the plugin fits the directory size limit. ' +
+              'The dashboard, search and the MCP tools all work. Run the full build from ' +
+              'source for the agent.',
+          });
+          return;
+        }
         try {
           const { query } = await readBody(req) as { query: string };
           if (!query?.trim()) { json(res, 400, { error: 'query is required' }); return; }
