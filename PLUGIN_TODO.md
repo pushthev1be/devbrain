@@ -196,8 +196,10 @@ secure credential store rather than `settings.json`.
       install that exists
 - [x] Marketplace entry, then `/plugin marketplace add pushthev1be/devbrain`
       and `/plugin install devbrain@devbrain` as the documented install.
-      `.claude-plugin/marketplace.json` at the repo root, plugin source
-      `./plugin`.
+      `plugin/.claude-plugin/marketplace.json`, plugin source `./` — one file that
+      is correct both here (as `./plugin`) and in the published repo (as its
+      root), because a marketplace root is whatever directory holds
+      `.claude-plugin/`.
 
       **The plugin root had to move out of the repo root.** Installing from the
       repo root failed outright on Windows:
@@ -274,7 +276,7 @@ Audited against the pre-submission checklist and the component support table on
 - [x] **The Gemini key prompt is gone**, with its `env` entry — a
       `${user_config.KEY}` naming an option the manifest no longer declares is a
       validation error, and prompting for a key this build cannot use is a lie.
-- [ ] **Move the plugin to its own repository.** Two findings share one fix. The
+- [x] **Move the plugin to its own repository.** Two findings share one fix. The
       validator holds "scripts the validator couldn't follow" because the plugin
       folder is a subfolder and the hooks run `node dist/cli.js`, a non-shell file;
       the documented remedy is to keep the plugin at the root of its own
@@ -282,6 +284,21 @@ Audited against the pre-submission checklist and the component support table on
       plugin root made Claude Code install Node dependencies and fail on Windows
       with `EPERM: operation not permitted, symlink`. Its own repo is at a root
       *and* has no `package.json`.
+
+      Published to **pushthev1be/Devbrain-memory-Claudeplugin**, pushed with
+      `git subtree push --prefix=plugin`, so `plugin/` stays the one place it is
+      edited and its history carries over. `npm run publish:plugin` does it.
+
+      `plugin/` is now self-sufficient: its own `marketplace.json` (source
+      `./`), `LICENSE` and `PRIVACY.md`, because the published repo contains none
+      of the files above it. Verified by installing from `./plugin` as a
+      marketplace root before pushing — 5.6 MB, 4 commands and skills, 5 hooks,
+      1 MCP server.
+
+      The published repo holds the built bundles and no readable source, which
+      makes the "packed code" reviewer hold more likely rather than less. Its
+      README therefore names the source repository prominently, so a reviewer has
+      somewhere to look.
 - [ ] **Two reviewer holds that remain by design.** `cli.js` and `mcp.js` are over
       the 256 KiB non-image limit, and "commit readable source instead of compiled,
       packed, or minified code" is held for a reviewer. Committed bundles are
