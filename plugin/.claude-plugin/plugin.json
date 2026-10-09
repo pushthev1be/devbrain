@@ -10,6 +10,8 @@
   "repository": "https://github.com/pushthev1be/devbrain",
   "homepage": "https://github.com/pushthev1be/devbrain#readme",
   "icon": "./assets/logo.svg",
+  "privacyPolicyUrl": "https://github.com/pushthev1be/devbrain/blob/main/PRIVACY.md",
+  "supportUrl": "https://github.com/pushthev1be/devbrain/issues",
   "license": "MIT",
   "keywords": [
     "memory",

@@ -287,6 +287,21 @@ Audited against the pre-submission checklist and the component support table on
       packed, or minified code" is held for a reviewer. Committed bundles are
       load-bearing: a plugin install runs neither `npm install` nor `tsc`. Not
       blocking, but a human reads each version.
+- [x] **A privacy statement.** Not required to submit — the directory takes
+      `plugin/README.md` as the listing description — but a reviewer looking at a
+      tool that reads session transcripts will look for one, and there was nothing
+      to point at. `PRIVACY.md` (870 words), with `privacyPolicyUrl` and
+      `supportUrl` set in the manifest.
+
+      Every claim in it was checked against the code before being written, not
+      after: no telemetry or analytics identifiers anywhere in the sources, no
+      outbound request of DevBrain's own (the one `fetch` is the dashboard's own
+      browser script calling localhost), and the only home-directory reads are
+      `~/.devbrain` and `~/.claude`. `privacy.test.ts` pins those three, and the
+      guards were verified by injecting a violation and watching them fail by
+      name — a privacy page is a promise in prose, so it goes stale silently.
+
+      The URL resolves once this branch is on `main`, same as the install line.
 - [ ] **Submit.** Needs a paid claude.ai plan, from claude.ai/directory/manage. The
       portal runs checks the CLI does not, so a clean local run is not a guarantee.
 
