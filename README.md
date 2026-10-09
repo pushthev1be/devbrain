@@ -55,9 +55,14 @@ Every registered project writes to one knowledge base — local by default, or a
 As a Claude Code plugin, which is the whole of it — the five triggers, the three tools and the dashboard:
 
 ```
-/plugin marketplace add pushthev1be/devbrain
+/plugin marketplace add pushthev1be/Devbrain-memory-Claudeplugin
 /plugin install devbrain@devbrain
 ```
+
+The plugin is published from its own repository, which holds the built bundles
+and nothing else — a plugin root carrying this repo's `package.json` makes Claude
+Code install Node dependencies, and on Windows that fails outright. This
+repository is the source: `npm run bundle` builds what goes there.
 
 There is no setup step. The plugin carries its own hooks, and the first session in a repo registers it with its detected stack. Memory lands in `~/.devbrain/db.json`, so nothing is provisioned and nothing leaves the machine.
 
@@ -81,7 +86,7 @@ devbrain setup
 To install the plugin from a clone rather than from GitHub — which is also how to try a change to it — point the marketplace at the checkout:
 
 ```
-/plugin marketplace add ./path/to/devbrain
+/plugin marketplace add ./path/to/devbrain/plugin
 /plugin install devbrain@devbrain
 ```
 

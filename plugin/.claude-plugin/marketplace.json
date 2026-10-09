@@ -4,12 +4,12 @@
   "description": "DevBrain — persistent memory for your coding agent.",
   "owner": {
     "name": "DevBrain",
-    "url": "https://github.com/pushthev1be/devbrain"
+    "url": "https://github.com/pushthev1be/Devbrain-memory-Claudeplugin"
   },
   "plugins": [
     {
       "name": "devbrain",
-      "source": "./plugin",
+      "source": "./",
       "category": "knowledge",
       "tags": [
         "memory",

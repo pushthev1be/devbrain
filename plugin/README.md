@@ -33,9 +33,12 @@ of a turn that resolved something you are asked to record it.
 ## Install
 
 ```
-/plugin marketplace add pushthev1be/devbrain
+/plugin marketplace add pushthev1be/Devbrain-memory-Claudeplugin
 /plugin install devbrain@devbrain
 ```
+
+Capitalisation matters in that first line: enter the repository exactly as it is
+spelled, or the marketplace will not resolve.
 
 There is no setup step. The first session in a repository registers it with its
 detected stack.
@@ -70,4 +73,16 @@ Secrets are scrubbed before anything is stored and again before any text leaves
 for a model, with narrow rules on purpose — a generic "long random string" would
 eat the commit hashes and UUIDs that make an error findable.
 
-MIT licensed. Source and issues: https://github.com/pushthev1be/devbrain
+## Source
+
+This repository holds the built plugin: two bundled JavaScript files, the hooks,
+the skill, the commands and these docs. It deliberately has no `package.json`,
+because a plugin root with one makes Claude Code install Node dependencies, and
+for the source repository's npm workspace that fails on Windows with
+`EPERM: operation not permitted, symlink`.
+
+The readable source — TypeScript across three packages, 536 tests — is at
+**https://github.com/pushthev1be/devbrain**, and `plugin/dist/*.js` here is built
+from it with `npm run bundle`. Issues and pull requests belong there.
+
+MIT licensed. See [LICENSE](LICENSE) and [PRIVACY.md](PRIVACY.md).
