@@ -14,7 +14,7 @@
     "icons": "node scripts/gen-stack-icons.mjs",
     "brand": "node scripts/gen-logo.mjs",
     "bundle": "node scripts/bundle.mjs",
-    "publish:plugin": "npm run bundle && git subtree push --prefix=plugin https://github.com/pushthev1be/Devbrain-memory-Claudeplugin.git main"
+    "publish:plugin": "npm run bundle && node scripts/check-plugin-version.mjs && git subtree push --prefix=plugin https://github.com/pushthev1be/Devbrain-memory-Claudeplugin.git main"
   },
   "dependencies": {
     "@google/adk": "^1.1.0"

@@ -1027,11 +1027,8 @@ async function handleNote(text, inq, extra = {}) {
   if (!text.trim()) return;
   const cwd = process.cwd();
   const repoRoot = devbrainMcp1.distExports.getRepoRoot(cwd) ?? cwd;
-  let project = await devbrainMcp1.distExports.getProjectByPath(repoRoot);
-  if (!project) {
-    project = { id: nanoid1.nanoid(), name: devbrainMcp1.distExports.getProjectName(repoRoot), path: repoRoot, stack: devbrainMcp1.distExports.detectStack(repoRoot), createdAt: Date.now(), lastSeen: Date.now() };
-    await devbrainMcp1.distExports.upsertProject(project);
-  }
+  const { project, unfiled } = await devbrainMcp1.distExports.projectForSave(repoRoot);
+  if (unfiled) console.log(`  ${DIM}Not inside a project, so this goes to Unfiled. Run it from the repo it is about to file it there.${RESET}`);
   const { type, content } = parseQuickSave(text);
   const s = spin("Saving...");
   try {

@@ -8,7 +8,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprot
 import {
   getProjectByPath, upsertProject, insertEntry,
   getEntriesByProject, getAllEntriesWithProjects, getAllProjects,
-  getRepoRoot, getProjectName, detectStack,
+  getRepoRoot,
   getEmbedding, similarityLabel, timeAgo, hasGeminiCreds, CONFIDENT_MATCH,
   buildContext, compressContext, formatContext,
   bumpRetrievalCounts, preciseSearch, vectorSearch,
@@ -17,6 +17,7 @@ import {
   buildDossier, describeStorage, findDuplicate, findTextDuplicate, clip, measureUse,
   filterUnprocessedCommits, listCommitHashes, activeSession, takeAsk,
   buildGraph, graphSubset, loadGlobalEnv, isNoAiBuild,
+  projectForSave, unfiledProject,
 } from '@devbrain/core';
 import type { EntryCategory } from '@devbrain/core';
 import type { Entry } from '@devbrain/core';
@@ -319,14 +320,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       const cwd      = project_path ?? process.cwd();
       const repoRoot = getRepoRoot(cwd) ?? cwd;
-      let project    = await getProjectByPath(repoRoot);
-      if (!project) {
-        project = {
-          id: nanoid(), name: getProjectName(repoRoot), path: repoRoot,
-          stack: detectStack(repoRoot), createdAt: Date.now(), lastSeen: Date.now(),
-        };
-        await upsertProject(project);
-      }
+      const { project, unfiled } = await projectForSave(repoRoot);
 
       // A correction: check the target first, so nothing is saved if it cannot apply.
       // The bug being closed is resolved from the same read, so an id that does
@@ -414,7 +408,12 @@ Note: no entry with id ${fixes}, so nothing was linked.`;
       }
 
       const confirmation = saveConfirmation(type, title, category, archetype, error_pattern);
-      return { content: [{ type: 'text', text: `DevBrain: ${confirmation}${retracted}${closed}` }] };
+      // Say where it went, so an agent working outside a repo can re-save with
+      // project_path instead of believing it filed the entry under its project.
+      const filed = unfiled
+        ? `\nFiled under Unfiled: ${repoRoot} is not a project. Pass project_path to file it under one.`
+        : '';
+      return { content: [{ type: 'text', text: `DevBrain: ${confirmation}${retracted}${closed}${filed}` }] };
     }
 
     return { content: [{ type: 'text', text: `Unknown tool: ${name}. DevBrain has get_context, search_knowledge and save_entry.` }], isError: true };
@@ -832,11 +831,7 @@ const httpServer = createServer(async (req, res) => {
           } else {
             // No project named: fall back to a clearly-labelled inbox rather than
             // silently attaching the entry to an unrelated project.
-            targetId = 'unfiled';
-            const existing = await getProjectByPath('unfiled');
-            await upsertProject(existing
-              ? { ...existing, lastSeen: Date.now() }
-              : { id: 'unfiled', name: 'Unfiled', path: 'unfiled', stack: [], createdAt: Date.now(), lastSeen: Date.now() });
+            targetId = (await unfiledProject()).id;
           }
 
           let embedding: number[] | undefined;

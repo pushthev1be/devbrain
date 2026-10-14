@@ -249,18 +249,7 @@ ${text}
         const { type, title, content, tags = [], category, error_pattern, cause_archetype, project_path, supersedes, fixes } = args;
         const cwd = project_path ?? process.cwd();
         const repoRoot = devbrainMcp1.distExports.getRepoRoot(cwd) ?? cwd;
-        let project = await devbrainMcp1.distExports.getProjectByPath(repoRoot);
-        if (!project) {
-          project = {
-            id: nanoid1.nanoid(),
-            name: devbrainMcp1.distExports.getProjectName(repoRoot),
-            path: repoRoot,
-            stack: devbrainMcp1.distExports.detectStack(repoRoot),
-            createdAt: Date.now(),
-            lastSeen: Date.now()
-          };
-          await devbrainMcp1.distExports.upsertProject(project);
-        }
+        const { project, unfiled } = await devbrainMcp1.distExports.projectForSave(repoRoot);
         const known = supersedes || fixes ? await devbrainMcp1.distExports.getAllEntriesWithProjects() : [];
         const target = supersedes ? known.find((e) => e.id === supersedes) : void 0;
         const closing = fixes ? known.find((e) => e.id === fixes) : void 0;
@@ -321,7 +310,9 @@ Closes: "${devbrainMcp1.distExports.clip(closing.title, 70)}" \u2014 both stay, 
 Note: no entry with id ${fixes}, so nothing was linked.`;
         }
         const confirmation = saveConfirmation(type, title, category, archetype, error_pattern);
-        return { content: [{ type: "text", text: `DevBrain: ${confirmation}${retracted}${closed}` }] };
+        const filed = unfiled ? `
+Filed under Unfiled: ${repoRoot} is not a project. Pass project_path to file it under one.` : "";
+        return { content: [{ type: "text", text: `DevBrain: ${confirmation}${retracted}${closed}${filed}` }] };
       }
       return { content: [{ type: "text", text: `Unknown tool: ${name}. DevBrain has get_context, search_knowledge and save_entry.` }], isError: true };
     } catch (err) {
@@ -724,9 +715,7 @@ Note: no entry with id ${fixes}, so nothing was linked.`;
             }
             await devbrainMcp1.distExports.upsertProject({ ...known, lastSeen: Date.now() });
           } else {
-            targetId = "unfiled";
-            const existing = await devbrainMcp1.distExports.getProjectByPath("unfiled");
-            await devbrainMcp1.distExports.upsertProject(existing ? { ...existing, lastSeen: Date.now() } : { id: "unfiled", name: "Unfiled", path: "unfiled", stack: [], createdAt: Date.now(), lastSeen: Date.now() });
+            targetId = (await devbrainMcp1.distExports.unfiledProject()).id;
           }
           let embedding;
           try {

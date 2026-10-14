@@ -6,6 +6,7 @@ const require$$1 = require('path');
 const require$$2 = require('os');
 const require$$0 = require('fs');
 const mongodb4 = require('./mongodb-4.js');
+const nanoid1 = require('./nanoid-1.js');
 const crypto = require('crypto');
 
 var dist = {};
@@ -1757,8 +1758,9 @@ function requireDb () {
 		async function upsertProject(project) {
 		    // Records written before remotes were stored learn theirs on their next
 		    // write. null is stored too, so a folder with no remote is asked only once.
-		    if (project.remote === undefined)
-		        project = { ...project, remote: (0, git_1.getRepoRemote)(project.path) };
+		    if (project.remote === undefined) {
+		        project = { ...project, remote: (0, path_1.isAbsolute)(project.path) ? (0, git_1.getRepoRemote)(project.path) : null };
+		    }
 		    if (useLocal())
 		        return local.upsertProject(project);
 		    const db = await getDb();
@@ -1788,6 +1790,10 @@ function requireDb () {
 		    const byPath = useLocal() ? await local.getProjectByPath(path) : await findProjectAtPath(path);
 		    if (byPath)
 		        return byPath;
+		    // Only a real folder has a remote. A key such as 'unfiled' is not a path, and
+		    // git would resolve it against whatever directory this process is in.
+		    if (!(0, path_1.isAbsolute)(path))
+		        return null;
 		    const remote = (0, git_1.getRepoRemote)(path);
 		    if (!remote)
 		        return null;
@@ -2088,67 +2094,6 @@ function requireDb () {
 
 var projectIdentity = {};
 
-var hasRequiredProjectIdentity;
-
-function requireProjectIdentity () {
-	if (hasRequiredProjectIdentity) return projectIdentity;
-	hasRequiredProjectIdentity = 1;
-	Object.defineProperty(projectIdentity, "__esModule", { value: true });
-	projectIdentity.mergeDuplicateProjects = mergeDuplicateProjects;
-	/**
-	 * One repository, one project.
-	 *
-	 * Projects used to be keyed by path alone, so each clone and each worktree of a
-	 * repository registered as a separate, empty project. Its own history then read
-	 * as another project's — ranked lower, labelled "other project", and held to a
-	 * cross-project bar — and an entry surfaced from two checkouts counted as seen
-	 * in two projects. getProjectByPath now falls back to the remote, so no new
-	 * duplicates are made; this folds together the ones already stored.
-	 */
-	const fs_1 = require$$0;
-	const db_1 = requireDb();
-	const git_1 = requireGit();
-	const projectPath_1 = requireProjectPath();
-	/**
-	 * Merge every project record of the repository at repoRoot into the oldest.
-	 *
-	 * Scoped to this one repository on purpose: it runs at session start, and a
-	 * session in one repo has no business rewriting another's records. Records
-	 * written before remotes were stored learn theirs here, from their own path
-	 * when it still exists, so a duplicate is recognised whichever checkout made it.
-	 * Null when there is nothing to merge, including a folder with no remote.
-	 */
-	async function mergeDuplicateProjects(repoRoot) {
-	    const remote = (0, git_1.getRepoRemote)(repoRoot);
-	    if (!remote)
-	        return null;
-	    const same = [];
-	    for (const p of await (0, db_1.getAllProjects)()) {
-	        let r = p.remote;
-	        if (r === undefined) {
-	            r = p.path && (0, fs_1.existsSync)(p.path) ? (0, git_1.getRepoRemote)(p.path) : null;
-	            await (0, db_1.upsertProject)({ ...p, remote: r });
-	        }
-	        if (r === remote)
-	            same.push({ ...p, remote: r });
-	    }
-	    if (same.length < 2)
-	        return null;
-	    same.sort((a, b) => a.createdAt - b.createdAt);
-	    const [into, ...rest] = same;
-	    const merged = [];
-	    for (const project of rest) {
-	        merged.push({ project, entries: await (0, db_1.reassignProject)(project.id, into.id) });
-	    }
-	    // Deleted first, so this path is free for the record that remains.
-	    const kept = { ...into, path: (0, projectPath_1.normalizeProjectPath)(repoRoot), remote, lastSeen: Date.now() };
-	    await (0, db_1.upsertProject)(kept);
-	    return { into: kept, merged };
-	}
-	
-	return projectIdentity;
-}
-
 var stack = {};
 
 var hasRequiredStack;
@@ -2305,6 +2250,110 @@ function requireStack () {
 	}
 	
 	return stack;
+}
+
+var hasRequiredProjectIdentity;
+
+function requireProjectIdentity () {
+	if (hasRequiredProjectIdentity) return projectIdentity;
+	hasRequiredProjectIdentity = 1;
+	(function (exports) {
+		Object.defineProperty(exports, "__esModule", { value: true });
+		exports.UNFILED_PROJECT_ID = void 0;
+		exports.unfiledProject = unfiledProject;
+		exports.projectForSave = projectForSave;
+		exports.mergeDuplicateProjects = mergeDuplicateProjects;
+		/**
+		 * One repository, one project.
+		 *
+		 * Projects used to be keyed by path alone, so each clone and each worktree of a
+		 * repository registered as a separate, empty project. Its own history then read
+		 * as another project's — ranked lower, labelled "other project", and held to a
+		 * cross-project bar — and an entry surfaced from two checkouts counted as seen
+		 * in two projects. getProjectByPath now falls back to the remote, so no new
+		 * duplicates are made; this folds together the ones already stored.
+		 */
+		const fs_1 = require$$0;
+		const nanoid_1 = /*@__PURE__*/ nanoid1.requireNanoid();
+		const db_1 = requireDb();
+		const git_1 = requireGit();
+		const projectPath_1 = requireProjectPath();
+		const stack_1 = requireStack();
+		/** The inbox for entries saved from somewhere that is not a project. */
+		exports.UNFILED_PROJECT_ID = 'unfiled';
+		async function unfiledProject() {
+		    const existing = await (0, db_1.getProjectByPath)(exports.UNFILED_PROJECT_ID);
+		    const project = existing
+		        ? { ...existing, lastSeen: Date.now() }
+		        : { id: exports.UNFILED_PROJECT_ID, name: 'Unfiled', path: exports.UNFILED_PROJECT_ID, remote: null, stack: [], createdAt: Date.now(), lastSeen: Date.now() };
+		    await (0, db_1.upsertProject)(project);
+		    return project;
+		}
+		/**
+		 * The project a save from this folder belongs to.
+		 *
+		 * A known project, or this folder registered as one — but only when it looks
+		 * like one, by the same test the session-start hook applies. A save is the
+		 * other way a folder used to be registered, and it registered anything: an
+		 * agent saving from the home directory made the home directory a project,
+		 * which then sat in every list and graph as a repo that does not exist.
+		 * Saved from anywhere else, the entry goes to the Unfiled inbox, the same
+		 * place the dashboard puts an entry with no project named. Nothing is lost.
+		 */
+		async function projectForSave(repoRoot) {
+		    const known = await (0, db_1.getProjectByPath)(repoRoot);
+		    if (known)
+		        return { project: known, unfiled: false };
+		    const stack = (0, stack_1.detectStack)(repoRoot);
+		    if (!(0, stack_1.looksLikeProject)({ isGitRepo: (0, git_1.isGitRepo)(repoRoot), stack })) {
+		        return { project: await unfiledProject(), unfiled: true };
+		    }
+		    const project = {
+		        id: (0, nanoid_1.nanoid)(), name: (0, stack_1.getProjectName)(repoRoot), path: repoRoot, stack,
+		        createdAt: Date.now(), lastSeen: Date.now(),
+		    };
+		    await (0, db_1.upsertProject)(project);
+		    return { project, unfiled: false };
+		}
+		/**
+		 * Merge every project record of the repository at repoRoot into the oldest.
+		 *
+		 * Scoped to this one repository on purpose: it runs at session start, and a
+		 * session in one repo has no business rewriting another's records. Records
+		 * written before remotes were stored learn theirs here, from their own path
+		 * when it still exists, so a duplicate is recognised whichever checkout made it.
+		 * Null when there is nothing to merge, including a folder with no remote.
+		 */
+		async function mergeDuplicateProjects(repoRoot) {
+		    const remote = (0, git_1.getRepoRemote)(repoRoot);
+		    if (!remote)
+		        return null;
+		    const same = [];
+		    for (const p of await (0, db_1.getAllProjects)()) {
+		        let r = p.remote;
+		        if (r === undefined) {
+		            r = p.path && (0, fs_1.existsSync)(p.path) ? (0, git_1.getRepoRemote)(p.path) : null;
+		            await (0, db_1.upsertProject)({ ...p, remote: r });
+		        }
+		        if (r === remote)
+		            same.push({ ...p, remote: r });
+		    }
+		    if (same.length < 2)
+		        return null;
+		    same.sort((a, b) => a.createdAt - b.createdAt);
+		    const [into, ...rest] = same;
+		    const merged = [];
+		    for (const project of rest) {
+		        merged.push({ project, entries: await (0, db_1.reassignProject)(project.id, into.id) });
+		    }
+		    // Deleted first, so this path is free for the record that remains.
+		    const kept = { ...into, path: (0, projectPath_1.normalizeProjectPath)(repoRoot), remote, lastSeen: Date.now() };
+		    await (0, db_1.upsertProject)(kept);
+		    return { into: kept, merged };
+		}
+		
+	} (projectIdentity));
+	return projectIdentity;
 }
 
 var dossier = {};

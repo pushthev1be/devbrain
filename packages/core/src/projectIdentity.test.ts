@@ -19,7 +19,7 @@ vi.mock('os', async importOriginal => {
 });
 
 import { upsertProject, getProjectByPath, getAllProjects, getAllEntriesWithProjects, getLocalDbPath } from './db';
-import { mergeDuplicateProjects } from './projectIdentity';
+import { mergeDuplicateProjects, projectForSave, UNFILED_PROJECT_ID } from './projectIdentity';
 import { normalizeProjectPath } from './projectPath';
 
 let home: string;
@@ -128,6 +128,38 @@ describe('mergeDuplicateProjects', () => {
     await upsertProject(project('p1', a, 1));
     expect(await mergeDuplicateProjects(a)).toBeNull();
     expect(await mergeDuplicateProjects(clone())).toBeNull();
+    expect(await getAllProjects()).toHaveLength(1);
+  });
+});
+
+// A save was the other way a folder became a project, and it took any folder:
+// an agent saving from the home directory registered the home directory.
+describe('projectForSave', () => {
+  it('files a save from a folder that is not a project under Unfiled', async () => {
+    const plain = mkdtempSync(join(tmpdir(), 'devbrain-plain-'));
+    dirs.push(plain);
+    const { project, unfiled } = await projectForSave(plain);
+    expect(unfiled).toBe(true);
+    expect(project.id).toBe(UNFILED_PROJECT_ID);
+    expect((await getAllProjects()).map(p => p.id)).toEqual([UNFILED_PROJECT_ID]);
+    // A second save reuses the inbox rather than adding another.
+    await projectForSave(plain);
+    expect(await getAllProjects()).toHaveLength(1);
+  });
+
+  it('registers a git repository it has not seen', async () => {
+    const a = clone('https://github.com/owner/app.git');
+    const { project, unfiled } = await projectForSave(a);
+    expect(unfiled).toBe(false);
+    expect(project.path).toBe(a);
+    expect((await getAllProjects())[0]).toMatchObject({ id: project.id, remote: 'github.com/owner/app' });
+  });
+
+  it('uses the project already known, including through another clone', async () => {
+    const a = clone('https://github.com/owner/app.git');
+    await upsertProject(project('p1', a, 1));
+    expect((await projectForSave(a)).project.id).toBe('p1');
+    expect((await projectForSave(clone('git@github.com:owner/app.git'))).project.id).toBe('p1');
     expect(await getAllProjects()).toHaveLength(1);
   });
 });
