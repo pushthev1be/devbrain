@@ -130,6 +130,10 @@ const OMITTED_FROM_PLUGIN = [
   // the CLI makes. The plugin takes its settings from Claude Code, and the
   // directory holds a plugin whose code reads credentials from the machine.
   { filter: '^[.]/onboarding$', why: 'the setup wizard' },
+  // The file opener and `devbrain run`'s shell. No plugin component starts
+  // either, and the directory holds code that starts a program from a path or a
+  // command put together at run time.
+  { filter: '^[.]/launch$', why: 'the file opener and devbrain run' },
 ];
 
 /**

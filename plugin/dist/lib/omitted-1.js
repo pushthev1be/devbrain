@@ -33,6 +33,16 @@ function getAugmentedNamespace(n) {
 	return a;
 }
 
+var theFileOpenerAndDevbrainRun;
+var hasRequiredTheFileOpenerAndDevbrainRun;
+
+function requireTheFileOpenerAndDevbrainRun () {
+	if (hasRequiredTheFileOpenerAndDevbrainRun) return theFileOpenerAndDevbrainRun;
+	hasRequiredTheFileOpenerAndDevbrainRun = 1;
+	theFileOpenerAndDevbrainRun = {};
+	throw new Error("DevBrain was built without the file opener and devbrain run, so the plugin stays inside the file limits Anthropic's plugin directory enforces. Matching on wording and on exact error text still works. Install the devbrain CLI for the full build.");
+}
+
 var theSetupWizard;
 var hasRequiredTheSetupWizard;
 
@@ -66,5 +76,6 @@ function requireTheADKAgentRoute () {
 exports.getAugmentedNamespace = getAugmentedNamespace;
 exports.getDefaultExportFromCjs = getDefaultExportFromCjs;
 exports.requireTheADKAgentRoute = requireTheADKAgentRoute;
+exports.requireTheFileOpenerAndDevbrainRun = requireTheFileOpenerAndDevbrainRun;
 exports.requireTheInteractiveTerminalUI = requireTheInteractiveTerminalUI;
 exports.requireTheSetupWizard = requireTheSetupWizard;

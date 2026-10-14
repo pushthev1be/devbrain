@@ -102,15 +102,11 @@ function typeCode(type: string): string {
   }
 }
 
-// The target goes to the opener as one argument, never into a shell string: it
-// can be an entry's own content, and a quote in it would have ended the string.
-function openPath(target: string): void {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { execFile } = require('child_process') as typeof import('child_process');
-  const opener = process.platform === 'win32' ? 'explorer'
-    : process.platform === 'darwin' ? 'open' : 'xdg-open';
-  execFile(opener, [target], () => {});
-}
+type Launch = typeof import('./launch');
+/** Loaded only when used: the plugin build leaves launch.ts out. */
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+function launch(): Launch { return require('./launch'); }
+function openPath(target: string): void { launch().openPath(target); }
 function typeDot(type: string): string { return `${typeCode(type)}●${RESET}`; }
 
 function spin(text: string) {
@@ -1077,9 +1073,6 @@ async function handleRun(argv: string[]): Promise<void> {
     return;
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { spawn } = require('child_process') as typeof import('child_process');
-
   const captured: string[] = [];
   const MAX_CAPTURE = 64 * 1024;
   let size = 0;
@@ -1088,16 +1081,7 @@ async function handleRun(argv: string[]): Promise<void> {
     if (size < MAX_CAPTURE) { captured.push(chunk.toString()); size += chunk.length; }
   };
 
-  const code: number = await new Promise(resolve => {
-    const child = spawn(argv.join(' '), {
-      shell: true,
-      stdio: ['inherit', 'pipe', 'pipe'],
-    });
-    child.stdout?.on('data', c => tee(c, process.stdout));
-    child.stderr?.on('data', c => tee(c, process.stderr));
-    child.on('error', () => resolve(127));
-    child.on('close', c => resolve(c ?? 0));
-  });
+  const code = await launch().runCommand(argv, tee);
 
   if (code === 0) { process.exitCode = 0; return; }
 
@@ -2008,7 +1992,11 @@ async function main(): Promise<void> {
         await handleProject(rest.join(' ') || undefined, { write });
         break;
       }
-      case 'run':     await handleRun(args.slice(1));              break;
+      case 'run':
+        // The plugin's post-tool hook does this for every command the agent runs.
+        if (PLUGIN_BUILD) console.log(`\n  ${DIM}In the plugin, failed commands are looked up by its hooks. ${RESET}${CYAN}devbrain run${RESET}${DIM} comes with the npm CLI.${RESET}\n`);
+        else await handleRun(args.slice(1));
+        break;
       case 'index': {
         const rest = args.slice(1);
         await handleIndex(rest.find(a => !a.startsWith('--')), { force: rest.includes('--force') });

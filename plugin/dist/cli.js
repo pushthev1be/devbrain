@@ -3,7 +3,6 @@
 
 Object.defineProperty(exports, Symbol.toStringTag, { value: 'Module' });
 
-const require$$0$1 = require('child_process');
 const omitted1 = require('./lib/omitted-1.js');
 const require$$1 = require('path');
 const require$$0 = require('fs');
@@ -75,11 +74,11 @@ function typeCode(type) {
       return devbrainCli1.BLUE;
   }
 }
+function launch() {
+  return omitted1.requireTheFileOpenerAndDevbrainRun();
+}
 function openPath(target) {
-  const { execFile } = require$$0$1;
-  const opener = process.platform === "win32" ? "explorer" : process.platform === "darwin" ? "open" : "xdg-open";
-  execFile(opener, [target], () => {
-  });
+  launch().openPath(target);
 }
 function typeDot(type) {
   return `${typeCode(type)}\u25CF${devbrainCli1.RESET}`;
@@ -821,7 +820,6 @@ async function handleRun(argv) {
     process.exitCode = 1;
     return;
   }
-  const { spawn } = require$$0$1;
   const captured = [];
   const MAX_CAPTURE = 64 * 1024;
   let size = 0;
@@ -832,16 +830,7 @@ async function handleRun(argv) {
       size += chunk.length;
     }
   };
-  const code = await new Promise((resolve) => {
-    const child = spawn(argv.join(" "), {
-      shell: true,
-      stdio: ["inherit", "pipe", "pipe"]
-    });
-    child.stdout?.on("data", (c) => tee(c, process.stdout));
-    child.stderr?.on("data", (c) => tee(c, process.stderr));
-    child.on("error", () => resolve(127));
-    child.on("close", (c) => resolve(c ?? 0));
-  });
+  const code = await launch().runCommand(argv, tee);
   if (code === 0) {
     process.exitCode = 0;
     return;
@@ -1656,7 +1645,9 @@ async function main() {
         break;
       }
       case "run":
-        await handleRun(args.slice(1));
+        if (PLUGIN_BUILD) console.log(`
+  ${devbrainCli1.DIM}In the plugin, failed commands are looked up by its hooks. ${devbrainCli1.RESET}${devbrainCli1.CYAN}devbrain run${devbrainCli1.RESET}${devbrainCli1.DIM} comes with the npm CLI.${devbrainCli1.RESET}
+`);
         break;
       case "index": {
         const rest = args.slice(1);
