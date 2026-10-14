@@ -3,7 +3,7 @@
 // common case — a hook that decides locally and returns — never opens a
 // connection at all. See loadMongo() below.
 import type { MongoClient, Db } from 'mongodb';
-import { join } from 'path';
+import { join, isAbsolute } from 'path';
 import { homedir } from 'os';
 import type { Entry, Project } from './types';
 import { redactSecrets } from './redact';
@@ -95,7 +95,9 @@ function strip<T>(doc: Record<string, unknown>): T {
 export async function upsertProject(project: Project): Promise<void> {
   // Records written before remotes were stored learn theirs on their next
   // write. null is stored too, so a folder with no remote is asked only once.
-  if (project.remote === undefined) project = { ...project, remote: getRepoRemote(project.path) };
+  if (project.remote === undefined) {
+    project = { ...project, remote: isAbsolute(project.path) ? getRepoRemote(project.path) : null };
+  }
   if (useLocal()) return local.upsertProject(project);
   const db = await getDb();
   const stored = { ...project, path: normalizeProjectPath(project.path) };
@@ -124,6 +126,9 @@ export async function upsertProject(project: Project): Promise<void> {
 export async function getProjectByPath(path: string): Promise<Project | null> {
   const byPath = useLocal() ? await local.getProjectByPath(path) : await findProjectAtPath(path);
   if (byPath) return byPath;
+  // Only a real folder has a remote. A key such as 'unfiled' is not a path, and
+  // git would resolve it against whatever directory this process is in.
+  if (!isAbsolute(path)) return null;
   const remote = getRepoRemote(path);
   if (!remote) return null;
   const byRemote = await getProjectByRemote(remote);

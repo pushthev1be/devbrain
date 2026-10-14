@@ -85,6 +85,9 @@ vi.mock('@devbrain/core', async importOriginal => {
   takeAsk:                   vi.fn().mockReturnValue(false),
   getProjectName:            vi.fn().mockReturnValue('test-project'),
   detectStack:               vi.fn().mockReturnValue(['Node.js']),
+  // Saves land in the test project unless a test says the folder is not one.
+  projectForSave:            vi.fn().mockResolvedValue({ project: mockProject, unfiled: false }),
+  unfiledProject:            vi.fn().mockResolvedValue({ ...mockProject, id: 'unfiled', name: 'Unfiled', path: 'unfiled' }),
   getEmbedding:              vi.fn().mockResolvedValue(new Array(3072).fill(0.1)),
   similarityLabel:           vi.fn().mockReturnValue('90% match'),
   timeAgo:                   vi.fn().mockReturnValue('2h ago'),
@@ -197,6 +200,21 @@ describe('MCP tool: save_entry', () => {
     });
     expect(result.isError).toBeFalsy();
     expect(result.content[0].text).toContain('DevBrain:');
+  });
+
+  // Saved from outside any project, the entry goes to the inbox — and the
+  // agent is told, so it does not believe it filed it under its repo.
+  it('says when a save from outside a project went to Unfiled', async () => {
+    const { projectForSave } = await import('@devbrain/core');
+    vi.mocked(projectForSave).mockResolvedValueOnce({
+      project: { ...mockProject, id: 'unfiled', name: 'Unfiled', path: 'unfiled' }, unfiled: true,
+    });
+    const client = await buildTestClient();
+    const text = (await callTool(client, 'save_entry', {
+      type: 'lesson', title: 'A lesson saved from the home directory', content: 'Detail.',
+    })).content[0].text;
+    expect(text).toContain('Filed under Unfiled');
+    expect(text).toContain('project_path');
   });
 
   it('retracts the entry it corrects, in the same call', async () => {

@@ -27,7 +27,7 @@ import {
   withDevbrainHooks, withoutDevbrainHooks, installedDevbrainHooks,
   nextSessionChunk, formatBackfillBatch, commitExcerpt, BACKFILL_BATCH_BUDGET,
   sameProjectPath, loadGlobalEnv, looksLikeProject, formatFirstSession,
-  mergeDuplicateProjects,
+  mergeDuplicateProjects, projectForSave,
 } from '@devbrain/core';
 import type { Entry, Project, EntryCategory } from '@devbrain/core';
 import { nanoid } from 'nanoid';
@@ -1293,11 +1293,8 @@ async function handleNote(
   if (!text.trim()) return;
   const cwd = process.cwd();
   const repoRoot = getRepoRoot(cwd) ?? cwd;
-  let project = await getProjectByPath(repoRoot);
-  if (!project) {
-    project = { id: nanoid(), name: getProjectName(repoRoot), path: repoRoot, stack: detectStack(repoRoot), createdAt: Date.now(), lastSeen: Date.now() };
-    await upsertProject(project);
-  }
+  const { project, unfiled } = await projectForSave(repoRoot);
+  if (unfiled) console.log(`  ${DIM}Not inside a project, so this goes to Unfiled. Run it from the repo it is about to file it there.${RESET}`);
   const { type, content } = parseQuickSave(text);
   const s = spin('Saving...');
   try {
