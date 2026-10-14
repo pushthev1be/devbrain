@@ -5,7 +5,7 @@ exactly what it reads, what it keeps, where that lives, and what leaves — and
 what it does not do, because for a tool that reads your coding sessions that is
 the part worth being specific about.
 
-Last reviewed: 2026-10-09.
+Last reviewed: 2026-10-14.
 
 ## The short version
 
@@ -22,7 +22,7 @@ Last reviewed: 2026-10-09.
 | Path | Why |
 |---|---|
 | `~/.claude/projects/<project>/*.jsonl` | Your Claude Code session transcripts. Read to work out whether a stretch of work resolved something, and to show your agent what it just did when asking it to record a lesson |
-| `~/.claude/settings.json` | Only to check whether DevBrain's hooks are installed |
+| `~/.claude/settings.json` | npm CLI only, to install or check its hooks (`devbrain hooks`, `devbrain init`). The plugin brings its own hooks and never opens this file |
 | `~/.devbrain/` | Its own memory, config and session cursors |
 | Your git history, via `git log` in the repository you are working in | `devbrain backfill` offers past commits for your agent to learn from |
 

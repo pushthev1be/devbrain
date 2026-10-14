@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin.json",
   "name": "devbrain",
   "displayName": "DevBrain",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "Persistent memory for your coding agent. It writes down what it fixes and decides as it works, and reads it back before the next task. Matches on wording and on exact error text, with no model and no account needed.",
   "author": {
     "name": "DevBrain"
