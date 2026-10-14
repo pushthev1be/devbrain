@@ -112,6 +112,43 @@ describe('recallForFailure byWording', () => {
     const hits = recallForFailure(PROMPT, [portEntry], { projectId: 'p1', byWording: true, embedding: [1, 0, 0] });
     expect(hits).toEqual([]);
   });
+
+  // Another project's entry must also agree on its title. Modelled on the false
+  // answer measured on a real four-project store: a request in one repo, and
+  // another repo's entry sharing its vocabulary but not its subject.
+  describe('across projects', () => {
+    const STRIPE = 'the stripe webhook signature check fails in production';
+    const payments = entry({
+      id: 'payments', projectId: 'p2', project: other, errorPattern: undefined, tags: [],
+      title: 'Payments silently dead in prod: expired Stripe key, pm2 still online',
+      content: 'Checkout stopped in production because the Stripe key had expired; the webhook signature check failed while pm2 kept reporting the process online.',
+    });
+
+    it("holds another project's entry to a title that agrees, not just shared words", () => {
+      expect(recallForFailure(STRIPE, [payments], { projectId: 'p1', byWording: true })).toEqual([]);
+    });
+
+    it('still finds the same entry when it belongs to this project', () => {
+      const own = { ...payments, projectId: 'p1', project };
+      expect(recallForFailure(STRIPE, [own], { projectId: 'p1', byWording: true }).map(h => h.entry.id))
+        .toEqual(['payments']);
+    });
+
+    it("admits another project's entry whose title says the same thing", () => {
+      const webhook = entry({
+        id: 'webhook', projectId: 'p2', project: other, errorPattern: undefined, tags: [],
+        title: 'Stripe webhook signature check fails in production',
+        content: 'The webhook signing secret in production was the test-mode one, so every signature check failed.',
+      });
+      expect(recallForFailure(STRIPE, [webhook], { projectId: 'p1', byWording: true }).map(h => h.entry.id))
+        .toEqual(['webhook']);
+    });
+
+    it('leaves the literal route across projects untouched', () => {
+      const hits = recallForFailure(FAILURE, [entry({ id: 'sib', projectId: 'p2', project: other })], { projectId: 'p1', byWording: true });
+      expect(hits.map(h => h.entry.id)).toEqual(['sib']);
+    });
+  });
 });
 
 describe('formatRecallForAgent', () => {

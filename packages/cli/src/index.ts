@@ -27,6 +27,7 @@ import {
   withDevbrainHooks, withoutDevbrainHooks, installedDevbrainHooks,
   nextSessionChunk, formatBackfillBatch, commitExcerpt, BACKFILL_BATCH_BUDGET,
   sameProjectPath, loadGlobalEnv, looksLikeProject, formatFirstSession,
+  mergeDuplicateProjects,
 } from '@devbrain/core';
 import type { Entry, Project, EntryCategory } from '@devbrain/core';
 import { nanoid } from 'nanoid';
@@ -261,6 +262,7 @@ async function handleInit(): Promise<void> {
   try {
     const stack    = detectStack(repoRoot);
     const name     = getProjectName(repoRoot);
+    const merge    = await mergeDuplicateProjects(repoRoot);
     const existing = await getProjectByPath(repoRoot);
     const isNew    = !existing;
     await upsertProject({
@@ -271,6 +273,9 @@ async function handleInit(): Promise<void> {
     });
     s.succeed(`Registered: ${BOLD}${name}${RESET}`);
     console.log(`  Stack: ${stack.join(', ') || 'Unknown'}`);
+    for (const m of merge?.merged ?? []) {
+      console.log(`  ${GREEN}✓${RESET} Merged an earlier record of this repo from ${m.project.path} (${m.entries} entries)`);
+    }
     if (isGitRepo(repoRoot)) {
       // Earlier versions installed a post-commit hook that had a model read each
       // commit. Commits are now reviewed through the agent (devbrain backfill).
@@ -628,6 +633,14 @@ async function handleHook(event: string): Promise<void> {
       // `devbrain note` can stamp it, which is what makes a run of entries
       // readable as one episode instead of unrelated rows.
       if (typeof input.session_id === 'string') markActiveSession(repoRoot, input.session_id);
+      // Earlier clones and worktrees of this repo each made a project of their
+      // own. Fold them into one before reading it, so this session sees all of
+      // the repo's history as its own rather than as another project's.
+      const merge = await mergeDuplicateProjects(repoRoot).catch(() => null);
+      if (merge) {
+        captureLog(`merged ${merge.merged.length} duplicate record(s) of ${merge.into.name}: ` +
+          merge.merged.map(m => `${m.project.path} (${m.entries} entries)`).join(', '));
+      }
       let project = await getProjectByPath(repoRoot);
 
       // Register the project here when it is not known yet.

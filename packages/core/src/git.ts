@@ -2,6 +2,7 @@ import { execSync } from 'child_process';
 import { writeFileSync, existsSync, readFileSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import type { CommitInfo } from './types';
+import { normalizeRemote } from './projectPath';
 
 export function isGitRepo(path: string): boolean {
   try {
@@ -15,6 +16,26 @@ export function isGitRepo(path: string): boolean {
 export function getRepoRoot(cwd: string): string | null {
   try {
     return execSync('git rev-parse --show-toplevel', { cwd, stdio: 'pipe' }).toString().trim();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The repository's remote, normalized — origin if there is one, else the first
+ * remote listed. Null outside a repo, in a repo with no remote, or for a path
+ * that no longer exists. See normalizeRemote for why this is a project's identity.
+ */
+export function getRepoRemote(cwd: string): string | null {
+  const git = (args: string) => execSync(`git ${args}`, { cwd, stdio: 'pipe', timeout: 5000 }).toString().trim();
+  try {
+    let url = '';
+    try { url = git('remote get-url origin'); } catch { /* no origin */ }
+    if (!url) {
+      const first = git('remote').split(/\r?\n/).find(Boolean);
+      if (first) url = git(`remote get-url ${first}`);
+    }
+    return normalizeRemote(url);
   } catch {
     return null;
   }

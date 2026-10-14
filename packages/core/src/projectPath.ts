@@ -23,3 +23,36 @@ export function normalizeProjectPath(p: string): string {
 export function sameProjectPath(a: string, b: string): boolean {
   return normalizeProjectPath(a) === normalizeProjectPath(b);
 }
+
+/**
+ * The one spelling of a git remote, used as a project's identity across clones.
+ *
+ * A path names one checkout, so every clone and every worktree of a repository
+ * registered as a new, empty project: its own history then read as another
+ * project's, and the same entry "seen in" two of them counted as seen in two
+ * projects. The remote names the repository. Every way of writing the same one
+ * reduces to host/owner/repo:
+ *
+ *   https://github.com/Owner/Repo.git      -> github.com/owner/repo
+ *   git@github.com:Owner/Repo.git          -> github.com/owner/repo
+ *   ssh://git@github.com:22/Owner/Repo     -> github.com/owner/repo
+ *
+ * Lower-cased whole, since the hosts people use are case-insensitive about
+ * owner and name. Returns null for an empty string.
+ */
+export function normalizeRemote(url: string): string | null {
+  let s = url.trim();
+  if (!s) return null;
+  // scp-like form: user@host:owner/repo (no scheme, colon before the path)
+  const scp = /^[^/@\s]+@([^:/\s]+):(.+)$/.exec(s);
+  if (scp) s = `${scp[1]}/${scp[2]}`;
+  else s = s.replace(/^[a-z][a-z0-9+.-]*:\/\//i, '');   // scheme
+  s = s
+    .replace(/^[^/@]*@/, '')           // user or user:token
+    .replace(/^([^/:]+):\d+\//, '$1/') // port
+    .replace(/\\/g, '/')
+    .replace(/\/+$/, '')
+    .replace(/\.git$/i, '')
+    .replace(/\/+$/, '');
+  return s ? s.toLowerCase() : null;
+}

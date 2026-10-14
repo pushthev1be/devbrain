@@ -250,6 +250,7 @@ async function handleInit() {
   try {
     const stack = devbrainMcp1.distExports.detectStack(repoRoot);
     const name = devbrainMcp1.distExports.getProjectName(repoRoot);
+    const merge = await devbrainMcp1.distExports.mergeDuplicateProjects(repoRoot);
     const existing = await devbrainMcp1.distExports.getProjectByPath(repoRoot);
     const isNew = !existing;
     await devbrainMcp1.distExports.upsertProject({
@@ -262,6 +263,9 @@ async function handleInit() {
     });
     s.succeed(`Registered: ${BOLD}${name}${RESET}`);
     console.log(`  Stack: ${stack.join(", ") || "Unknown"}`);
+    for (const m of merge?.merged ?? []) {
+      console.log(`  ${GREEN}\u2713${RESET} Merged an earlier record of this repo from ${m.project.path} (${m.entries} entries)`);
+    }
     if (devbrainMcp1.distExports.isGitRepo(repoRoot)) {
       if (devbrainMcp1.distExports.removeGitHook(repoRoot)) {
         console.log(`  ${GREEN}\u2713${RESET} Removed the old post-commit hook \u2014 your agent reviews commits now`);
@@ -545,6 +549,10 @@ async function handleHook(event) {
     if (event === "session-start") {
       const repoRoot = devbrainMcp1.distExports.getRepoRoot(cwd) ?? cwd;
       if (typeof input.session_id === "string") devbrainMcp1.distExports.markActiveSession(repoRoot, input.session_id);
+      const merge = await devbrainMcp1.distExports.mergeDuplicateProjects(repoRoot).catch(() => null);
+      if (merge) {
+        captureLog(`merged ${merge.merged.length} duplicate record(s) of ${merge.into.name}: ` + merge.merged.map((m) => `${m.project.path} (${m.entries} entries)`).join(", "));
+      }
       let project2 = await devbrainMcp1.distExports.getProjectByPath(repoRoot);
       if (!project2) {
         const stack = devbrainMcp1.distExports.detectStack(repoRoot);

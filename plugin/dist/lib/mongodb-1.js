@@ -1,6 +1,5 @@
 'use strict';
 
-const require$$0$4 = require('child_process');
 const mongodb5 = require('./mongodb-5.js');
 const mongodb7 = require('./mongodb-7.js');
 const mongodb4 = require('./mongodb-4.js');
@@ -11,6 +10,7 @@ const require$$0$3 = require('fs/promises');
 const require$$3 = require('tls');
 const mongodb3 = require('./mongodb-3.js');
 const require$$0$1 = require('process');
+const require$$0$4 = require('child_process');
 const bson1 = require('./bson-1.js');
 const mongodb2 = require('./mongodb-2.js');
 

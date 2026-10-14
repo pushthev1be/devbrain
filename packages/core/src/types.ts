@@ -2,6 +2,12 @@ export interface Project {
   id: string;
   name: string;
   path: string;
+  /**
+   * The repository's normalized git remote, which identifies the project
+   * across clones and worktrees where path cannot. Null when the folder has no
+   * remote; absent on records written before this field existed.
+   */
+  remote?: string | null;
   stack: string[];
   createdAt: number;
   lastSeen: number;

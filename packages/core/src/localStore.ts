@@ -161,7 +161,10 @@ function projectFor(projects: Project[], projectId: string): Project {
 export async function upsertProject(project: Project): Promise<void> {
   const stored = { ...project, path: normalizeProjectPath(project.path) };
   mutate(data => {
-    const idx = data.projects.findIndex(p => sameProjectPath(p.path, stored.path));
+    // By id first: a project found through its remote carries the path of the
+    // checkout it was found from, and must update its own record, not add one.
+    let idx = data.projects.findIndex(p => p.id === stored.id);
+    if (idx === -1) idx = data.projects.findIndex(p => sameProjectPath(p.path, stored.path));
     if (idx === -1) data.projects.push(stored);
     else data.projects[idx] = stored;
   });
@@ -169,6 +172,32 @@ export async function upsertProject(project: Project): Promise<void> {
 
 export async function getProjectByPath(path: string): Promise<Project | null> {
   return read().projects.find(p => sameProjectPath(p.path, path)) ?? null;
+}
+
+/** The oldest project recorded with this normalized remote. */
+export async function getProjectByRemote(remote: string): Promise<Project | null> {
+  return read().projects
+    .filter(p => p.remote === remote)
+    .sort((a, b) => a.createdAt - b.createdAt)[0] ?? null;
+}
+
+/** See db.ts. */
+export async function reassignProject(fromId: string, toId: string): Promise<number> {
+  let moved = 0;
+  mutate(data => {
+    for (const e of data.entries) {
+      if (e.projectId === fromId) { e.projectId = toId; moved++; }
+      if (e.seenInProjects?.includes(fromId)) {
+        e.seenInProjects = [...new Set(e.seenInProjects.map(id => (id === fromId ? toId : id)))];
+        if (e.confidence === 'corroborated' && !e.reinforcedCount && e.seenInProjects.length < 2) {
+          e.confidence = 'observation';
+        }
+      }
+    }
+    for (const c of data.processedCommits) if (c.projectId === fromId) c.projectId = toId;
+    data.projects = data.projects.filter(p => p.id !== fromId);
+  });
+  return moved;
 }
 
 export async function getAllProjects(): Promise<Project[]> {
