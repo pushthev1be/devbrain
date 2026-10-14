@@ -285,9 +285,14 @@ Audited against the pre-submission checklist and the component support table on
       with `EPERM: operation not permitted, symlink`. Its own repo is at a root
       *and* has no `package.json`.
 
-      Published to **pushthev1be/Devbrain-memory-Claudeplugin**, pushed with
-      `git subtree push --prefix=plugin`, so `plugin/` stays the one place it is
-      edited and its history carries over. `npm run publish:plugin` does it.
+      Published to **pushthev1be/Devbrain-memory-Claudeplugin**. `plugin/` stays
+      the one place it is edited. `npm run release:plugin` builds and tests from
+      a clean `main`, refuses a changed plugin under an unchanged version, lays
+      `plugin/` over the published `main` and pushes `release/<version>` for a
+      pull request there. This replaced `git subtree push --prefix=plugin`, which
+      pushed straight to the published `main` and was rejected as
+      non-fast-forward once releases went through pull requests: their merge
+      commits are in no split of this repository.
 
       `plugin/` is now self-sufficient: its own `marketplace.json` (source
       `./`), `LICENSE` and `PRIVACY.md`, because the published repo contains none
