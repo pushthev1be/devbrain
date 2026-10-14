@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import 'dotenv/config';
 import { join, dirname, basename } from 'path';
 import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync, appendFileSync, readdirSync, statSync } from 'fs';
 import {
@@ -26,17 +25,27 @@ import {
   looksLikeError, isReadOnlyCommand, isEchoedOutput, isGenericFailureLine, recallForFailure, formatRecallForAgent,
   withDevbrainHooks, withoutDevbrainHooks, installedDevbrainHooks,
   nextSessionChunk, formatBackfillBatch, commitExcerpt, BACKFILL_BATCH_BUDGET,
-  sameProjectPath, loadGlobalEnv, looksLikeProject, formatFirstSession,
+  sameProjectPath, loadGlobalEnv, globalEnvPath, usePluginSettings, looksLikeProject, formatFirstSession,
   mergeDuplicateProjects, projectForSave,
 } from '@devbrain/core';
 import type { Entry, Project, EntryCategory } from '@devbrain/core';
 import { nanoid } from 'nanoid';
 import { homedir, tmpdir } from 'os';
+import { BOLD, DIM, CYAN, GREEN, YELLOW, RED, BLUE, MAGENTA, RESET, BANNER, clr } from './term';
+type RunOnboarding = typeof import('./onboarding').runOnboarding;
 
-// Load config from ~/.devbrain/.env (GEMINI_API_KEY, Vertex AI vars, MONGODB_URI, …).
-// A real environment variable takes precedence, but only when it holds a value:
-// see loadGlobalEnv on why an empty one has to count as absent here.
-loadGlobalEnv();
+/**
+ * True in the plugin bundle, where scripts/bundle.mjs replaces the variable with
+ * "1". That build leaves the setup wizard out and takes its settings from Claude
+ * Code rather than from the machine.
+ */
+const PLUGIN_BUILD = process.env.DEVBRAIN_PLUGIN_BUILD === '1';
+
+// The npm CLI loads ~/.devbrain/.env (GEMINI_API_KEY, Vertex AI vars,
+// MONGODB_URI, …); a real environment variable takes precedence, but only when
+// it holds a value — see loadGlobalEnv on why an empty one counts as absent. The
+// plugin takes its settings from Claude Code alone: see usePluginSettings.
+if (PLUGIN_BUILD) usePluginSettings(); else loadGlobalEnv();
 
 // ─── first-run detection ──────────────────────────────────────────────────────
 
@@ -56,43 +65,14 @@ function markOnboarded(): void {
 
 // ─── credentials ──────────────────────────────────────────────────────────────
 
-const envFilePath = join(devbrainDir, '.env');
-
-// Merge keys into ~/.devbrain/.env in place. Never rewrites the whole file —
-// writing one credential must not wipe out the others already stored there.
-function writeEnvVars(vars: Record<string, string>): void {
-  if (!existsSync(devbrainDir)) mkdirSync(devbrainDir, { recursive: true });
-  const lines = existsSync(envFilePath)
-    ? readFileSync(envFilePath, 'utf-8').replace(/^﻿/, '').split('\n')
-    : [];
-  for (const [key, value] of Object.entries(vars)) {
-    const idx = lines.findIndex(l => l.trim().startsWith(`${key}=`));
-    if (idx === -1) lines.push(`${key}=${value}`);
-    else lines[idx] = `${key}=${value}`;
-  }
-  writeFileSync(envFilePath, `${lines.join('\n').replace(/\n+$/, '')}\n`, 'utf-8');
-}
-
-function isMockMode(): boolean { return process.env.DEVBRAIN_MOCK === 'true'; }
-
-function hasVertexCreds(): boolean {
-  return ['true', '1'].includes((process.env.GOOGLE_GENAI_USE_VERTEXAI ?? '').toLowerCase())
-    && !!process.env.GOOGLE_CLOUD_PROJECT;
-}
-
-function hasGeminiCreds(): boolean {
-  return isMockMode() || hasVertexCreds()
-    || !!process.env.GEMINI_API_KEY || !!process.env.GOOGLE_API_KEY;
-}
-
-function hasMongoUri(): boolean { return !!process.env.MONGODB_URI?.trim(); }
+const envFilePath = globalEnvPath();
 
 // Map a raw error onto something a user can act on. Driver and SDK messages are
 // accurate but unreadable; the common config failures get a next step instead.
 function explainError(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err);
   if (/No Gemini credentials|GOOGLE_CLOUD_PROJECT is not set/i.test(msg))
-    return `No Gemini credentials — run ${CYAN}devbrain setup${RESET}, or add GEMINI_API_KEY to ${envFilePath}`;
+    return `No Gemini credentials — run ${CYAN}devbrain setup${RESET} to add a key.`;
   if (/bad auth|[Aa]uthentication failed/.test(msg))
     return `The database rejected the credentials in MONGODB_URI — check the username and password.`;
   if (/ENOTFOUND|ECONNREFUSED|ETIMEDOUT|querySrv|[Ss]erver selection/.test(msg))
@@ -107,28 +87,8 @@ function reportError(err: unknown, label = 'Error'): void {
   }
 }
 
-const BOLD    = '\x1b[1m';
-const DIM     = '\x1b[2m';
-const CYAN    = '\x1b[36m';
-const GREEN   = '\x1b[32m';
-const YELLOW  = '\x1b[33m';
-const RED     = '\x1b[31m';
-const BLUE    = '\x1b[34m';
-const MAGENTA = '\x1b[35m';
-const RESET   = '\x1b[0m';
-
-const BANNER = `${CYAN}
-  ██████╗ ███████╗██╗   ██╗██████╗ ██████╗  █████╗ ██╗███╗   ██╗
-  ██╔══██╗██╔════╝██║   ██║██╔══██╗██╔══██╗██╔══██╗██║████╗  ██║
-  ██║  ██║█████╗  ╚██╗ ██╔╝██████╔╝██████╔╝███████║██║██╔██╗ ██║
-  ██║  ██║██╔══╝   ╚████╔╝ ██╔══██╗██╔══██╗██╔══██║██║██║╚██╗██║
-  ██████╔╝███████╗  ╚██╔╝  ██████╔╝██║  ██╗██║  ██║██║██║ ╚████║
-  ╚═════╝ ╚══════╝   ╚═╝   ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚═╝  ╚═══╝${RESET}
-${DIM}                    your developer memory${RESET}`;
-
 function dim(text: string): string { return `${DIM}${text}${RESET}`; }
 function bold(text: string): string { return `${BOLD}${text}${RESET}`; }
-function clr(): void { process.stdout.write('\x1b[2J\x1b[H'); }
 function typeCode(type: string): string {
   switch (type) {
     case 'bug':                    return RED;
@@ -1785,155 +1745,18 @@ async function handleDelete(inquirer: unknown): Promise<void> {
 
 // ─── first-run onboarding ─────────────────────────────────────────────────────
 
+/** The setup wizard, loaded only when it runs: the plugin build leaves it out. */
 async function runOnboarding(): Promise<void> {
-  // The wizard is all prompts. Without a TTY (CI, a piped script, an agent
-  // shelling out) inquirer's readline closes on EOF and Node dies with an
-  // unhandled ERR_USE_AFTER_CLOSE, so print the manual path and stop instead.
-  if (!process.stdin.isTTY) {
-    console.log(`\n  ${YELLOW}Setup needs an interactive terminal.${RESET}\n`);
-    console.log(`  ${DIM}Nothing is required to start — memory defaults to ${RESET}${getLocalDbPath()}${DIM}.${RESET}`);
-    console.log(`  ${DIM}Commands that save and recall notes already work.${RESET}\n`);
-    console.log(`  Optional, in ${DIM}${envFilePath}${RESET}:`);
-    console.log(`    ${CYAN}GEMINI_API_KEY${RESET}=...              ${DIM}# semantic search instead of keywords${RESET}`);
-    console.log(`    ${CYAN}MONGODB_URI${RESET}=mongodb+srv://...   ${DIM}# optional — share memory across a team${RESET}\n`);
-    return;
-  }
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const run: RunOnboarding = require('./onboarding').runOnboarding;
+  await run({ markOnboarded, handleInit });
+}
 
-  // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-explicit-any
-  const _inq: any = require('inquirer');
-  const inq = typeof _inq.prompt === 'function' ? _inq : _inq.default;
-
-  clr();
-  console.log(BANNER);
-  console.log(`\n  ${BOLD}Welcome to DevBrain.${RESET} Let's get you set up — takes about 30 seconds.\n`);
-
-  const stageHeader = (n: number, total: number, label: string) =>
-    `  ${BOLD}${CYAN}[${n}/${total}]${RESET}  ${BOLD}${label}${RESET}`;
-
-  // ── Stage 1: Storage ──────────────────────────────────────────────────────
-  // Local is the default so setup can't strand anyone. MongoDB is the upgrade
-  // you pick when you want a team to share one memory.
-  console.log(stageHeader(1, 3, 'Storage'));
-
-  if (hasMongoUri()) {
-    console.log(`  ${GREEN}✓${RESET} MongoDB already configured ${DIM}(MONGODB_URI is set)${RESET}\n`);
-  } else {
-    const { store } = await inq.prompt([{
-      type: 'list', name: 'store', prefix: ' ',
-      message: 'Where should DevBrain keep your memory?',
-      choices: [
-        { name: `${GREEN}This machine${RESET}  ${DIM}a JSON file in ~/.devbrain — no setup, works now${RESET}`, value: 'local' },
-        { name: `${CYAN}MongoDB${RESET}       ${DIM}share one memory across a team or machines${RESET}`, value: 'mongo' },
-      ],
-    }]);
-
-    if (store === 'mongo') {
-      console.log(`\n  ${DIM}${RESET}${CYAN}https://cloud.mongodb.com${RESET}${DIM} → create a free cluster → Connect → copy the string${RESET}\n`);
-      const { uri } = await inq.prompt([{
-        type: 'password', name: 'uri', prefix: ' ',
-        message: 'Paste your MongoDB connection string (or press Enter to stay local):',
-        validate: (v: string) =>
-          !v?.trim() || /^mongodb(\+srv)?:\/\//.test(v.trim())
-            ? true
-            : 'That does not look like a connection string — it should start with mongodb:// or mongodb+srv://',
-      }]);
-      if (uri?.trim()) {
-        writeEnvVars({ MONGODB_URI: uri.trim() });
-        process.env.MONGODB_URI = uri.trim();
-        console.log(`  ${GREEN}✓${RESET} Saved to ${DIM}${envFilePath}${RESET}\n`);
-      } else {
-        console.log(`  ${DIM}Staying local — ${RESET}${CYAN}${getLocalDbPath()}${RESET}\n`);
-      }
-    } else {
-      console.log(`  ${GREEN}✓${RESET} Local storage — ${DIM}${getLocalDbPath()}${RESET}`);
-      console.log(`     ${DIM}Switch later by adding MONGODB_URI to ${envFilePath}${RESET}\n`);
-    }
-  }
-
-  // ── Stage 2: semantic search (optional) ───────────────────────────────────
-  // Nothing in DevBrain needs a model: the coding agent writes every entry and
-  // search matches keywords. A Gemini key only upgrades search to meaning.
-  console.log(stageHeader(2, 3, 'Semantic Search (optional)'));
-  console.log(`  ${DIM}DevBrain needs no AI — your coding agent writes every entry, and search matches keywords.${RESET}`);
-  console.log(`  ${DIM}A Gemini key adds semantic search: matching by meaning, not just words.${RESET}\n`);
-
-  if (isMockMode()) {
-    console.log(`  ${GREEN}✓${RESET} Mock mode (DEVBRAIN_MOCK=true) — no Gemini calls will be made\n`);
-  } else if (hasVertexCreds()) {
-    console.log(`  ${GREEN}✓${RESET} Vertex AI configured (project ${process.env.GOOGLE_CLOUD_PROJECT})\n`);
-  } else if (hasGeminiCreds()) {
-    console.log(`  ${GREEN}✓${RESET} Gemini API key already set\n`);
-  } else {
-    const { apiKey } = await inq.prompt([{
-      type: 'password',
-      name: 'apiKey',
-      message: 'Gemini API key (press Enter to skip — you can add one later):',
-      prefix: ' ',
-    }]);
-    if (apiKey?.trim()) {
-      writeEnvVars({ GEMINI_API_KEY: apiKey.trim() });
-      process.env.GEMINI_API_KEY = apiKey.trim();
-      console.log(`  ${GREEN}✓${RESET} Saved to ${DIM}${envFilePath}${RESET}\n`);
-    } else {
-      console.log(`  ${GREEN}✓${RESET} Keyword search ${DIM}— add GEMINI_API_KEY to ${envFilePath} anytime${RESET}\n`);
-    }
-  }
-
-  // Settings are on disk, so this run counts as onboarded. Recorded before the
-  // stage that touches the database: if it is unreachable we must not relaunch
-  // this wizard on every invocation.
-  markOnboarded();
-
-  // ── Stage 3: this project ─────────────────────────────────────────────────
-  // Exactly what `devbrain init` does — one implementation, not a second copy.
-  console.log(stageHeader(3, 3, 'This Project'));
-  const repoRoot = getRepoRoot(process.cwd()) ?? process.cwd();
-  console.log(`  ${DIM}Detected: ${RESET}${BOLD}${getProjectName(repoRoot)}${RESET}  ${DIM}${repoRoot}${RESET}\n`);
-
-  const { regProject } = await inq.prompt([{
-    type: 'confirm', name: 'regProject',
-    message: 'Set up DevBrain for this project?',
-    default: true, prefix: ' ',
-  }]);
-  if (regProject) {
-    await handleInit();
-  } else {
-    console.log(`  ${DIM}Skipped — run ${RESET}${CYAN}devbrain init${RESET}${DIM} in any project to set it up.${RESET}\n`);
-  }
-
-  // ── Done ──────────────────────────────────────────────────────────────────
-  const W = Math.min(process.stdout.columns || 80, 80);
-  const storage = describeStorage();
-  console.log(`${DIM}${'─'.repeat(W)}${RESET}`);
-  console.log(`\n  ${GREEN}${BOLD}DevBrain is ready.${RESET}\n`);
-
-  console.log(`  ${BOLD}Where your data lives${RESET}`);
-  console.log(`  ${DIM}Memory    ${RESET}${storage.location}${storage.kind === 'local' ? ` ${DIM}(local)${RESET}` : ''}`);
-  console.log(`  ${DIM}Config    ${RESET}${envFilePath}\n`);
-
-  if (!hasGeminiCreds()) {
-    console.log(`  ${DIM}Search matches keywords. For semantic search, add GEMINI_API_KEY to ${envFilePath}.${RESET}\n`);
-  }
-
-  console.log(`  ${BOLD}Quick reference${RESET}`);
-  console.log(`  ${CYAN}bug: <text>${RESET}   save a bug instantly`);
-  console.log(`  ${CYAN}fix: <text>${RESET}   save a fix instantly`);
-  console.log(`  ${CYAN}/<command>${RESET}    type / to see all commands`);
-  console.log(`  ${CYAN}devbrain setup${RESET} re-run this wizard anytime\n`);
-
-  console.log(`${DIM}${'─'.repeat(W)}${RESET}\n`);
-
-  let goNow = true;
-  try {
-    const res = await inq.prompt([{
-      type: 'confirm', name: 'goNow',
-      message: 'Open DevBrain now?',
-      default: true, prefix: ' ',
-    }]);
-    goNow = res.goNow;
-  } catch { goNow = false; }
-
-  if (goNow) clr();
+/** The plugin build's `setup`: its settings live in Claude Code, not in a wizard. */
+function pluginSettingsNotice(): void {
+  console.log(`\n  ${BOLD}DevBrain's settings live in Claude Code.${RESET} Open ${CYAN}/plugin${RESET}, pick devbrain, and configure it there.`);
+  console.log(`  ${DIM}Nothing is required — memory defaults to ${RESET}${getLocalDbPath()}${DIM}.${RESET}`);
+  console.log(`  ${DIM}A MongoDB connection string there shares one memory across machines or a team.${RESET}\n`);
 }
 
 // ─── interactive REPL ────────────────────────────────────────────────────────
@@ -2137,13 +1960,29 @@ async function handleInteractive(): Promise<void> {
 
 // ─── entry point ──────────────────────────────────────────────────────────────
 
+/** `devbrain` with no command: the setup wizard on first run, then the REPL. */
+async function startRepl(): Promise<void> {
+  if (!isOnboarded()) {
+    await runOnboarding();
+    if (!isOnboarded()) process.exit(1);   // setup skipped or non-interactive
+  }
+  if (!process.stdin.isTTY) {
+    console.log(`\n  ${YELLOW}The DevBrain REPL needs an interactive terminal.${RESET}`);
+    console.log(`  ${DIM}Non-interactively, use ${RESET}${CYAN}devbrain context${RESET}${DIM}, ${RESET}${CYAN}devbrain search${RESET}${DIM} or ${RESET}${CYAN}devbrain note${RESET}${DIM}.${RESET}\n`);
+    process.exit(1);
+  }
+  await handleInteractive();
+}
+
 async function main(): Promise<void> {
   const args    = process.argv.slice(2);
   const command = args[0] ?? '';
 
   try {
     switch (command) {
-      case 'setup':   await runOnboarding();                       break;
+      case 'setup':
+        if (PLUGIN_BUILD) pluginSettingsNotice(); else await runOnboarding();
+        break;
       case 'init':    await handleInit();                          break;
       case 'note': {
         const rest = args.slice(1);
@@ -2201,16 +2040,7 @@ async function main(): Promise<void> {
           console.log(`  ${DIM}Run ${RESET}${CYAN}devbrain --help${RESET}${DIM} to see what's available.${RESET}\n`);
           process.exit(1);
         }
-        if (!isOnboarded()) {
-          await runOnboarding();
-          if (!isOnboarded()) process.exit(1);   // setup skipped or non-interactive
-        }
-        if (!process.stdin.isTTY) {
-          console.log(`\n  ${YELLOW}The DevBrain REPL needs an interactive terminal.${RESET}`);
-          console.log(`  ${DIM}Non-interactively, use ${RESET}${CYAN}devbrain context${RESET}${DIM}, ${RESET}${CYAN}devbrain search${RESET}${DIM} or ${RESET}${CYAN}devbrain note${RESET}${DIM}.${RESET}\n`);
-          process.exit(1);
-        }
-        await handleInteractive();
+        if (PLUGIN_BUILD) pluginSettingsNotice(); else await startRepl();
         break;
     }
   } catch (err: unknown) {

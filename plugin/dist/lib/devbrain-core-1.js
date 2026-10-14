@@ -1,10 +1,10 @@
 'use strict';
 
 const require$$0$1 = require('child_process');
-const devbrainCore2 = require('./devbrain-core-2.js');
 const require$$1 = require('path');
 const require$$2 = require('os');
 const require$$0 = require('fs');
+const devbrainCore2 = require('./devbrain-core-2.js');
 const mongodb4 = require('./mongodb-4.js');
 const nanoid1 = require('./nanoid-1.js');
 const crypto = require('crypto');
@@ -4097,7 +4097,8 @@ function requireEnv () {
 	if (hasRequiredEnv) return env;
 	hasRequiredEnv = 1;
 	// Reading ~/.devbrain/.env, which is where `devbrain setup` puts MONGODB_URI,
-	// GEMINI_API_KEY and the Vertex AI variables.
+	// GEMINI_API_KEY and the Vertex AI variables. The npm CLI only: the plugin build
+	// reads its settings from Claude Code instead, through usePluginSettings.
 	//
 	// This lived twice, copied between the CLI and the MCP server, which is how the
 	// two drifted into disagreeing about a case neither of them was tested on.
@@ -4105,6 +4106,7 @@ function requireEnv () {
 	env.parseEnvFile = parseEnvFile;
 	env.globalEnvPath = globalEnvPath;
 	env.loadGlobalEnv = loadGlobalEnv;
+	env.usePluginSettings = usePluginSettings;
 	const fs_1 = require$$0;
 	const os_1 = require$$2;
 	const path_1 = require$$1;
@@ -4168,6 +4170,23 @@ function requireEnv () {
 	        }
 	    }
 	    return applied;
+	}
+	/**
+	 * In the Claude Code plugin, take the database from the plugin's own settings
+	 * and from nothing else on the machine.
+	 *
+	 * Claude Code hands the `mongodb_uri` option to hooks as
+	 * CLAUDE_PLUGIN_OPTION_MONGODB_URI and to the MCP server as DEVBRAIN_MONGODB_URI,
+	 * which plugin.json sets from `${user_config.mongodb_uri}`. A MONGODB_URI the
+	 * user's shell or project happens to carry is theirs, usually for their own app,
+	 * and is overwritten here: read, it would have put DevBrain's memory in that
+	 * app's database. Anthropic's plugin directory holds a plugin that reads a
+	 * credential from the machine rather than from a value the user chose to share.
+	 *
+	 * Unset in both means local storage, the same as an empty option.
+	 */
+	function usePluginSettings(env = process.env) {
+	    env.MONGODB_URI = env.CLAUDE_PLUGIN_OPTION_MONGODB_URI ?? env.DEVBRAIN_MONGODB_URI ?? '';
 	}
 	
 	return env;

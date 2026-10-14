@@ -14,7 +14,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, writeFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { parseEnvFile, loadGlobalEnv, globalEnvPath } from './env';
+import { parseEnvFile, loadGlobalEnv, globalEnvPath, usePluginSettings } from './env';
 
 const KEY = 'DEVBRAIN_ENV_TEST_URI';
 let dir: string;
@@ -91,5 +91,37 @@ describe('loadGlobalEnv', () => {
     const path = globalEnvPath();
     expect(path.endsWith('.env')).toBe(true);
     expect(path).toContain('.devbrain');
+  });
+});
+
+// The plugin reads the database from its own settings: the option Claude Code
+// exports to hooks, or the variable plugin.json gives the MCP server. Never a
+// MONGODB_URI the machine already had, which is usually the user's own app's.
+describe('usePluginSettings', () => {
+  const machine = 'mongodb://the-users-own-app/db';
+  const chosen = 'mongodb+srv://devbrain.example.net/memory';
+
+  it('takes the option Claude Code exports to hooks', () => {
+    const env: NodeJS.ProcessEnv = { MONGODB_URI: machine, CLAUDE_PLUGIN_OPTION_MONGODB_URI: chosen };
+    usePluginSettings(env);
+    expect(env.MONGODB_URI).toBe(chosen);
+  });
+
+  it('takes the variable plugin.json sets for the MCP server', () => {
+    const env: NodeJS.ProcessEnv = { MONGODB_URI: machine, DEVBRAIN_MONGODB_URI: chosen };
+    usePluginSettings(env);
+    expect(env.MONGODB_URI).toBe(chosen);
+  });
+
+  it('keeps an option left blank blank, which means local storage', () => {
+    const env: NodeJS.ProcessEnv = { MONGODB_URI: machine, CLAUDE_PLUGIN_OPTION_MONGODB_URI: '' };
+    usePluginSettings(env);
+    expect(env.MONGODB_URI).toBe('');
+  });
+
+  it('ignores a MONGODB_URI the machine had when neither is set', () => {
+    const env: NodeJS.ProcessEnv = { MONGODB_URI: machine };
+    usePluginSettings(env);
+    expect(env.MONGODB_URI).toBe('');
   });
 });

@@ -50,6 +50,13 @@ share one memory across machines or a team; empty keeps everything in the local
 file. **Dashboard token**: only needed to reach the dashboard from another
 machine; left empty it answers on localhost only and needs no token.
 
+These settings are the only place the plugin looks. It does not read a
+`MONGODB_URI` from your shell or your project's `.env`, which usually belongs to
+your own app, and it does not read `~/.devbrain/.env`, which only the npm CLI
+uses. If you set MongoDB up through the CLI, put the same connection string here.
+`/devbrain:dashboard` is started outside these settings, so it shows the local
+file even when a MongoDB connection string is set.
+
 ## What this build leaves out
 
 This plugin matches on words and on exact error text, not on meaning. It
