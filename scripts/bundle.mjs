@@ -134,6 +134,10 @@ const OMITTED_FROM_PLUGIN = [
   // either, and the directory holds code that starts a program from a path or a
   // command put together at run time.
   { filter: '^[.]/launch$', why: 'the file opener and devbrain run' },
+  // Reading and writing Claude Code's settings files to install hooks. The
+  // plugin brings its own, and the directory holds code that reads
+  // ~/.claude/settings.json and writes commands into it.
+  { filter: '^[.]/agentSettings$', why: 'hook installation into Claude Code settings' },
 ];
 
 /**

@@ -138,6 +138,14 @@ describe('the committed plugin bundles', () => {
     expect(cli).not.toMatch(/\b(spawn|execFile|execSync|exec)\(/);
   });
 
+  // The plugin brings its own hooks, so it has no reason to open Claude Code's
+  // settings, where an apiKeyHelper or API keys can live.
+  it('cli.js does not touch Claude Code settings files', () => {
+    const cli = readFileSync(join(DIST, 'cli.js'), 'utf-8');
+    // A path is built from the bare file name; prose mentioning it is fine.
+    expect(cli).not.toMatch(/["']settings(\.local)?\.json["']/);
+  });
+
   // Reading a key in one place and running curl in another is held as a
   // credential leaving the machine in two steps, even when curl only asks
   // localhost whether the dashboard is up. The server answers that itself.
