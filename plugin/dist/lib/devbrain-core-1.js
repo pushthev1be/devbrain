@@ -3606,6 +3606,12 @@ function requireRecall () {
 		 * 0.67 and rare words 0.42, inside the range of the right answers (0.60-0.71 and
 		 * 0.37-0.52), so no word bar separates it. Its title, 0.10, does. A hint nobody
 		 * asked for, about someone else's code, has to agree on more than vocabulary.
+		 * On that store, 12 requests describing an entry and 6 about nothing stored:
+		 * found 6 of 12 either way, unrelated answered 1 of 6 before and 0 after.
+		 *
+		 * This only holds once a repository is one project (see projectIdentity.ts).
+		 * Measured before that, five of those six right answers sat in a second record
+		 * of the same repo and counted as another project's.
 		 */
 		exports.VOLUNTEER_MIN_WORDS = 0.6;
 		exports.VOLUNTEER_MIN_WORDS_WITH_TITLE = 0.4;
