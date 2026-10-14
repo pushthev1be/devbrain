@@ -85,7 +85,6 @@ const HOOK_ARG: Record<HookEvent, string> = {
  * The cost of widening is false positives from tools whose output is source
  * code rather than a result, and those are excluded by name in isFileTool.
  */
-const POST_TOOL_MATCHERS = ['*'];
 
 /**
  * Tools whose output is file content, not a result.
@@ -94,10 +93,24 @@ const POST_TOOL_MATCHERS = ['*'];
  * them. For shell commands the equivalent guard is isReadOnlyCommand; this is
  * the same rule for tools that take no command at all.
  */
-const FILE_TOOLS = new Set([
+export const FILE_TOOLS: ReadonlySet<string> = new Set([
   'Read', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'NotebookRead',
   'Glob', 'Grep', 'LS', 'TodoWrite', 'ExitPlanMode',
 ]);
+
+/**
+ * Every tool except the file tools, as a Claude Code matcher.
+ *
+ * It was '*', with the file tools dropped inside the hook. That was correct but
+ * not free: each Read, Edit and Grep still started node and loaded the bundle,
+ * about 200 ms apiece, to decide to do nothing. Measured over a real session,
+ * file tools are most of the calls. Excluding them here means Claude Code never
+ * starts the process. Matchers are regular expressions; checked in Claude Code
+ * 2.1.299 that this one skips Read and Glob and still fires for Bash. The hook
+ * keeps its own isFileTool check for settings written before this changed.
+ */
+export const POST_TOOL_MATCHER = `^(?!(${[...FILE_TOOLS].join('|')})$).*`;
+const POST_TOOL_MATCHERS = [POST_TOOL_MATCHER];
 
 export function isFileTool(name: string): boolean {
   return FILE_TOOLS.has(name);

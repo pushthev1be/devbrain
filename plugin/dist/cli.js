@@ -591,6 +591,9 @@ async function handleHook(event) {
       const hits = devbrainMcp1.distExports.recallForFailure(prompt2, await devbrainMcp1.distExports.getAllEntriesWithProjects(), {
         projectId: project2.id,
         embedding,
+        // A request is a description, not an error string, so without an
+        // embedding it is matched on its wording as well.
+        byWording: true,
         // Never the same entry twice in one session. A briefing that repeats
         // itself every message is one the agent learns to skim past.
         exclude: sessionId2 ? devbrainMcp1.distExports.readCursor(sessionId2).surfaced ?? [] : []

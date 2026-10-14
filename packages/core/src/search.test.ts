@@ -308,6 +308,39 @@ describe('buildContext', () => {
     expect(ctx.currentProject?.id).toBe('proj-1');
   });
 
+  // Reported from real use of the plugin build, which has no embeddings: two
+  // entries seen in two projects led get_context for WebAssembly, saslprep,
+  // PRIVACY.md and rollup alike, because a query filtered nothing.
+  describe('with a query and no embedding', () => {
+    const crossNoise = [
+      makeEntry({ id: 'x-agent', type: 'lesson', title: 'Agent provides insufficient detail from past issues', content: 'Recall output was too terse to act on', embedding: vec(1, 0, 0), seenInProjects: ['proj-1', 'proj-2'], project: otherProject }),
+      makeEntry({ id: 'x-outage', type: 'lesson', title: 'Three false outage calls in one session', content: 'Health checks were misread as outages', embedding: vec(0, 1, 0), seenInProjects: ['proj-1', 'proj-2'], project: otherProject }),
+      makeEntry({ id: 'wasm', type: 'fix', title: 'bson ships inline WebAssembly the plugin scan cannot read', content: 'Replaced with its JavaScript Long fallback', errorPattern: 'Ships code the scan can’t read', embedding: vec(0, 0, 1), project }),
+    ];
+
+    it('leaves unrelated cross-project entries out', () => {
+      const ctx = buildContext(crossNoise, project, undefined, 'plugin bundle ships WebAssembly from bson');
+      expect(ctx.crossProjectPatterns ?? []).toHaveLength(0);
+      expect(ctx.issues.map(r => r.entry.id)).toEqual(['wasm']);
+    });
+
+    it('still shows a cross-project entry the query is about', () => {
+      const ctx = buildContext(crossNoise, project, undefined, 'false outage calls from health checks');
+      expect((ctx.crossProjectPatterns ?? []).map(r => r.entry.id)).toEqual(['x-outage']);
+    });
+
+    it('returns nothing rather than noise when nothing matches', () => {
+      const ctx = buildContext(crossNoise, project, undefined, 'kubernetes pod stuck in CrashLoopBackOff');
+      const all = [...(ctx.crossProjectPatterns ?? []), ...ctx.issues, ...ctx.patterns, ...ctx.notes];
+      expect(all).toHaveLength(0);
+    });
+
+    it('keeps the no-query briefing unfiltered', () => {
+      const ctx = buildContext(crossNoise, project);
+      expect((ctx.crossProjectPatterns ?? []).length).toBe(2);
+    });
+  });
+
   it('handles null currentProject without throwing', () => {
     expect(() => buildContext(entries, null)).not.toThrow();
     const ctx = buildContext(entries, null);

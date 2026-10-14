@@ -18,7 +18,8 @@ vi.mock('os', async importOriginal => {
 
 import {
   withDevbrainHooks, withoutDevbrainHooks, installedDevbrainHooks, formatSessionBriefing, HOOK_EVENTS,
-  briefingEntries, isAlreadyInAgentContext, isFileTool, formatFirstSession } from './agentHooks';
+  briefingEntries, isAlreadyInAgentContext, isFileTool, formatFirstSession,
+  FILE_TOOLS, POST_TOOL_MATCHER } from './agentHooks';
 import type { Entry } from './types';
 import { readCursor, writeCursor } from './sessionCursor';
 import { buildContext } from './search';
@@ -58,7 +59,7 @@ describe('agent hook settings', () => {
   // never nudged while holding the entry for the error on screen.
   it('installs PostToolUse for every tool, not only the shells', () => {
     const groups = withDevbrainHooks({}).hooks!.PostToolUse;
-    expect(groups.map(g => g.matcher)).toEqual(['*']);
+    expect(groups.map(g => g.matcher)).toEqual([POST_TOOL_MATCHER]);
     expect(groups[0].hooks[0].command).toContain('hook post-tool');
   });
 
@@ -66,7 +67,7 @@ describe('agent hook settings', () => {
   // PostToolUse — without this, a failing command could not trigger recall.
   it('installs PostToolUseFailure for every tool, to the same handler', () => {
     const groups = withDevbrainHooks({}).hooks!.PostToolUseFailure;
-    expect(groups.map(g => g.matcher)).toEqual(['*']);
+    expect(groups.map(g => g.matcher)).toEqual([POST_TOOL_MATCHER]);
     expect(groups[0].hooks[0].command).toContain('hook post-tool');
   });
 
@@ -78,6 +79,16 @@ describe('agent hook settings', () => {
     }
     for (const t of ['Bash', 'PowerShell', 'mcp__supabase__query_logs', 'WebFetch', '']) {
       expect(isFileTool(t), t).toBe(false);
+    }
+  });
+
+  // So that Claude Code never starts node for a call the hook would drop. The
+  // plugin's hooks.json carries the same string; bundles.test.ts holds it there.
+  it('matches exactly the tools the hook does not drop', () => {
+    const matcher = new RegExp(POST_TOOL_MATCHER);
+    for (const t of FILE_TOOLS) expect(matcher.test(t), t).toBe(false);
+    for (const t of ['Bash', 'PowerShell', 'mcp__supabase__query_logs', 'WebFetch', 'Task', 'ReadMcpResource', 'Readme']) {
+      expect(matcher.test(t), t).toBe(true);
     }
   });
 

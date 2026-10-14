@@ -448,9 +448,21 @@ export function buildContext(
     return { entry: e, project: e.project, score, semantic };
   });
 
+  // Without an embedding a query used to filter nothing: every entry stayed
+  // "relevant", only reordered, so the cross-project section below filled with
+  // whatever had been seen in two projects. Two such entries came back first
+  // for WebAssembly, saslprep, PRIVACY.md and rollup alike. The no-AI search
+  // gate in preciseSearch applies here too: enough of the query's words in the
+  // entry, or its title or error text overlapping the query.
+  const lexicallyRelevant = (e: Entry) =>
+    keywordScore(queryText!, e) >= KEYWORD_THRESHOLD ||
+    patternOverlap(queryText!, e.title) * 0.6 >= 0.25 ||
+    (!!e.errorPattern && patternOverlap(queryText!, e.errorPattern) >= 0.25);
   const relevant = queryEmbedding
     ? scored.filter(r => !r.entry.embedding || r.semantic >= SEMANTIC_THRESHOLD)
-    : scored;
+    : queryText?.trim()
+      ? scored.filter(r => lexicallyRelevant(r.entry))
+      : scored;
 
   relevant.sort((a, b) => b.score - a.score);
 

@@ -705,6 +705,9 @@ async function handleHook(event: string): Promise<void> {
       const hits = recallForFailure(prompt, await getAllEntriesWithProjects(), {
         projectId: project.id,
         embedding,
+        // A request is a description, not an error string, so without an
+        // embedding it is matched on its wording as well.
+        byWording: true,
         // Never the same entry twice in one session. A briefing that repeats
         // itself every message is one the agent learns to skim past.
         exclude: sessionId ? readCursor(sessionId).surfaced ?? [] : [],
