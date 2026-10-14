@@ -122,6 +122,14 @@ describe('the committed plugin bundles', () => {
     }
   });
 
+  // The hooks run cli.js, which sends nothing anywhere. Rollup used to hoist
+  // every chunk's dependencies into it, the Mongo driver's `http` included, and
+  // the directory's scan read that require as cli.js able to send data.
+  it('cli.js requires no network module of its own', () => {
+    const cli = readFileSync(join(DIST, 'cli.js'), 'utf-8');
+    expect(cli).not.toMatch(/require\('(http|https|net|tls|dns)'\)/);
+  });
+
   // Reading a key in one place and running curl in another is held as a
   // credential leaving the machine in two steps, even when curl only asks
   // localhost whether the dashboard is up. The server answers that itself.

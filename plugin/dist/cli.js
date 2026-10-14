@@ -11,37 +11,6 @@ const devbrainMcp1 = require('./lib/devbrain-mcp-1.js');
 const nanoid1 = require('./lib/nanoid-1.js');
 const require$$2 = require('os');
 const devbrainCli1 = require('./lib/devbrain-cli-1.js');
-require('./lib/devbrain-core-1.js');
-require('./lib/devbrain-core-2.js');
-require('./lib/mongodb-4.js');
-require('./lib/mongodb-1.js');
-require('./lib/mongodb-5.js');
-require('timers/promises');
-require('./lib/mongodb-3.js');
-require('stream');
-require('./lib/mongodb-7.js');
-require('timers');
-require('http');
-require('process');
-require('./lib/mongodb-2.js');
-require('zlib');
-require('./lib/mongodb-6.js');
-require('dns');
-require('net');
-require('tls');
-require('fs/promises');
-require('./lib/mongodb-js-saslprep-1.js');
-require('url');
-require('./lib/mongodb-connection-string-url-1.js');
-require('./lib/whatwg-url-1.js');
-require('./lib/webidl-conversions-1.js');
-require('./lib/tr46-1.js');
-require('./lib/punycode-1.js');
-require('./lib/tr46-2.js');
-require('events');
-require('util');
-require('./lib/bson-1.js');
-require('crypto');
 
 const PLUGIN_BUILD = true;
 devbrainMcp1.distExports.usePluginSettings();
@@ -107,10 +76,10 @@ function typeCode(type) {
   }
 }
 function openPath(target) {
-  const { exec } = require$$0$1;
-  if (process.platform === "win32") exec(`start "" "${target}"`);
-  else if (process.platform === "darwin") exec(`open "${target}"`);
-  else exec(`xdg-open "${target}"`);
+  const { execFile } = require$$0$1;
+  const opener = process.platform === "win32" ? "explorer" : process.platform === "darwin" ? "open" : "xdg-open";
+  execFile(opener, [target], () => {
+  });
 }
 function typeDot(type) {
   return `${typeCode(type)}\u25CF${devbrainCli1.RESET}`;
