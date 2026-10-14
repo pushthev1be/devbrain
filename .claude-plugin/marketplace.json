@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "devbrain",
+  "description": "DevBrain — persistent memory for your coding agent. Installs the built plugin from its published repository.",
+  "owner": {
+    "name": "DevBrain",
+    "url": "https://github.com/pushthev1be/devbrain"
+  },
+  "plugins": [
+    {
+      "name": "devbrain",
+      "source": {
+        "source": "github",
+        "repo": "pushthev1be/Devbrain-memory-Claudeplugin"
+      },
+      "description": "Persistent memory for your coding agent. It writes down what it fixes and decides as it works, and reads it back before the next task.",
+      "category": "knowledge",
+      "tags": ["memory", "knowledge", "recall", "mcp", "hooks"]
+    }
+  ]
+}

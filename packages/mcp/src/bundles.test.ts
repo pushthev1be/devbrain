@@ -21,6 +21,7 @@
 import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';
+import { POST_TOOL_MATCHER } from '@devbrain/core';
 
 const REPO = join(__dirname, '..', '..', '..');
 const DIST = join(REPO, 'plugin', 'dist');
@@ -101,6 +102,16 @@ describe('the committed plugin bundles', () => {
       expect(code, `${file} instantiates WebAssembly`)
         .not.toMatch(/WebAssembly\.(Module|Instance|compile|instantiate)\(/);
       expect(code, `${file} carries a long base64 run`).not.toMatch(/[A-Za-z0-9+/]{1000,}/);
+    }
+  });
+
+  // The plugin's hooks are written by hand, not by withDevbrainHooks, so the
+  // matcher that keeps Claude Code from starting node for every Read and Edit
+  // is checked against the one the hook's own filter is built from.
+  it('hooks.json skips exactly the tools the post-tool hook drops', () => {
+    const hooks = JSON.parse(readFileSync(join(REPO, 'plugin', 'hooks', 'hooks.json'), 'utf-8')).hooks;
+    for (const event of ['PostToolUse', 'PostToolUseFailure']) {
+      expect(hooks[event].map((g: { matcher: string }) => g.matcher), event).toEqual([POST_TOOL_MATCHER]);
     }
   });
 

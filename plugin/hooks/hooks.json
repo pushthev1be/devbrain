@@ -27,7 +27,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "*",
+        "matcher": "^(?!(Read|Write|Edit|MultiEdit|NotebookEdit|NotebookRead|Glob|Grep|LS|TodoWrite|ExitPlanMode)$).*",
         "hooks": [
           {
             "type": "command",
@@ -40,7 +40,7 @@
     ],
     "PostToolUseFailure": [
       {
-        "matcher": "*",
+        "matcher": "^(?!(Read|Write|Edit|MultiEdit|NotebookEdit|NotebookRead|Glob|Grep|LS|TodoWrite|ExitPlanMode)$).*",
         "hooks": [
           {
             "type": "command",

@@ -55,18 +55,20 @@ Every registered project writes to one knowledge base — local by default, or a
 As a Claude Code plugin, which is the whole of it — the five triggers, the three tools and the dashboard:
 
 ```
-/plugin marketplace add pushthev1be/Devbrain-memory-Claudeplugin
+/plugin marketplace add pushthev1be/devbrain
 /plugin install devbrain@devbrain
 ```
 
-The plugin is published from its own repository, which holds the built bundles
+The marketplace here points at the repository the plugin is published from,
+[`pushthev1be/Devbrain-memory-Claudeplugin`](https://github.com/pushthev1be/Devbrain-memory-Claudeplugin),
+which also works as the first line. That repository holds the built bundles
 and nothing else — a plugin root carrying this repo's `package.json` makes Claude
 Code install Node dependencies, and on Windows that fails outright. This
 repository is the source: `npm run bundle` builds what goes there.
 
 There is no setup step. The plugin carries its own hooks, and the first session in a repo registers it with its detected stack. Memory lands in `~/.devbrain/db.json`, so nothing is provisioned and nothing leaves the machine.
 
-Two optional values, which Claude Code prompts for on enable and keeps in the platform's credential store rather than in `settings.json`: a **Gemini API key**, which adds search by meaning, and a **MongoDB connection string**, for sharing one memory across machines or a team. Both are safe to leave blank — without them, search matches on wording, which still finds an exact error.
+Two optional values, kept in the platform's credential store rather than in `settings.json`: a **MongoDB connection string**, for sharing one memory across machines or a team, and a **dashboard token**, only needed to reach the dashboard from another machine. Installing ends with "2 userConfig options not yet set"; leaving both blank is the normal setup. The plugin matches on wording and exact error text; search by meaning needs the CLI below with a Gemini key.
 
 ### Or the CLI
 

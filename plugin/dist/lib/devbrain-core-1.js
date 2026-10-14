@@ -751,9 +751,20 @@ function requireSearch () {
 		        const score = semantic * 0.45 + recency * 0.10 + sameProj * 0.10 + sameStack * 0.08 + usage * 0.05 + confidenceScore * 0.05 + categoryBoost * 0.07 + patternBoost * 0.05 + crossProjectBoost * 0.05;
 		        return { entry: e, project: e.project, score, semantic };
 		    });
+		    // Without an embedding a query used to filter nothing: every entry stayed
+		    // "relevant", only reordered, so the cross-project section below filled with
+		    // whatever had been seen in two projects. Two such entries came back first
+		    // for WebAssembly, saslprep, PRIVACY.md and rollup alike. The no-AI search
+		    // gate in preciseSearch applies here too: enough of the query's words in the
+		    // entry, or its title or error text overlapping the query.
+		    const lexicallyRelevant = (e) => keywordScore(queryText, e) >= exports.KEYWORD_THRESHOLD ||
+		        patternOverlap(queryText, e.title) * 0.6 >= 0.25 ||
+		        (!!e.errorPattern && patternOverlap(queryText, e.errorPattern) >= 0.25);
 		    const relevant = queryEmbedding
 		        ? scored.filter(r => !r.entry.embedding || r.semantic >= exports.SEMANTIC_THRESHOLD)
-		        : scored;
+		        : queryText?.trim()
+		            ? scored.filter(r => lexicallyRelevant(r.entry))
+		            : scored;
 		    relevant.sort((a, b) => b.score - a.score);
 		    function dedupe(list, limit) {
 		        const out = [];
@@ -2347,420 +2358,6 @@ function requireDedupe () {
 
 var indexSource = {};
 
-var transcript = {};
-
-var hasRequiredTranscript;
-
-function requireTranscript () {
-	if (hasRequiredTranscript) return transcript;
-	hasRequiredTranscript = 1;
-	// Reading a coding-agent session transcript as evidence.
-	//
-	// Commit capture sees a diff, and a diff records what changed but almost never
-	// why: not the error that started the work, not the approach that failed first,
-	// not the alternative that was rejected. That knowledge lives in the session —
-	// the user's request, the tool output that came back red, the edits that
-	// followed, and the agent's own explanation of the cause. The agent was asked
-	// to write it down (task_end, save_entry) and mostly did not.
-	//
-	// This module turns a Claude Code JSONL transcript into a compact digest of that
-	// evidence, so it can be extracted without anyone being asked. It is pure: no
-	// I/O, no model calls, so every rule here is unit-tested.
-	Object.defineProperty(transcript, "__esModule", { value: true });
-	transcript.isEchoedOutput = isEchoedOutput;
-	transcript.isReadOnlyCommand = isReadOnlyCommand;
-	transcript.errorExcerpt = errorExcerpt;
-	transcript.isGenericFailureLine = isGenericFailureLine;
-	transcript.looksLikeError = looksLikeError;
-	transcript.parseTranscript = parseTranscript;
-	transcript.assessSegment = assessSegment;
-	transcript.buildDigest = buildDigest;
-	transcript.chunkEvents = chunkEvents;
-	const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
-	const SHELL_TOOLS = new Set(['Bash', 'PowerShell']);
-	/** MCP tools through which an agent records knowledge, under any server prefix. */
-	const SAVE_TOOL = /(?:^|__)(save_entry|task_end|supersede_entry)$/;
-	const SAVE_COMMAND = /\bdevbrain\s+(?:note|recap)\b/;
-	// Lines that are an error by their shape, not because the word "error" appears
-	// somewhere in a grep result or a source file.
-	const ERROR_LINE = 
-	// Case-sensitive on purpose: "FAIL" from a test runner is a failure, a
-	// `fail:` key in printed source code is not.
-	/^\s*(?:[\w.]*(?:Error|Exception)\b|Traceback \(most recent call last\)|npm ERR!|[Ee]rror(?:\[\w+\])?:|[Ff]atal:|panic:|FAIL\b|✗|×|E\d{3,}\b|Exit code [1-9]|.*\berror TS\d+:)/;
-	// Commands that print files or search them. Their output is source code, which
-	// is full of the word Error; only the tool reporting failure counts for these.
-	const READ_COMMAND = /^\s*(?:cd\s+\S+\s*&&\s*)?(?:cat|sed\s+-n|head|tail|less|grep|rg|ls|find|git\s+(?:show|diff|log|grep|blame)|Get-Content|Select-String|type)\b/;
-	/**
-	 * DevBrain's own messages, which quote the error they are about.
-	 *
-	 * A step-back or a recall lands in the transcript carrying error text, so the
-	 * next parse reads it as a fresh failure and the warning becomes its own
-	 * evidence. Matched on the opening phrases rather than the word "DevBrain",
-	 * which an application is free to print for its own reasons.
-	 */
-	const SELF_VOICE = /DevBrain: (?:step back|this stretch of work|this failure matches)|# DevBrain backfill/;
-	/**
-	 * True when output is DevBrain quoting an error back, or a command printing an
-	 * error string it was handed.
-	 *
-	 * The second case is what test fixtures and demo scripts do: the literal error
-	 * appears in the command, so the command did not discover a failure, it echoed
-	 * one. Both are distinguishable from a real failure precisely because the text
-	 * was already there before the command ran.
-	 */
-	function isEchoedOutput(output, command) {
-	    if (SELF_VOICE.test(output))
-	        return true;
-	    if (!command)
-	        return false;
-	    const flat = (s) => s.toLowerCase().replace(/\s+/g, ' ');
-	    const line = flat(errorExcerpt(output).split('\n')[0]);
-	    // Short lines match too easily to be evidence of anything.
-	    return line.length >= 20 && flat(command).includes(line.slice(0, 60));
-	}
-	/**
-	 * True when a command only prints files or searches them.
-	 *
-	 * Their output is source code, which is full of the word Error, so error
-	 * detection on it produces false failures. Only the tool reporting a non-zero
-	 * exit counts for these.
-	 */
-	function isReadOnlyCommand(command) {
-	    return READ_COMMAND.test(command);
-	}
-	// Wrappers the IDE and harness put into user turns. They are context for the
-	// agent, not something the user asked.
-	const NOISE_TAGS = /<(system-reminder|ide_opened_file|ide_selection|ide_diagnostics|command-message|command-name|command-args|local-command-stdout|local-command-stderr|pasted_content)[^>]*>[\s\S]*?<\/\1>/g;
-	function cleanPrompt(text) {
-	    return text.replace(NOISE_TAGS, ' ').replace(/\s+/g, ' ').trim();
-	}
-	function resultText(content) {
-	    if (typeof content === 'string')
-	        return content;
-	    if (Array.isArray(content)) {
-	        return content
-	            .map(b => (b && typeof b === 'object' && b.type === 'text' ? String(b.text ?? '') : ''))
-	            .filter(Boolean)
-	            .join('\n');
-	    }
-	    return '';
-	}
-	/**
-	 * The error-bearing part of a tool result: the lines that look like an error,
-	 * each with the line after it (usually the location or the real message). Kept
-	 * verbatim, because a literal error string is what lets a future search match.
-	 */
-	function errorExcerpt(output, max = 600) {
-	    const lines = output.split(/\r?\n/);
-	    const keep = [];
-	    for (let i = 0; i < lines.length && keep.join('\n').length < max; i++) {
-	        // A generic line is never the best text available: it announces the failure
-	        // without describing it, so it is skipped even though it looks like an error.
-	        if (!ERROR_LINE.test(lines[i]) || isGenericFailureLine(lines[i]))
-	            continue;
-	        keep.push(lines[i].trimEnd());
-	        if (lines[i + 1]?.trim()) {
-	            keep.push(lines[i + 1].trimEnd());
-	            i++;
-	        }
-	    }
-	    const informative = lines.filter(l => l.trim() && !isGenericFailureLine(l)).slice(-6);
-	    // Last resort: a command that failed and said nothing else. "Exit code 1" is
-	    // then all there is, and an empty excerpt would be worse — it would make
-	    // every silent failure identical to every other kind.
-	    const anything = lines.filter(l => l.trim()).slice(-3);
-	    const text = (keep.length ? keep : informative.length ? informative : anything).join('\n').trim();
-	    return text.length > max ? text.slice(0, max) : text;
-	}
-	/**
-	 * A line that announces a failure without describing it.
-	 *
-	 * "Exit code 1" is equally true of every failed command. Chosen as the failure
-	 * text it discards the only part worth matching on — which is exactly what
-	 * happened: a command failed with "No Gemini credentials", an entry stored that
-	 * very pattern, and the recall matched nothing because it searched for
-	 * "Exit code 1". It also makes unrelated failures fingerprint identically, so
-	 * the loop detector sees a repeat that never happened.
-	 */
-	const GENERIC_FAILURE = /^\s*(?:exit (?:code|status) \d+|command failed(?: with exit code \d+)?[.:]?|traceback \(most recent call last\):|build failed|tests? failed|error[.:]?|FAIL|✗|×)\s*$/i;
-	/**
-	 * A row of a printed table, which is output ABOUT failures rather than one.
-	 *
-	 * A benchmark that tests error handling prints rows like
-	 * `npm ERR! ERESOLVE unable to resolve dependen | ok | ok` — a deliberately
-	 * unrelated fixture beside its pass/fail columns. That is error-shaped text
-	 * quoted as data, and offering it verbatim as an error_pattern stores a pattern
-	 * that matches the benchmark's own output, so every later run of it reads as the
-	 * same failure recurring.
-	 *
-	 * Two separators is the test. A real message rarely carries two, and the lines
-	 * that do — an echoed shell pipeline, a table — are not the error either.
-	 */
-	const TABLE_ROW = / \| .* \| /;
-	function isGenericFailureLine(line) {
-	    return GENERIC_FAILURE.test(line) || TABLE_ROW.test(line);
-	}
-	/** True when a tool result reports a failure. */
-	function looksLikeError(output, isError) {
-	    if (isError)
-	        return true;
-	    return output.split(/\r?\n/).slice(0, 400).some(l => ERROR_LINE.test(l));
-	}
-	/**
-	 * Parse a transcript from line `fromLine` onward.
-	 *
-	 * Subagent (sidechain) turns are skipped: their final answer comes back to the
-	 * main agent as a tool result anyway, and their exploration is noise here.
-	 */
-	function parseTranscript(jsonl, fromLine = 0) {
-	    const lines = jsonl.split('\n');
-	    // A trailing newline leaves an empty last element; a transcript still being
-	    // written may end mid-line. Either way the last element is not a complete
-	    // record yet, so it is not consumed — the next read starts there.
-	    const complete = lines.length - 1;
-	    const events = [];
-	    const toolNames = new Map();
-	    let sessionId;
-	    let cwd;
-	    for (let i = Math.max(0, fromLine); i < complete; i++) {
-	        const raw = lines[i].trim();
-	        if (!raw)
-	            continue;
-	        let ev;
-	        try {
-	            ev = JSON.parse(raw);
-	        }
-	        catch {
-	            continue;
-	        }
-	        if (ev.isSidechain)
-	            continue;
-	        if (typeof ev.sessionId === 'string')
-	            sessionId = ev.sessionId;
-	        if (typeof ev.cwd === 'string')
-	            cwd = ev.cwd;
-	        const message = ev.message;
-	        const content = message?.content;
-	        if (ev.type === 'user') {
-	            if (typeof content === 'string') {
-	                const text = cleanPrompt(content);
-	                if (text && !text.startsWith('[Request interrupted'))
-	                    events.push({ kind: 'prompt', text, line: i });
-	                continue;
-	            }
-	            if (!Array.isArray(content))
-	                continue;
-	            for (const block of content) {
-	                if (block?.type === 'text') {
-	                    const text = cleanPrompt(String(block.text ?? ''));
-	                    if (text && !text.startsWith('[Request interrupted'))
-	                        events.push({ kind: 'prompt', text, line: i });
-	                }
-	                else if (block?.type === 'tool_result') {
-	                    const out = resultText(block.content);
-	                    const tool = toolNames.get(String(block.tool_use_id ?? ''));
-	                    // Only shell output carries errors worth keeping. A Read of a file that
-	                    // happens to contain "Error:" is not a failure.
-	                    const fromShell = !tool || SHELL_TOOLS.has(tool.name);
-	                    const failed = block.is_error === true;
-	                    const reading = !!tool?.command && READ_COMMAND.test(tool.command);
-	                    if (fromShell && (reading ? failed : looksLikeError(out, failed))
-	                        && !isEchoedOutput(out, tool?.command)) {
-	                        events.push({
-	                            kind: 'error', text: errorExcerpt(out), line: i,
-	                            ...(tool?.command ? { via: tool.command.slice(0, 120) } : {}),
-	                        });
-	                    }
-	                }
-	            }
-	            continue;
-	        }
-	        if (ev.type === 'assistant' && Array.isArray(content)) {
-	            for (const block of content) {
-	                if (block?.type === 'text') {
-	                    const text = String(block.text ?? '').trim();
-	                    if (text)
-	                        events.push({ kind: 'say', text, line: i });
-	                }
-	                else if (block?.type === 'tool_use') {
-	                    const name = String(block.name ?? '');
-	                    const input = (block.input ?? {});
-	                    const id = String(block.id ?? '');
-	                    if (SAVE_TOOL.test(name)) {
-	                        events.push({ kind: 'save', text: String(input.title ?? input.summary ?? input.reason ?? name).slice(0, 200), line: i });
-	                        toolNames.set(id, { name });
-	                    }
-	                    else if (EDIT_TOOLS.has(name)) {
-	                        const file = String(input.file_path ?? input.notebook_path ?? '');
-	                        if (file)
-	                            events.push({ kind: 'edit', text: file, line: i });
-	                        toolNames.set(id, { name });
-	                    }
-	                    else if (SHELL_TOOLS.has(name)) {
-	                        const command = String(input.command ?? '').replace(/\s+/g, ' ').trim();
-	                        if (command)
-	                            events.push({ kind: SAVE_COMMAND.test(command) ? 'save' : 'command', text: command.slice(0, 200), line: i });
-	                        toolNames.set(id, { name, command });
-	                    }
-	                    else {
-	                        toolNames.set(id, { name });
-	                    }
-	                }
-	            }
-	        }
-	    }
-	    return { events, endLine: complete, sessionId, cwd };
-	}
-	/**
-	 * Might this stretch have established something? Deliberately loose.
-	 *
-	 * "because" is in here and is a catch-all: measured over 52 chunks of real
-	 * transcript it is present in 81% of them. That is right for "worth a second
-	 * look" and far too loose to carry a short stretch on its own — see
-	 * STRONG_DECISION_CUE.
-	 */
-	const DECISION_CUE = /\b(instead of|rather than|decided|chose|trade-?off|root cause|the cause|turns out|because)\b/i;
-	/**
-	 * A phrase in which a choice is actually stated, rather than merely explained.
-	 *
-	 * Required instead of DECISION_CUE when there is little prose. A two-line
-	 * message containing "because" is not a decision; one saying "we went with X
-	 * rather than Y" is. Measured: swapping this in below SHORT_PROSE changed the
-	 * rate not at all at chunk scale (42/52 either way), because real 14k chunks
-	 * always carry plenty of prose — it exists for the short stretches the Stop hook
-	 * actually sees between asks, which that measurement cannot reach.
-	 */
-	const STRONG_DECISION_CUE = /\b(instead of|rather than|decided|we chose|chose to|chose the|opted for|opted to|went with|going with|settled on|ruled out|rejected|trade-?off|in favour of|in favor of|on purpose|deliberately)\b/i;
-	/**
-	 * How much prose a stretch needs before a stated choice counts.
-	 *
-	 * These were 800 and 2500, which meant a decision stated in one clear sentence
-	 * was invisible while a rambling one was caught — backwards, since a crisply
-	 * stated decision is easier to record and no less worth keeping. Asked for
-	 * explicitly, and measured first: at chunk scale, dropping them to zero moved
-	 * the nudge rate only from 71% to 77%, because a 14k chunk nearly always clears
-	 * any prose bar. The bar binds on the short segments the hook sees between
-	 * asks, which is exactly the case this change is for.
-	 *
-	 * Below SHORT_PROSE the stronger cue is required, so lowering the bar does not
-	 * turn "because" in a two-line message into a nudge.
-	 */
-	//
-	// Set from the sentences they have to admit, not from a round number. "We chose
-	// Postgres instead of Mongo for the ledger." is 50 characters; at 200 it was
-	// still invisible, which was the whole complaint. Below SHORT_PROSE the strong
-	// cue is what provides precision, so the length here only has to be long enough
-	// to be a sentence.
-	const DECISION_PROSE_MIN = 40; // a stretch that also changed code
-	// Higher, because with no edits and no errors nothing but the prose is evidence
-	// that anything happened at all.
-	const DISCUSSION_PROSE_MIN = 120; // a design call with no edits at all
-	const SHORT_PROSE = 800; // the old bar; beneath it, demand the strong cue
-	/**
-	 * Cheap gate before any model call. Most turns are reading, answering and
-	 * small edits; spending an extraction on each would cost money and produce the
-	 * noise this system exists to avoid.
-	 */
-	function assessSegment(events) {
-	    let edits = 0, errors = 0, lastEdit = -1, lastError = -1, said = 0;
-	    let cue = false;
-	    let strongCue = false;
-	    events.forEach((e, i) => {
-	        if (e.kind === 'edit') {
-	            edits++;
-	            lastEdit = i;
-	        }
-	        if (e.kind === 'error') {
-	            errors++;
-	            lastError = i;
-	        }
-	        if (e.kind === 'say') {
-	            said += e.text.length;
-	            if (DECISION_CUE.test(e.text))
-	                cue = true;
-	            if (STRONG_DECISION_CUE.test(e.text))
-	                strongCue = true;
-	        }
-	    });
-	    // Little was said, so the phrasing has to carry more weight.
-	    const stated = said < SHORT_PROSE ? strongCue : cue;
-	    const debugged = errors > 0 && edits > 0;
-	    // `edits >= 1`, not 2. At 2 a stretch that changed one file and broke nothing
-	    // cleared neither this nor `discussion`, so a one-file decision could never be
-	    // asked about at any prose length — 2 of 52 real chunks sat in that hole, both
-	    // carrying a cue. Not a threshold, a gap between two branches.
-	    const substantialWork = edits >= 1 && said >= DECISION_PROSE_MIN && stated;
-	    const discussion = edits === 0 && said >= DISCUSSION_PROSE_MIN && stated;
-	    return {
-	        worth: debugged || substantialWork || discussion,
-	        unresolved: lastError > lastEdit,
-	        edits,
-	        errors,
-	    };
-	}
-	const LABEL = {
-	    prompt: 'USER', say: 'AGENT', edit: 'EDITED', command: 'RAN', error: 'ERROR', save: 'SAVED',
-	};
-	const CAP = { prompt: 600, say: 900, edit: 200, command: 200, error: 700, save: 200 };
-	function line(e) {
-	    const t = e.text.length > CAP[e.kind] ? `${e.text.slice(0, CAP[e.kind])}…` : e.text;
-	    return `${LABEL[e.kind]}${e.via ? ` [${e.via}]` : ''}: ${t}`;
-	}
-	/**
-	 * Render events as a digest under `budget` characters.
-	 *
-	 * When it does not fit, the agent's prose goes first, oldest first — errors,
-	 * the user's words, and what was edited are the evidence and are kept longest.
-	 * The agent's last few messages are also kept: they usually state the cause.
-	 */
-	function buildDigest(events, budget = 14000) {
-	    const rendered = events.map(e => ({ e, text: line(e), keep: true }));
-	    const size = () => rendered.reduce((n, r) => n + (r.keep ? r.text.length + 1 : 0), 0);
-	    const lastSays = new Set(rendered.map((r, i) => (r.e.kind === 'say' ? i : -1)).filter(i => i >= 0).slice(-3));
-	    for (const kind of ['say', 'command', 'edit', 'prompt']) {
-	        for (let i = 0; i < rendered.length && size() > budget; i++) {
-	            if (rendered[i].e.kind === kind && !(kind === 'say' && lastSays.has(i)))
-	                rendered[i].keep = false;
-	        }
-	    }
-	    // Collapse runs of the same file edited repeatedly into one line.
-	    const out = [];
-	    for (const r of rendered) {
-	        if (!r.keep)
-	            continue;
-	        if (out.length && out[out.length - 1] === r.text && r.e.kind !== 'say')
-	            continue;
-	        out.push(r.text);
-	    }
-	    const text = out.join('\n');
-	    return text.length > budget ? text.slice(text.length - budget) : text;
-	}
-	/**
-	 * Split a long session into chunks that each fit the budget, cutting only where
-	 * the user spoke, so a problem and its fix are not separated mid-thought.
-	 */
-	function chunkEvents(events, budget = 14000) {
-	    const chunks = [];
-	    let current = [];
-	    let size = 0;
-	    for (const e of events) {
-	        const len = line(e).length + 1;
-	        if (e.kind === 'prompt' && current.length && size + len > budget) {
-	            chunks.push(current);
-	            current = [];
-	            size = 0;
-	        }
-	        current.push(e);
-	        size += len;
-	    }
-	    if (current.length)
-	        chunks.push(current);
-	    return chunks;
-	}
-	
-	return transcript;
-}
-
 var hasRequiredIndexSource;
 
 function requireIndexSource () {
@@ -2787,7 +2384,7 @@ function requireIndexSource () {
 	indexSource.extractErrorPattern = extractErrorPattern;
 	indexSource.entryForSection = entryForSection;
 	const crypto_1 = crypto;
-	const transcript_1 = requireTranscript();
+	const transcript_1 = devbrainCore2.requireTranscript();
 	function slug(text) {
 	    return text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60);
 	}
@@ -3060,7 +2657,7 @@ function requireAgentHooks () {
 		//
 		// This file only edits the settings object; the CLI does the file I/O.
 		Object.defineProperty(exports, "__esModule", { value: true });
-		exports.HOOK_EVENTS = exports.AGENT_LOADED_SOURCE_FILES = void 0;
+		exports.POST_TOOL_MATCHER = exports.FILE_TOOLS = exports.HOOK_EVENTS = exports.AGENT_LOADED_SOURCE_FILES = void 0;
 		exports.isAlreadyInAgentContext = isAlreadyInAgentContext;
 		exports.briefingEntries = briefingEntries;
 		exports.isFileTool = isFileTool;
@@ -3127,7 +2724,6 @@ function requireAgentHooks () {
 		 * The cost of widening is false positives from tools whose output is source
 		 * code rather than a result, and those are excluded by name in isFileTool.
 		 */
-		const POST_TOOL_MATCHERS = ['*'];
 		/**
 		 * Tools whose output is file content, not a result.
 		 *
@@ -3135,12 +2731,25 @@ function requireAgentHooks () {
 		 * them. For shell commands the equivalent guard is isReadOnlyCommand; this is
 		 * the same rule for tools that take no command at all.
 		 */
-		const FILE_TOOLS = new Set([
+		exports.FILE_TOOLS = new Set([
 		    'Read', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'NotebookRead',
 		    'Glob', 'Grep', 'LS', 'TodoWrite', 'ExitPlanMode',
 		]);
+		/**
+		 * Every tool except the file tools, as a Claude Code matcher.
+		 *
+		 * It was '*', with the file tools dropped inside the hook. That was correct but
+		 * not free: each Read, Edit and Grep still started node and loaded the bundle,
+		 * about 200 ms apiece, to decide to do nothing. Measured over a real session,
+		 * file tools are most of the calls. Excluding them here means Claude Code never
+		 * starts the process. Matchers are regular expressions; checked in Claude Code
+		 * 2.1.299 that this one skips Read and Glob and still fires for Bash. The hook
+		 * keeps its own isFileTool check for settings written before this changed.
+		 */
+		exports.POST_TOOL_MATCHER = `^(?!(${[...exports.FILE_TOOLS].join('|')})$).*`;
+		const POST_TOOL_MATCHERS = [exports.POST_TOOL_MATCHER];
 		function isFileTool(name) {
-		    return FILE_TOOLS.has(name);
+		    return exports.FILE_TOOLS.has(name);
 		}
 		/** The CLI argument for a hook event, e.g. `devbrain hook stop`. */
 		function hookArg(event) {
@@ -3610,7 +3219,7 @@ function requireBackfill () {
 		exports.commitExcerpt = commitExcerpt;
 		exports.nextSessionChunk = nextSessionChunk;
 		exports.formatBackfillBatch = formatBackfillBatch;
-		const transcript_1 = requireTranscript();
+		const transcript_1 = devbrainCore2.requireTranscript();
 		const turnReview_1 = devbrainCore2.requireTurnReview();
 		/** Characters of diff shown per commit; the agent can `git show` for the rest. */
 		const COMMIT_DIFF_BUDGET = 1800;
@@ -3712,7 +3321,7 @@ function requireRecall () {
 		//
 		// Pure: failure text and entries in, results and a message out.
 		Object.defineProperty(exports, "__esModule", { value: true });
-		exports.VOLUNTEER_TOP_K = exports.VOLUNTEER_MIN_SEMANTIC = exports.VOLUNTEER_MIN_PATTERN = void 0;
+		exports.VOLUNTEER_TOP_K = exports.VOLUNTEER_MIN_RARE_WORDS = exports.VOLUNTEER_MIN_TITLE = exports.VOLUNTEER_MIN_WORDS_WITH_TITLE = exports.VOLUNTEER_MIN_WORDS = exports.VOLUNTEER_MIN_SEMANTIC = exports.VOLUNTEER_MIN_PATTERN = void 0;
 		exports.isWorthLookingUp = isWorthLookingUp;
 		exports.recallForFailure = recallForFailure;
 		exports.formatRecallForAgent = formatRecallForAgent;
@@ -3740,6 +3349,31 @@ function requireRecall () {
 		 * with no precision to gain in return.
 		 */
 		exports.VOLUNTEER_MIN_SEMANTIC = 0.62;
+		/**
+		 * The wording route, for a request typed by a person when there is no
+		 * embedding — the plugin build, which leaves the model out.
+		 *
+		 * Without it a prompt could only match on literal error text, so "the express
+		 * server crashes on boot saying the port is already in use" found nothing while
+		 * the entry titled with nearly those words sat in the store. An entry passes
+		 * when most of the request's words are in it, or when fewer are but its title
+		 * says much the same thing and the rarer words agree (BM25).
+		 *
+		 * Measured against 105 entries built from this repository's own history: 18
+		 * requests that each describe one entry in other words, and 20 everyday
+		 * requests about nothing stored. Literal matching alone found 1 of the 18. This
+		 * found 12 and fired on none of the 20. Checked afterwards, untuned, on 10 more
+		 * of each kind and 12 more unrelated: found 8, fired on none. The thresholds
+		 * that found 13-17 each fired on at least one unrelated request, and for a hint
+		 * nobody asked for that is the worse error.
+		 *
+		 * Off for command output. A stack trace is long enough to contain half of any
+		 * title by accident; failures keep to the literal route.
+		 */
+		exports.VOLUNTEER_MIN_WORDS = 0.6;
+		exports.VOLUNTEER_MIN_WORDS_WITH_TITLE = 0.4;
+		exports.VOLUNTEER_MIN_TITLE = 0.5;
+		exports.VOLUNTEER_MIN_RARE_WORDS = 0.2;
 		/** Most entries to volunteer at once. Two is a hint; five is an interruption. */
 		exports.VOLUNTEER_TOP_K = 2;
 		/**
@@ -3793,16 +3427,29 @@ function requireRecall () {
 		 * still outranks a merely similar one.
 		 */
 		function recallForFailure(failure, all, opts = {}) {
-		    const { projectId, exclude = [], topK = exports.VOLUNTEER_TOP_K, minPattern = exports.VOLUNTEER_MIN_PATTERN, embedding = [], minSemantic = exports.VOLUNTEER_MIN_SEMANTIC, } = opts;
+		    const { projectId, exclude = [], topK = exports.VOLUNTEER_TOP_K, minPattern = exports.VOLUNTEER_MIN_PATTERN, embedding = [], minSemantic = exports.VOLUNTEER_MIN_SEMANTIC, byWording = false, } = opts;
 		    if (!failure.trim())
 		        return [];
 		    const skip = new Set(exclude);
 		    const candidates = all.filter(e => !skip.has(e.id) && !e.supersededBy);
 		    // With no embedding preciseSearch scores literal overlap only, which is what
 		    // an exact error string wants anyway — and is all there is to go on offline.
+		    const wordingMatches = (r) => {
+		        if (!byWording || embedding.length > 0)
+		            return false;
+		        // Some of the rarer words must agree on either branch: a request made only
+		        // of common words can contain most of a title without being about it.
+		        if (r.lexical < exports.VOLUNTEER_MIN_RARE_WORDS / 2)
+		            return false;
+		        const words = (0, search_1.keywordScore)(failure, r.entry);
+		        return words >= exports.VOLUNTEER_MIN_WORDS ||
+		            (words >= exports.VOLUNTEER_MIN_WORDS_WITH_TITLE && r.titleScore >= exports.VOLUNTEER_MIN_TITLE &&
+		                r.lexical >= exports.VOLUNTEER_MIN_RARE_WORDS);
+		    };
 		    return (0, search_1.preciseSearch)(failure, embedding, candidates, { projectId, topK: topK * 4 })
 		        .filter(r => (r.matchType === 'pattern' && r.patternScore >= minPattern) ||
-		        (embedding.length > 0 && r.similarity >= minSemantic))
+		        (embedding.length > 0 && r.similarity >= minSemantic) ||
+		        wordingMatches(r))
 		        .slice(0, topK);
 		}
 		/**
@@ -4262,7 +3909,7 @@ function requireDist () {
 		__exportStar(requireDossier(), exports);
 		__exportStar(requireDedupe(), exports);
 		__exportStar(requireIndexSource(), exports);
-		__exportStar(requireTranscript(), exports);
+		__exportStar(devbrainCore2.requireTranscript(), exports);
 		__exportStar(requireAgentHooks(), exports);
 		__exportStar(devbrainCore2.requireTurnReview(), exports);
 		__exportStar(requireSessionCursor(), exports);
@@ -4280,4 +3927,3 @@ function requireDist () {
 
 exports.requireDist = requireDist;
 exports.requireStuck = requireStuck;
-exports.requireTranscript = requireTranscript;

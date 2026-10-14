@@ -71,6 +71,49 @@ describe('recallForFailure', () => {
   });
 });
 
+// The plugin build has no embeddings, so a request described in plain words
+// matched nothing unless it quoted the error text. Reported from a real run:
+// the entry was found only once the prompt carried EADDRINUSE verbatim.
+describe('recallForFailure byWording', () => {
+  const portEntry = entry({
+    // Worded unlike the request, so the literal title route cannot find it.
+    id: 'port', title: 'Dev server will not start: port taken by a stale process',
+    content: 'Express crashes on boot when the port is already in use. A stale dev server kept 3000 bound; kill it, or read PORT from the environment.',
+    errorPattern: 'Error: listen EADDRINUSE: address already in use :::3000',
+  });
+  const store = [
+    portEntry,
+    entry({ id: 'sidebar', title: 'Sidebar stretches to full height on wide screens', content: 'align-self: start on the aside.', errorPattern: undefined, tags: ['css'] }),
+    entry({ id: 'jwt', title: 'Login fails after deploy because JWT secret differs', content: 'Each instance generated its own secret.', errorPattern: undefined, tags: ['auth'] }),
+  ];
+  const PROMPT = 'the express server crashes on boot saying the port is already in use';
+
+  it('finds an entry a request describes in other words', () => {
+    const hits = recallForFailure(PROMPT, store, { projectId: 'p1', byWording: true });
+    expect(hits.map(h => h.entry.id)).toEqual(['port']);
+  });
+
+  it('stays off unless asked for, so command output keeps to literal matching', () => {
+    expect(recallForFailure(PROMPT, store, { projectId: 'p1' })).toEqual([]);
+  });
+
+  it('stays quiet on a request about something never stored', () => {
+    for (const prompt of [
+      'add a dark mode toggle to the settings page',
+      'write unit tests for the payment service',
+      'help me write a commit message for these changes',
+      'the build fails on CI but passes locally',
+    ]) {
+      expect(recallForFailure(prompt, store, { projectId: 'p1', byWording: true }), prompt).toEqual([]);
+    }
+  });
+
+  it('leaves wording to the embedding when there is one', () => {
+    const hits = recallForFailure(PROMPT, [portEntry], { projectId: 'p1', byWording: true, embedding: [1, 0, 0] });
+    expect(hits).toEqual([]);
+  });
+});
+
 describe('formatRecallForAgent', () => {
   it('gives the fix, the id to correct it with, and its standing', () => {
     const hits = recallForFailure(FAILURE, [entry()], { projectId: 'p1' });
