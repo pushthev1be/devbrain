@@ -374,6 +374,11 @@ const { output } = await bundle.write({
   dir: outDir,
   entryFileNames: '[name].js',
   chunkFileNames: 'lib/[name].js',
+  // Off, so an entry requires only what it uses. On, Rollup hoisted every
+  // chunk's own dependencies into cli.js as bare requires -- the Mongo driver's
+  // `http` among them -- and the directory's scan read that as cli.js able to
+  // send data off the machine. Each chunk still requires what it needs.
+  hoistTransitiveImports: false,
   banner: chunk => (chunk.isEntry ? '#!/usr/bin/env node' : ''),
   manualChunks: id => plan.get(id),
 });

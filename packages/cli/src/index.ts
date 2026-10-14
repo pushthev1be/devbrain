@@ -102,12 +102,14 @@ function typeCode(type: string): string {
   }
 }
 
+// The target goes to the opener as one argument, never into a shell string: it
+// can be an entry's own content, and a quote in it would have ended the string.
 function openPath(target: string): void {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { exec } = require('child_process') as typeof import('child_process');
-  if (process.platform === 'win32') exec(`start "" "${target}"`);
-  else if (process.platform === 'darwin') exec(`open "${target}"`);
-  else exec(`xdg-open "${target}"`);
+  const { execFile } = require('child_process') as typeof import('child_process');
+  const opener = process.platform === 'win32' ? 'explorer'
+    : process.platform === 'darwin' ? 'open' : 'xdg-open';
+  execFile(opener, [target], () => {});
 }
 function typeDot(type: string): string { return `${typeCode(type)}●${RESET}`; }
 
