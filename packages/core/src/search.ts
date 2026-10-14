@@ -1,5 +1,5 @@
 import type { Entry, EntryCategory, Project, SearchResult, ContextEntry, DevBrainContext } from './types';
-import { synthesizeSection } from './gemini';
+import { synthesizeSection } from './backend';
 
 function cosineSimilarity(a: number[], b: number[]): number {
   if (a.length !== b.length || a.length === 0) return 0;

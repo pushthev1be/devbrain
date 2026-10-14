@@ -5,7 +5,8 @@
   "types": "./dist/index.d.ts",
   "scripts": {
     "build": "tsc",
-    "dev": "tsc --watch"
+    "dev": "tsc --watch",
+    "test": "ts-node tests/provider-selection.ts"
   },
   "dependencies": {
     "@google/genai": "^1.52.0",
