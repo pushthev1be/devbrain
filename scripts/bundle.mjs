@@ -1,12 +1,13 @@
 /**
- * Bundle the CLI and the MCP server into one file each, for the plugin.
+ * Bundle the CLI and the MCP server for the plugin: one entry file each, plus
+ * the chunks under `lib/` that they share, every file under 256 KiB.
  *
  *   npm run bundle
  *
  * Installing a Claude Code plugin copies the plugin root and runs neither `npm
  * install` nor `tsc`, so whatever the hooks and `plugin.json` point at has to be
- * runnable as it stands in git. These two files are therefore committed, which
- * is why `.gitignore` un-ignores exactly them and nothing else under
+ * runnable as it stands in git. These files are therefore committed, which is
+ * why `.gitignore` un-ignores exactly them and nothing else under
  * `plugin/dist/`.
  *
  * They go to `plugin/dist/`, not `dist/`, because the plugin root cannot be the
@@ -22,10 +23,16 @@
  * generated icons and logo follow.
  */
 
-import { build } from 'esbuild';
-import { mkdirSync, statSync, writeFileSync } from 'fs';
+import { transform } from 'esbuild';
+import { rollup } from 'rollup';
+import commonjs from '@rollup/plugin-commonjs';
+import { nodeResolve } from '@rollup/plugin-node-resolve';
+import json from '@rollup/plugin-json';
+import replace from '@rollup/plugin-replace';
+import { builtinModules } from 'module';
+import { mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs';
 import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
+import { dirname, join, relative, sep } from 'path';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -114,6 +121,11 @@ const OMITTED_FROM_PLUGIN = [
   // Embeddings, archetypes and context synthesis. Reached only through a
   // runtime require inside loadGenAI(), so no static import refers to it.
   { filter: '^@google/genai($|/)', why: 'Gemini' },
+  // The interactive terminal UI -- onboarding wizard and REPL. Required lazily
+  // and only on a TTY, which no hook or command reaches. With rxjs it was most
+  // of what made cli.js larger than mcp.js, and the directory's scan held
+  // cli.js as a file it could not inspect while passing the smaller mcp.js.
+  { filter: '^inquirer(-autocomplete-prompt)?$', why: 'the interactive terminal UI' },
 ];
 
 /**
@@ -129,63 +141,241 @@ const OMITTED_FROM_PLUGIN = [
  */
 const stubOmitted = {
   name: 'stub-omitted',
-  setup(build) {
-    for (const { filter, why } of OMITTED_FROM_PLUGIN) {
-      // A character class instead of an escape: a backslash in a generated
-      // string is one more thing to get wrong.
-      build.onResolve({ filter: new RegExp(filter) }, args => ({
-        path: args.path, namespace: 'omitted', pluginData: { why },
-      }));
-    }
-    build.onLoad({ filter: /.*/, namespace: 'omitted' }, args => ({
-      contents: `throw new Error(${JSON.stringify(
-        `DevBrain was built without ${args.pluginData.why}, so the plugin stays under ` +
-        `the 5 MiB per-file limit Anthropic's plugin directory enforces. Matching on ` +
-        `wording and on exact error text still works. Install the devbrain CLI for ` +
-        `the full build.`,
-      )});`,
-      loader: 'js',
-    }));
+  resolveId(source) {
+    const hit = OMITTED_FROM_PLUGIN.find(({ filter }) => new RegExp(filter).test(source));
+    // A plain path, not a \0 virtual id: the commonjs plugin skips those, and
+    // its wrapping is what keeps the stub from running at load (see below).
+    return hit ? join(root, 'omitted', `${hit.why.replace(/\W+/g, '-')}.cjs`) : null;
+  },
+  load(id) {
+    const hit = OMITTED_FROM_PLUGIN.find(({ why }) =>
+      id === join(root, 'omitted', `${why.replace(/\W+/g, '-')}.cjs`));
+    if (!hit) return null;
+    const why = hit.why;
+    // CommonJS, so the commonjs plugin defers it to the require() that asks for
+    // it -- every omitted module is required lazily. As an ES module Rollup
+    // would hoist it and it would throw while the bundle is still loading.
+    return `module.exports = {};\nthrow new Error(${JSON.stringify(
+      `DevBrain was built without ${why}, so the plugin stays inside the file ` +
+      `limits Anthropic's plugin directory enforces. Matching on wording and on ` +
+      `exact error text still works. Install the devbrain CLI for the full build.`,
+    )});`;
   },
 };
 
-const targets = [
-  { name: 'cli', entry: 'packages/cli/src/index.ts' },
-  { name: 'mcp', entry: 'packages/mcp/src/index.ts' },
-];
+/**
+ * Keep every byte of the bundle readable source.
+ *
+ * The plugin directory's security scan holds any file it cannot read -- a
+ * native binary, WebAssembly, a packed payload -- for manual review, and the
+ * Mongo driver brings in two:
+ *
+ *   bson               a 64-bit multiply/divide helper as an inline WebAssembly
+ *                      module. bson wraps it in a try/catch and falls back to
+ *                      its own JavaScript Long arithmetic, so it goes to
+ *                      `undefined` and that fallback runs instead.
+ *   @mongodb-js/saslprep  its Unicode tables as gzipped base64. The package
+ *                      ships the same tables as plain Sets in code-points-src,
+ *                      so its entry point is rebuilt on those.
+ *
+ * Each replacement fails the build when its pattern is no longer found, so an
+ * upgrade that moves the payload cannot slip one back in unnoticed -- and
+ * assertReadable() below checks the output either way.
+ */
+const readableOnly = {
+  name: 'readable-only',
+  load(id) {
+    if (/[\\/]bson[\\/]lib[\\/]bson\.cjs$/.test(id)) {
+      const source = readFileSync(id, 'utf8');
+      const wasm = /new WebAssembly\.Instance\(new WebAssembly\.Module\(new Uint8Array\(\[[\d,\s]+\]\)\),\s*\{\}\)\.exports/;
+      if (!wasm.test(source)) throw new Error(`bson's inline WebAssembly not found in ${id}`);
+      return source.replace(wasm, 'undefined');
+    }
+    if (/[\\/]@mongodb-js[\\/]saslprep[\\/]dist[\\/]node\.js$/.test(id)) {
+      if (!readFileSync(id, 'utf8').includes('./code-points-data')) {
+        throw new Error(`saslprep's entry point changed: ${id}`);
+      }
+      return `
+        const prep = require('./index').default;
+        const src = require('./code-points-src');
+        // index.js asks each table .get(codePoint); the Sets answer .has().
+        const codePoints = {};
+        for (const key of Object.keys(src)) {
+          if (src[key] instanceof Set) codePoints[key] = { get: c => src[key].has(c) };
+        }
+        function saslprep(input, opts) { return prep(codePoints, input, opts); }
+        saslprep.saslprep = saslprep;
+        saslprep.default = saslprep;
+        module.exports = saslprep;
+      `;
+    }
+    return null;
+  },
+};
+
+/** TypeScript to JavaScript, one file at a time; type checking is tsc's job. */
+const typescript = {
+  name: 'typescript',
+  async transform(code, id) {
+    if (!id.endsWith('.ts')) return null;
+    // The shebang is put back on each entry by `banner` below. Left in, it
+    // would sit wherever Rollup places the module, and anywhere but line one
+    // node reads it as code.
+    const result = await transform(code.replace(/^#!.*\r?\n/, ''), {
+      loader: 'ts', format: 'esm', target: 'node20', sourcefile: id,
+    });
+    return { code: result.code, map: null };
+  },
+};
+
+/**
+ * The plugin directory holds any file over 256 KiB that is not an image or a
+ * font as one it "couldn't inspect", and it checks bundled code like any other
+ * file. One bundle per entry was 1.8 and 2.5 MB, so the code is split into
+ * chunks below that, each still plain readable source.
+ *
+ * Modules are grouped by package, so a chunk's name says what is in it, and a
+ * package too big for one chunk is cut in module order. Sizes come from a first
+ * pass that writes nothing and renders every module on its own, so they are
+ * what each module really adds after tree-shaking. Chunk boilerplate adds a
+ * little on top, so the budget sits under the limit, and every written file is
+ * checked against the real one.
+ */
+const FILE_LIMIT = 256 * 1024;
+const CHUNK_BUDGET = 200 * 1024;
+
+function packageOf(id) {
+  const path = relative(root, id).split(sep).join('/');
+  const nm = path.lastIndexOf('node_modules/');
+  if (nm !== -1) {
+    const [scope, name] = path.slice(nm + 'node_modules/'.length).split('/');
+    return scope.startsWith('@') ? `${scope.slice(1)}-${name}` : scope;
+  }
+  if (path.startsWith('omitted/')) return 'omitted';
+  const own = path.match(/^packages\/([^/]+)\//);
+  return own ? `devbrain-${own[1]}` : 'misc';
+}
+
+/** Module id to chunk name, from each module's rendered size. */
+function planChunks(sizes, entries) {
+  const groups = new Map();
+  for (const id of [...sizes.keys()].sort()) {
+    // Entries stay in their own file, which is what the hooks and plugin.json
+    // run; Rollup's own helper modules go wherever their importers do.
+    if (entries.has(id) || id.startsWith('\0')) continue;
+    const pkg = packageOf(id);
+    if (!groups.has(pkg)) groups.set(pkg, []);
+    groups.get(pkg).push(id);
+  }
+  const plan = new Map();
+  for (const [pkg, ids] of groups) {
+    let part = 1, used = 0;
+    for (const id of ids) {
+      const size = sizes.get(id);
+      if (used > 0 && used + size > CHUNK_BUDGET) { part += 1; used = 0; }
+      plan.set(id, `${pkg}-${part}`);
+      used += size;
+    }
+  }
+  return plan;
+}
+
+/** Fail the build on anything the directory's scan would refuse to read. */
+function assertReadable(file) {
+  const text = readFileSync(file, 'utf8');
+  const problems = [];
+  if (/WebAssembly\.(Module|Instance|compile|instantiate)\(/.test(text)) problems.push('WebAssembly');
+  if (/[A-Za-z0-9+/]{1000,}={0,2}/.test(text)) problems.push('a base64 run of 1000+ characters');
+  const bytes = statSync(file).size;
+  if (bytes >= FILE_LIMIT) problems.push(`${(bytes / 1024).toFixed(0)} KiB, over the 256 KiB limit`);
+  if (problems.length) throw new Error(`${file} contains ${problems.join(' and ')}`);
+}
 
 const outDir = join(root, 'plugin', 'dist');
+// Chunk names change with the code, so the old ones must not linger.
+rmSync(outDir, { recursive: true, force: true });
 mkdirSync(outDir, { recursive: true });
 
-for (const { name, entry } of targets) {
-  const outfile = join(outDir, `${name}.js`);
-  const result = await build({
-    entryPoints: [join(root, entry)],
-    outfile,
-    bundle: true,
-    platform: 'node',
-    format: 'cjs',
-    target: 'node20',
-    external: OPTIONAL,
-    plugins: [stubOmitted],
+const bundle = await rollup({
+  input: {
+    cli: join(root, 'packages/cli/src/index.ts'),
+    mcp: join(root, 'packages/mcp/src/index.ts'),
+  },
+  external: [...OPTIONAL, ...builtinModules, ...builtinModules.map(m => `node:${m}`)],
+  plugins: [
+    stubOmitted,
+    readableOnly,
     // Read by isNoAiBuild() in core. Set here rather than at run time because it
     // is a property of the artifact, not of the machine running it.
-    define: { 'process.env.DEVBRAIN_NO_AI': '"1"' },
-    // Kept readable on purpose: this file is committed, so a reviewer should be
-    // able to see what changed, and minifying would make every diff opaque.
-    minify: false,
-    sourcemap: false,
-    logLevel: 'warning',
-    // No banner: packages/cli/src/index.ts already opens with a shebang and
-    // esbuild preserves it. Adding one produced two, and node read the second
-    // as code — the bundle would not start at all.
-    metafile: true,
-  });
+    replace({ preventAssignment: true, values: { 'process.env.DEVBRAIN_NO_AI': '"1"' } }),
+    nodeResolve({ preferBuiltins: true, extensions: ['.ts', '.mjs', '.js', '.cjs', '.json'] }),
+    typescript,
+    // Compact: the tr46 mapping table rendered with spacing came to 267 KiB.
+    json({ compact: true }),
+    // strictRequires keeps CommonJS load order exactly as node would run it,
+    // which the Mongo driver's circular requires depend on once they are spread
+    // across chunks. The optional modules above are required inside a
+    // try/catch, so leaving those calls alone is what lets the driver find them
+    // absent.
+    commonjs({
+      // .ts too: cli and mcp require inquirer and ./agent lazily, and only a
+      // file the plugin reads has those calls routed to the stubs above.
+      extensions: ['.js', '.cjs', '.ts'],
+      strictRequires: true,
+      transformMixedEsModules: true,
+      ignoreTryCatch: true,
+      ignoreDynamicRequires: true,
+    }),
+  ],
+  onwarn(warning, warn) {
+    // Expected with strictRequires: every CommonJS module is wrapped lazily, so
+    // a cycle between chunks is resolved at call time, not at load.
+    // Between chunks too, for the same reason: cutting the Mongo driver and
+    // ajv into several files puts their own cycles across file boundaries.
+    if (warning.code === 'CIRCULAR_DEPENDENCY' || warning.code === 'CIRCULAR_CHUNK') return;
+    if (warning.code === 'THIS_IS_UNDEFINED') return;
+    warn(warning);
+  },
+});
 
-  const bytes = statSync(outfile).size;
-  const inputs = Object.keys(result.metafile.inputs).length;
-  console.log(`plugin/dist/${name}.js  ${(bytes / 1024 / 1024).toFixed(2)} MB from ${inputs} files`);
+const common = {
+  format: 'cjs',
+  exports: 'auto',
+  generatedCode: 'es2015',
+  // Kept readable on purpose: these files are committed, so a reviewer should
+  // be able to see what changed, and minifying would make every diff opaque.
+  compact: false,
+  sourcemap: false,
+};
+
+// Named exports here only to silence a warning per module about mixing default
+// and named exports, which matters for a library's consumers and not for sizes.
+const measured = await bundle.generate({ ...common, exports: 'named', preserveModules: true });
+const sizes = new Map();
+const entries = new Set();
+for (const chunk of measured.output) {
+  if (chunk.type !== 'chunk' || !chunk.facadeModuleId) continue;
+  sizes.set(chunk.facadeModuleId, Buffer.byteLength(chunk.code));
+  if (chunk.isEntry) entries.add(chunk.facadeModuleId);
 }
+const plan = planChunks(sizes, entries);
+
+const { output } = await bundle.write({
+  ...common,
+  dir: outDir,
+  entryFileNames: '[name].js',
+  chunkFileNames: 'lib/[name].js',
+  banner: chunk => (chunk.isEntry ? '#!/usr/bin/env node' : ''),
+  manualChunks: id => plan.get(id),
+});
+await bundle.close();
+for (const file of output) assertReadable(join(outDir, file.fileName));
+const total = output.reduce((n, f) => n + statSync(join(outDir, f.fileName)).size, 0);
+const largest = Math.max(...output.map(f => statSync(join(outDir, f.fileName)).size));
+console.log(
+  `plugin/dist  ${output.length} files, ${(total / 1024 / 1024).toFixed(2)} MB, ` +
+  `largest ${(largest / 1024).toFixed(0)} KiB`,
+);
 
 // A stamp the test compares against the newest source file, so "the bundles are
 // stale" is a failing test rather than something noticed in production.
