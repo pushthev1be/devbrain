@@ -130,6 +130,14 @@ describe('the committed plugin bundles', () => {
     expect(cli).not.toMatch(/require\('(http|https|net|tls|dns)'\)/);
   });
 
+  // Neither hooks nor commands open files or run `devbrain run`, so the plugin
+  // starts no program of its own: the directory's scan traced a path built from
+  // the home directory into openPath and held it as data leaving the machine.
+  it('cli.js starts no program of its own', () => {
+    const cli = readFileSync(join(DIST, 'cli.js'), 'utf-8');
+    expect(cli).not.toMatch(/\b(spawn|execFile|execSync|exec)\(/);
+  });
+
   // Reading a key in one place and running curl in another is held as a
   // credential leaving the machine in two steps, even when curl only asks
   // localhost whether the dashboard is up. The server answers that itself.

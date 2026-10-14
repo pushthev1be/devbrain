@@ -1,9 +1,9 @@
 'use strict';
 
-const require$$0$1 = require('child_process');
 const require$$1 = require('path');
 const require$$2 = require('os');
 const require$$0 = require('fs');
+const require$$0$1 = require('child_process');
 const devbrainCore2 = require('./devbrain-core-2.js');
 const mongodb4 = require('./mongodb-4.js');
 const nanoid1 = require('./nanoid-1.js');
