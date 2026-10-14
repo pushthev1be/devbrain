@@ -10,6 +10,7 @@ import { redactSecrets } from './redact';
 import { RECALL_LOG_MAX } from './types';
 import * as local from './localStore';
 import { normalizeProjectPath } from './projectPath';
+import { getRepoRemote } from './git';
 
 export { getLocalDbPath } from './localStore';
 
@@ -92,19 +93,83 @@ function strip<T>(doc: Record<string, unknown>): T {
 // ── projects ──────────────────────────────────────────────────────────────────
 
 export async function upsertProject(project: Project): Promise<void> {
+  // Records written before remotes were stored learn theirs on their next
+  // write. null is stored too, so a folder with no remote is asked only once.
+  if (project.remote === undefined) project = { ...project, remote: getRepoRemote(project.path) };
   if (useLocal()) return local.upsertProject(project);
   const db = await getDb();
   const stored = { ...project, path: normalizeProjectPath(project.path) };
+  const projects = db.collection('projects');
+  // By id first: a project found through its remote carries the path of the
+  // checkout it was found from, and must update its own record, not add one.
+  if (await projects.findOne({ id: stored.id }, { projection: { _id: 1 } })) {
+    await projects.replaceOne({ id: stored.id }, stored);
+    return;
+  }
   // Matching every spelling replaces a record saved before paths were
   // normalized, rather than leaving it beside the new one.
-  await db.collection('projects').replaceOne({ path: { $in: pathSpellings(project.path) } }, stored, { upsert: true });
+  await projects.replaceOne({ path: { $in: pathSpellings(project.path) } }, stored, { upsert: true });
 }
 
+/**
+ * The project a folder belongs to: the record at this path, or else the record
+ * of the same repository cloned somewhere else.
+ *
+ * Path first, because it costs no git call and is what every registered
+ * checkout hits. Only an unregistered path pays for asking git its remote —
+ * and that is exactly the new clone or worktree that used to become a second,
+ * empty project. A record found that way is returned with this path, since
+ * callers run git, stack detection and session lookups against it.
+ */
 export async function getProjectByPath(path: string): Promise<Project | null> {
-  if (useLocal()) return local.getProjectByPath(path);
+  const byPath = useLocal() ? await local.getProjectByPath(path) : await findProjectAtPath(path);
+  if (byPath) return byPath;
+  const remote = getRepoRemote(path);
+  if (!remote) return null;
+  const byRemote = await getProjectByRemote(remote);
+  return byRemote ? { ...byRemote, path: normalizeProjectPath(path) } : null;
+}
+
+async function findProjectAtPath(path: string): Promise<Project | null> {
   const db = await getDb();
   const doc = await db.collection('projects').findOne({ path: { $in: pathSpellings(path) } });
   return doc ? strip<Project>(doc as Record<string, unknown>) : null;
+}
+
+/** The oldest project recorded with this normalized remote. */
+export async function getProjectByRemote(remote: string): Promise<Project | null> {
+  if (useLocal()) return local.getProjectByRemote(remote);
+  const db = await getDb();
+  const doc = await db.collection('projects').find({ remote }).sort({ createdAt: 1 }).limit(1).next();
+  return doc ? strip<Project>(doc as Record<string, unknown>) : null;
+}
+
+/**
+ * Fold one project record into another: its entries, the "seen in" marks that
+ * name it and its reviewed commits move across, and the record is deleted.
+ *
+ * For duplicate records of one repository (see mergeDuplicateProjects). An
+ * entry seen from both counted as seen in two projects, which is what promotes
+ * confidence to corroborated and earns the cross-project ranking boost; once
+ * they are one project that promotion is undone unless a person confirmed it.
+ * Returns the number of entries moved.
+ */
+export async function reassignProject(fromId: string, toId: string): Promise<number> {
+  if (useLocal()) return local.reassignProject(fromId, toId);
+  const db = await getDb();
+  const entries = db.collection('entries');
+  const moved = (await entries.updateMany({ projectId: fromId }, { $set: { projectId: toId } })).modifiedCount;
+  const seen = await entries.find({ seenInProjects: fromId }).toArray();
+  for (const doc of seen) {
+    const ids = [...new Set((doc.seenInProjects as string[]).map(id => (id === fromId ? toId : id)))];
+    const demote = doc.confidence === 'corroborated' && !doc.reinforcedCount && ids.length < 2;
+    await entries.updateOne({ id: doc.id }, {
+      $set: { seenInProjects: ids, ...(demote ? { confidence: 'observation' } : {}) },
+    });
+  }
+  await db.collection('processedCommits').updateMany({ projectId: fromId }, { $set: { projectId: toId } });
+  await db.collection('projects').deleteOne({ id: fromId });
+  return moved;
 }
 
 /**

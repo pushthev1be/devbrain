@@ -1,11 +1,11 @@
 'use strict';
 
+const require$$0$1 = require('child_process');
 const devbrainCore2 = require('./devbrain-core-2.js');
 const require$$1 = require('path');
 const require$$2 = require('os');
 const require$$0 = require('fs');
 const mongodb4 = require('./mongodb-4.js');
-const require$$0$1 = require('child_process');
 const crypto = require('crypto');
 
 var dist = {};
@@ -998,6 +998,7 @@ function requireProjectPath () {
 	Object.defineProperty(projectPath, "__esModule", { value: true });
 	projectPath.normalizeProjectPath = normalizeProjectPath;
 	projectPath.sameProjectPath = sameProjectPath;
+	projectPath.normalizeRemote = normalizeRemote;
 	/**
 	 * The one spelling of a project path, used whenever one is stored or looked up.
 	 *
@@ -1021,6 +1022,41 @@ function requireProjectPath () {
 	/** True when two paths name the same project. */
 	function sameProjectPath(a, b) {
 	    return normalizeProjectPath(a) === normalizeProjectPath(b);
+	}
+	/**
+	 * The one spelling of a git remote, used as a project's identity across clones.
+	 *
+	 * A path names one checkout, so every clone and every worktree of a repository
+	 * registered as a new, empty project: its own history then read as another
+	 * project's, and the same entry "seen in" two of them counted as seen in two
+	 * projects. The remote names the repository. Every way of writing the same one
+	 * reduces to host/owner/repo:
+	 *
+	 *   https://github.com/Owner/Repo.git      -> github.com/owner/repo
+	 *   git@github.com:Owner/Repo.git          -> github.com/owner/repo
+	 *   ssh://git@github.com:22/Owner/Repo     -> github.com/owner/repo
+	 *
+	 * Lower-cased whole, since the hosts people use are case-insensitive about
+	 * owner and name. Returns null for an empty string.
+	 */
+	function normalizeRemote(url) {
+	    let s = url.trim();
+	    if (!s)
+	        return null;
+	    // scp-like form: user@host:owner/repo (no scheme, colon before the path)
+	    const scp = /^[^/@\s]+@([^:/\s]+):(.+)$/.exec(s);
+	    if (scp)
+	        s = `${scp[1]}/${scp[2]}`;
+	    else
+	        s = s.replace(/^[a-z][a-z0-9+.-]*:\/\//i, ''); // scheme
+	    s = s
+	        .replace(/^[^/@]*@/, '') // user or user:token
+	        .replace(/^([^/:]+):\d+\//, '$1/') // port
+	        .replace(/\\/g, '/')
+	        .replace(/\/+$/, '')
+	        .replace(/\.git$/i, '')
+	        .replace(/\/+$/, '');
+	    return s ? s.toLowerCase() : null;
 	}
 	
 	return projectPath;
@@ -1051,6 +1087,8 @@ function requireLocalStore () {
 		exports.getLocalDbPath = getLocalDbPath;
 		exports.upsertProject = upsertProject;
 		exports.getProjectByPath = getProjectByPath;
+		exports.getProjectByRemote = getProjectByRemote;
+		exports.reassignProject = reassignProject;
 		exports.getAllProjects = getAllProjects;
 		exports.insertEntry = insertEntry;
 		exports.getEntriesByProject = getEntriesByProject;
@@ -1202,7 +1240,11 @@ function requireLocalStore () {
 		async function upsertProject(project) {
 		    const stored = { ...project, path: (0, projectPath_1.normalizeProjectPath)(project.path) };
 		    mutate(data => {
-		        const idx = data.projects.findIndex(p => (0, projectPath_1.sameProjectPath)(p.path, stored.path));
+		        // By id first: a project found through its remote carries the path of the
+		        // checkout it was found from, and must update its own record, not add one.
+		        let idx = data.projects.findIndex(p => p.id === stored.id);
+		        if (idx === -1)
+		            idx = data.projects.findIndex(p => (0, projectPath_1.sameProjectPath)(p.path, stored.path));
 		        if (idx === -1)
 		            data.projects.push(stored);
 		        else
@@ -1211,6 +1253,35 @@ function requireLocalStore () {
 		}
 		async function getProjectByPath(path) {
 		    return read().projects.find(p => (0, projectPath_1.sameProjectPath)(p.path, path)) ?? null;
+		}
+		/** The oldest project recorded with this normalized remote. */
+		async function getProjectByRemote(remote) {
+		    return read().projects
+		        .filter(p => p.remote === remote)
+		        .sort((a, b) => a.createdAt - b.createdAt)[0] ?? null;
+		}
+		/** See db.ts. */
+		async function reassignProject(fromId, toId) {
+		    let moved = 0;
+		    mutate(data => {
+		        for (const e of data.entries) {
+		            if (e.projectId === fromId) {
+		                e.projectId = toId;
+		                moved++;
+		            }
+		            if (e.seenInProjects?.includes(fromId)) {
+		                e.seenInProjects = [...new Set(e.seenInProjects.map(id => (id === fromId ? toId : id)))];
+		                if (e.confidence === 'corroborated' && !e.reinforcedCount && e.seenInProjects.length < 2) {
+		                    e.confidence = 'observation';
+		                }
+		            }
+		        }
+		        for (const c of data.processedCommits)
+		            if (c.projectId === fromId)
+		                c.projectId = toId;
+		        data.projects = data.projects.filter(p => p.id !== fromId);
+		    });
+		    return moved;
 		}
 		async function getAllProjects() {
 		    return read().projects.slice().sort((a, b) => b.lastSeen - a.lastSeen);
@@ -1356,6 +1427,194 @@ function requireLocalStore () {
 	return localStore;
 }
 
+var git = {};
+
+var hasRequiredGit;
+
+function requireGit () {
+	if (hasRequiredGit) return git;
+	hasRequiredGit = 1;
+	Object.defineProperty(git, "__esModule", { value: true });
+	git.isGitRepo = isGitRepo;
+	git.getRepoRoot = getRepoRoot;
+	git.getRepoRemote = getRepoRemote;
+	git.getLastCommit = getLastCommit;
+	git.getRecentCommits = getRecentCommits;
+	git.listCommitHashes = listCommitHashes;
+	git.getCommit = getCommit;
+	git.countCommits = countCommits;
+	git.removeGitHook = removeGitHook;
+	git.isHookInstalled = isHookInstalled;
+	const child_process_1 = require$$0$1;
+	const fs_1 = require$$0;
+	const path_1 = require$$1;
+	const projectPath_1 = requireProjectPath();
+	function isGitRepo(path) {
+	    try {
+	        (0, child_process_1.execSync)('git rev-parse --git-dir', { cwd: path, stdio: 'ignore' });
+	        return true;
+	    }
+	    catch {
+	        return false;
+	    }
+	}
+	function getRepoRoot(cwd) {
+	    try {
+	        return (0, child_process_1.execSync)('git rev-parse --show-toplevel', { cwd, stdio: 'pipe' }).toString().trim();
+	    }
+	    catch {
+	        return null;
+	    }
+	}
+	/**
+	 * The repository's remote, normalized — origin if there is one, else the first
+	 * remote listed. Null outside a repo, in a repo with no remote, or for a path
+	 * that no longer exists. See normalizeRemote for why this is a project's identity.
+	 */
+	function getRepoRemote(cwd) {
+	    const git = (args) => (0, child_process_1.execSync)(`git ${args}`, { cwd, stdio: 'pipe', timeout: 5000 }).toString().trim();
+	    try {
+	        let url = '';
+	        try {
+	            url = git('remote get-url origin');
+	        }
+	        catch { /* no origin */ }
+	        if (!url) {
+	            const first = git('remote').split(/\r?\n/).find(Boolean);
+	            if (first)
+	                url = git(`remote get-url ${first}`);
+	        }
+	        return (0, projectPath_1.normalizeRemote)(url);
+	    }
+	    catch {
+	        return null;
+	    }
+	}
+	// A single commit's diff can dwarf execSync's 1MB default maxBuffer, which would
+	// throw and silently yield no knowledge for exactly the large refactors worth
+	// remembering. Read generously, then cap: extractKnowledge only uses the first
+	// 6000 chars anyway.
+	const DIFF_MAX_BUFFER = 32 * 1024 * 1024;
+	const DIFF_CHAR_LIMIT = 20000;
+	function readCommit(repoPath, ref) {
+	    try {
+	        const git = (args, maxBuffer) => (0, child_process_1.execSync)(`git ${args}`, { cwd: repoPath, stdio: 'pipe', maxBuffer }).toString().trim();
+	        const hash = git(`rev-parse ${ref}`);
+	        const message = git(`log -1 --format=%s ${hash}`);
+	        const timestamp = parseInt(git(`log -1 --format=%ct ${hash}`), 10) * 1000;
+	        const stat = git(`show --stat --format="" ${hash}`, DIFF_MAX_BUFFER);
+	        const diff = git(`show --format="" ${hash}`, DIFF_MAX_BUFFER);
+	        return {
+	            hash,
+	            message,
+	            timestamp,
+	            diff: `${stat}\n\n${diff}`.slice(0, DIFF_CHAR_LIMIT),
+	        };
+	    }
+	    catch {
+	        return null;
+	    }
+	}
+	function getLastCommit(repoPath) {
+	    return readCommit(repoPath, 'HEAD');
+	}
+	/**
+	 * Most recent commits, newest first, for backfilling an existing repo's history.
+	 * Merges are excluded: they carry no authored knowledge and extractKnowledge
+	 * discards them anyway, so skipping them means `limit` buys real commits.
+	 */
+	function getRecentCommits(repoPath, limit = 20) {
+	    if (limit <= 0)
+	        return [];
+	    try {
+	        const hashes = (0, child_process_1.execSync)(`git log --no-merges --format=%H -n ${limit}`, {
+	            cwd: repoPath,
+	            stdio: 'pipe',
+	        })
+	            .toString()
+	            .trim()
+	            .split('\n')
+	            .map(h => h.trim())
+	            .filter(Boolean);
+	        return hashes
+	            .map(h => readCommit(repoPath, h))
+	            .filter((c) => c !== null);
+	    }
+	    catch {
+	        return [];
+	    }
+	}
+	/**
+	 * Hashes of the most recent non-merge commits, newest first. Cheap — no diffs —
+	 * so it can run at session start to count what has not been reviewed.
+	 */
+	function listCommitHashes(repoPath, limit = 200) {
+	    if (limit <= 0)
+	        return [];
+	    try {
+	        return (0, child_process_1.execSync)(`git log --no-merges --format=%H -n ${limit}`, { cwd: repoPath, stdio: 'pipe' })
+	            .toString().trim().split('\n').map(h => h.trim()).filter(Boolean);
+	    }
+	    catch {
+	        return [];
+	    }
+	}
+	/** One commit with its stat and diff, or null if it cannot be read. */
+	function getCommit(repoPath, hash) {
+	    return readCommit(repoPath, hash);
+	}
+	/** Total non-merge commits in the repo — used to size a backfill before running it. */
+	function countCommits(repoPath) {
+	    try {
+	        const out = (0, child_process_1.execSync)('git rev-list --no-merges --count HEAD', {
+	            cwd: repoPath,
+	            stdio: 'pipe',
+	        }).toString().trim();
+	        const n = parseInt(out, 10);
+	        return Number.isFinite(n) ? n : 0;
+	    }
+	    catch {
+	        return 0;
+	    }
+	}
+	/**
+	 * Remove the post-commit hook earlier versions installed.
+	 *
+	 * It ran `devbrain capture`, which had a model read each commit's diff. Commits
+	 * are now reviewed by the coding agent instead (`devbrain backfill`), so the
+	 * hook has nothing left to do. Other lines in a shared hook file are kept; a
+	 * file that held only DevBrain's line is deleted.
+	 */
+	function removeGitHook(repoPath) {
+	    const hookPath = (0, path_1.join)(repoPath, '.git', 'hooks', 'post-commit');
+	    if (!(0, fs_1.existsSync)(hookPath))
+	        return false;
+	    const content = (0, fs_1.readFileSync)(hookPath, 'utf-8');
+	    if (!content.includes('devbrain capture'))
+	        return false;
+	    const kept = content.split('\n').filter(l => !l.includes('devbrain capture'));
+	    if (kept.every(l => !l.trim() || l.startsWith('#!')))
+	        (0, fs_1.unlinkSync)(hookPath);
+	    else
+	        (0, fs_1.writeFileSync)(hookPath, kept.join('\n'), 'utf-8');
+	    return true;
+	}
+	function isHookInstalled(repoPath) {
+	    const hookPath = (0, path_1.join)(repoPath, '.git', 'hooks', 'post-commit');
+	    if (!(0, fs_1.existsSync)(hookPath))
+	        return false;
+	    try {
+	        const content = (0, fs_1.readFileSync)(hookPath, 'utf-8');
+	        return content.includes('devbrain capture');
+	    }
+	    catch {
+	        return false;
+	    }
+	}
+	
+	return git;
+}
+
 var hasRequiredDb;
 
 function requireDb () {
@@ -1401,6 +1660,8 @@ function requireDb () {
 		exports.closeDb = closeDb;
 		exports.upsertProject = upsertProject;
 		exports.getProjectByPath = getProjectByPath;
+		exports.getProjectByRemote = getProjectByRemote;
+		exports.reassignProject = reassignProject;
 		exports.getAllProjects = getAllProjects;
 		exports.insertEntry = insertEntry;
 		exports.getEntriesByProject = getEntriesByProject;
@@ -1421,6 +1682,7 @@ function requireDb () {
 		const types_1 = devbrainCore2.requireTypes();
 		const local = __importStar(requireLocalStore());
 		const projectPath_1 = requireProjectPath();
+		const git_1 = requireGit();
 		var localStore_1 = requireLocalStore();
 		Object.defineProperty(exports, "getLocalDbPath", { enumerable: true, get: function () { return localStore_1.getLocalDbPath; } });
 		// ── backend selection ─────────────────────────────────────────────────────────
@@ -1493,20 +1755,85 @@ function requireDb () {
 		}
 		// ── projects ──────────────────────────────────────────────────────────────────
 		async function upsertProject(project) {
+		    // Records written before remotes were stored learn theirs on their next
+		    // write. null is stored too, so a folder with no remote is asked only once.
+		    if (project.remote === undefined)
+		        project = { ...project, remote: (0, git_1.getRepoRemote)(project.path) };
 		    if (useLocal())
 		        return local.upsertProject(project);
 		    const db = await getDb();
 		    const stored = { ...project, path: (0, projectPath_1.normalizeProjectPath)(project.path) };
+		    const projects = db.collection('projects');
+		    // By id first: a project found through its remote carries the path of the
+		    // checkout it was found from, and must update its own record, not add one.
+		    if (await projects.findOne({ id: stored.id }, { projection: { _id: 1 } })) {
+		        await projects.replaceOne({ id: stored.id }, stored);
+		        return;
+		    }
 		    // Matching every spelling replaces a record saved before paths were
 		    // normalized, rather than leaving it beside the new one.
-		    await db.collection('projects').replaceOne({ path: { $in: pathSpellings(project.path) } }, stored, { upsert: true });
+		    await projects.replaceOne({ path: { $in: pathSpellings(project.path) } }, stored, { upsert: true });
 		}
+		/**
+		 * The project a folder belongs to: the record at this path, or else the record
+		 * of the same repository cloned somewhere else.
+		 *
+		 * Path first, because it costs no git call and is what every registered
+		 * checkout hits. Only an unregistered path pays for asking git its remote —
+		 * and that is exactly the new clone or worktree that used to become a second,
+		 * empty project. A record found that way is returned with this path, since
+		 * callers run git, stack detection and session lookups against it.
+		 */
 		async function getProjectByPath(path) {
-		    if (useLocal())
-		        return local.getProjectByPath(path);
+		    const byPath = useLocal() ? await local.getProjectByPath(path) : await findProjectAtPath(path);
+		    if (byPath)
+		        return byPath;
+		    const remote = (0, git_1.getRepoRemote)(path);
+		    if (!remote)
+		        return null;
+		    const byRemote = await getProjectByRemote(remote);
+		    return byRemote ? { ...byRemote, path: (0, projectPath_1.normalizeProjectPath)(path) } : null;
+		}
+		async function findProjectAtPath(path) {
 		    const db = await getDb();
 		    const doc = await db.collection('projects').findOne({ path: { $in: pathSpellings(path) } });
 		    return doc ? strip(doc) : null;
+		}
+		/** The oldest project recorded with this normalized remote. */
+		async function getProjectByRemote(remote) {
+		    if (useLocal())
+		        return local.getProjectByRemote(remote);
+		    const db = await getDb();
+		    const doc = await db.collection('projects').find({ remote }).sort({ createdAt: 1 }).limit(1).next();
+		    return doc ? strip(doc) : null;
+		}
+		/**
+		 * Fold one project record into another: its entries, the "seen in" marks that
+		 * name it and its reviewed commits move across, and the record is deleted.
+		 *
+		 * For duplicate records of one repository (see mergeDuplicateProjects). An
+		 * entry seen from both counted as seen in two projects, which is what promotes
+		 * confidence to corroborated and earns the cross-project ranking boost; once
+		 * they are one project that promotion is undone unless a person confirmed it.
+		 * Returns the number of entries moved.
+		 */
+		async function reassignProject(fromId, toId) {
+		    if (useLocal())
+		        return local.reassignProject(fromId, toId);
+		    const db = await getDb();
+		    const entries = db.collection('entries');
+		    const moved = (await entries.updateMany({ projectId: fromId }, { $set: { projectId: toId } })).modifiedCount;
+		    const seen = await entries.find({ seenInProjects: fromId }).toArray();
+		    for (const doc of seen) {
+		        const ids = [...new Set(doc.seenInProjects.map(id => (id === fromId ? toId : id)))];
+		        const demote = doc.confidence === 'corroborated' && !doc.reinforcedCount && ids.length < 2;
+		        await entries.updateOne({ id: doc.id }, {
+		            $set: { seenInProjects: ids, ...(demote ? { confidence: 'observation' } : {}) },
+		        });
+		    }
+		    await db.collection('processedCommits').updateMany({ projectId: fromId }, { $set: { projectId: toId } });
+		    await db.collection('projects').deleteOne({ id: fromId });
+		    return moved;
 		}
 		/**
 		 * The ways one project path may already be stored: normalized, as given, and —
@@ -1759,6 +2086,69 @@ function requireDb () {
 	return db;
 }
 
+var projectIdentity = {};
+
+var hasRequiredProjectIdentity;
+
+function requireProjectIdentity () {
+	if (hasRequiredProjectIdentity) return projectIdentity;
+	hasRequiredProjectIdentity = 1;
+	Object.defineProperty(projectIdentity, "__esModule", { value: true });
+	projectIdentity.mergeDuplicateProjects = mergeDuplicateProjects;
+	/**
+	 * One repository, one project.
+	 *
+	 * Projects used to be keyed by path alone, so each clone and each worktree of a
+	 * repository registered as a separate, empty project. Its own history then read
+	 * as another project's — ranked lower, labelled "other project", and held to a
+	 * cross-project bar — and an entry surfaced from two checkouts counted as seen
+	 * in two projects. getProjectByPath now falls back to the remote, so no new
+	 * duplicates are made; this folds together the ones already stored.
+	 */
+	const fs_1 = require$$0;
+	const db_1 = requireDb();
+	const git_1 = requireGit();
+	const projectPath_1 = requireProjectPath();
+	/**
+	 * Merge every project record of the repository at repoRoot into the oldest.
+	 *
+	 * Scoped to this one repository on purpose: it runs at session start, and a
+	 * session in one repo has no business rewriting another's records. Records
+	 * written before remotes were stored learn theirs here, from their own path
+	 * when it still exists, so a duplicate is recognised whichever checkout made it.
+	 * Null when there is nothing to merge, including a folder with no remote.
+	 */
+	async function mergeDuplicateProjects(repoRoot) {
+	    const remote = (0, git_1.getRepoRemote)(repoRoot);
+	    if (!remote)
+	        return null;
+	    const same = [];
+	    for (const p of await (0, db_1.getAllProjects)()) {
+	        let r = p.remote;
+	        if (r === undefined) {
+	            r = p.path && (0, fs_1.existsSync)(p.path) ? (0, git_1.getRepoRemote)(p.path) : null;
+	            await (0, db_1.upsertProject)({ ...p, remote: r });
+	        }
+	        if (r === remote)
+	            same.push({ ...p, remote: r });
+	    }
+	    if (same.length < 2)
+	        return null;
+	    same.sort((a, b) => a.createdAt - b.createdAt);
+	    const [into, ...rest] = same;
+	    const merged = [];
+	    for (const project of rest) {
+	        merged.push({ project, entries: await (0, db_1.reassignProject)(project.id, into.id) });
+	    }
+	    // Deleted first, so this path is free for the record that remains.
+	    const kept = { ...into, path: (0, projectPath_1.normalizeProjectPath)(repoRoot), remote, lastSeen: Date.now() };
+	    await (0, db_1.upsertProject)(kept);
+	    return { into: kept, merged };
+	}
+	
+	return projectIdentity;
+}
+
 var stack = {};
 
 var hasRequiredStack;
@@ -1915,168 +2305,6 @@ function requireStack () {
 	}
 	
 	return stack;
-}
-
-var git = {};
-
-var hasRequiredGit;
-
-function requireGit () {
-	if (hasRequiredGit) return git;
-	hasRequiredGit = 1;
-	Object.defineProperty(git, "__esModule", { value: true });
-	git.isGitRepo = isGitRepo;
-	git.getRepoRoot = getRepoRoot;
-	git.getLastCommit = getLastCommit;
-	git.getRecentCommits = getRecentCommits;
-	git.listCommitHashes = listCommitHashes;
-	git.getCommit = getCommit;
-	git.countCommits = countCommits;
-	git.removeGitHook = removeGitHook;
-	git.isHookInstalled = isHookInstalled;
-	const child_process_1 = require$$0$1;
-	const fs_1 = require$$0;
-	const path_1 = require$$1;
-	function isGitRepo(path) {
-	    try {
-	        (0, child_process_1.execSync)('git rev-parse --git-dir', { cwd: path, stdio: 'ignore' });
-	        return true;
-	    }
-	    catch {
-	        return false;
-	    }
-	}
-	function getRepoRoot(cwd) {
-	    try {
-	        return (0, child_process_1.execSync)('git rev-parse --show-toplevel', { cwd, stdio: 'pipe' }).toString().trim();
-	    }
-	    catch {
-	        return null;
-	    }
-	}
-	// A single commit's diff can dwarf execSync's 1MB default maxBuffer, which would
-	// throw and silently yield no knowledge for exactly the large refactors worth
-	// remembering. Read generously, then cap: extractKnowledge only uses the first
-	// 6000 chars anyway.
-	const DIFF_MAX_BUFFER = 32 * 1024 * 1024;
-	const DIFF_CHAR_LIMIT = 20000;
-	function readCommit(repoPath, ref) {
-	    try {
-	        const git = (args, maxBuffer) => (0, child_process_1.execSync)(`git ${args}`, { cwd: repoPath, stdio: 'pipe', maxBuffer }).toString().trim();
-	        const hash = git(`rev-parse ${ref}`);
-	        const message = git(`log -1 --format=%s ${hash}`);
-	        const timestamp = parseInt(git(`log -1 --format=%ct ${hash}`), 10) * 1000;
-	        const stat = git(`show --stat --format="" ${hash}`, DIFF_MAX_BUFFER);
-	        const diff = git(`show --format="" ${hash}`, DIFF_MAX_BUFFER);
-	        return {
-	            hash,
-	            message,
-	            timestamp,
-	            diff: `${stat}\n\n${diff}`.slice(0, DIFF_CHAR_LIMIT),
-	        };
-	    }
-	    catch {
-	        return null;
-	    }
-	}
-	function getLastCommit(repoPath) {
-	    return readCommit(repoPath, 'HEAD');
-	}
-	/**
-	 * Most recent commits, newest first, for backfilling an existing repo's history.
-	 * Merges are excluded: they carry no authored knowledge and extractKnowledge
-	 * discards them anyway, so skipping them means `limit` buys real commits.
-	 */
-	function getRecentCommits(repoPath, limit = 20) {
-	    if (limit <= 0)
-	        return [];
-	    try {
-	        const hashes = (0, child_process_1.execSync)(`git log --no-merges --format=%H -n ${limit}`, {
-	            cwd: repoPath,
-	            stdio: 'pipe',
-	        })
-	            .toString()
-	            .trim()
-	            .split('\n')
-	            .map(h => h.trim())
-	            .filter(Boolean);
-	        return hashes
-	            .map(h => readCommit(repoPath, h))
-	            .filter((c) => c !== null);
-	    }
-	    catch {
-	        return [];
-	    }
-	}
-	/**
-	 * Hashes of the most recent non-merge commits, newest first. Cheap — no diffs —
-	 * so it can run at session start to count what has not been reviewed.
-	 */
-	function listCommitHashes(repoPath, limit = 200) {
-	    if (limit <= 0)
-	        return [];
-	    try {
-	        return (0, child_process_1.execSync)(`git log --no-merges --format=%H -n ${limit}`, { cwd: repoPath, stdio: 'pipe' })
-	            .toString().trim().split('\n').map(h => h.trim()).filter(Boolean);
-	    }
-	    catch {
-	        return [];
-	    }
-	}
-	/** One commit with its stat and diff, or null if it cannot be read. */
-	function getCommit(repoPath, hash) {
-	    return readCommit(repoPath, hash);
-	}
-	/** Total non-merge commits in the repo — used to size a backfill before running it. */
-	function countCommits(repoPath) {
-	    try {
-	        const out = (0, child_process_1.execSync)('git rev-list --no-merges --count HEAD', {
-	            cwd: repoPath,
-	            stdio: 'pipe',
-	        }).toString().trim();
-	        const n = parseInt(out, 10);
-	        return Number.isFinite(n) ? n : 0;
-	    }
-	    catch {
-	        return 0;
-	    }
-	}
-	/**
-	 * Remove the post-commit hook earlier versions installed.
-	 *
-	 * It ran `devbrain capture`, which had a model read each commit's diff. Commits
-	 * are now reviewed by the coding agent instead (`devbrain backfill`), so the
-	 * hook has nothing left to do. Other lines in a shared hook file are kept; a
-	 * file that held only DevBrain's line is deleted.
-	 */
-	function removeGitHook(repoPath) {
-	    const hookPath = (0, path_1.join)(repoPath, '.git', 'hooks', 'post-commit');
-	    if (!(0, fs_1.existsSync)(hookPath))
-	        return false;
-	    const content = (0, fs_1.readFileSync)(hookPath, 'utf-8');
-	    if (!content.includes('devbrain capture'))
-	        return false;
-	    const kept = content.split('\n').filter(l => !l.includes('devbrain capture'));
-	    if (kept.every(l => !l.trim() || l.startsWith('#!')))
-	        (0, fs_1.unlinkSync)(hookPath);
-	    else
-	        (0, fs_1.writeFileSync)(hookPath, kept.join('\n'), 'utf-8');
-	    return true;
-	}
-	function isHookInstalled(repoPath) {
-	    const hookPath = (0, path_1.join)(repoPath, '.git', 'hooks', 'post-commit');
-	    if (!(0, fs_1.existsSync)(hookPath))
-	        return false;
-	    try {
-	        const content = (0, fs_1.readFileSync)(hookPath, 'utf-8');
-	        return content.includes('devbrain capture');
-	    }
-	    catch {
-	        return false;
-	    }
-	}
-	
-	return git;
 }
 
 var dossier = {};
@@ -3369,6 +3597,15 @@ function requireRecall () {
 		 *
 		 * Off for command output. A stack trace is long enough to contain half of any
 		 * title by accident; failures keep to the literal route.
+		 *
+		 * Another project's entry must pass both branches at once: most of the words,
+		 * AND a title that says the same thing. That measurement was one project's
+		 * store. On a real one of 264 entries across four projects, "the stripe webhook
+		 * signature check fails in production", asked in this repo, brought back
+		 * another project's "Payments silently dead in prod: expired Stripe key" — words
+		 * 0.67 and rare words 0.42, inside the range of the right answers (0.60-0.71 and
+		 * 0.37-0.52), so no word bar separates it. Its title, 0.10, does. A hint nobody
+		 * asked for, about someone else's code, has to agree on more than vocabulary.
 		 */
 		exports.VOLUNTEER_MIN_WORDS = 0.6;
 		exports.VOLUNTEER_MIN_WORDS_WITH_TITLE = 0.4;
@@ -3442,9 +3679,12 @@ function requireRecall () {
 		        if (r.lexical < exports.VOLUNTEER_MIN_RARE_WORDS / 2)
 		            return false;
 		        const words = (0, search_1.keywordScore)(failure, r.entry);
+		        const titleAgrees = r.titleScore >= exports.VOLUNTEER_MIN_TITLE && r.lexical >= exports.VOLUNTEER_MIN_RARE_WORDS;
+		        // Another project's entry needs both; see VOLUNTEER_MIN_WORDS.
+		        if (!r.sameProject)
+		            return words >= exports.VOLUNTEER_MIN_WORDS && titleAgrees;
 		        return words >= exports.VOLUNTEER_MIN_WORDS ||
-		            (words >= exports.VOLUNTEER_MIN_WORDS_WITH_TITLE && r.titleScore >= exports.VOLUNTEER_MIN_TITLE &&
-		                r.lexical >= exports.VOLUNTEER_MIN_RARE_WORDS);
+		            (words >= exports.VOLUNTEER_MIN_WORDS_WITH_TITLE && titleAgrees);
 		    };
 		    return (0, search_1.preciseSearch)(failure, embedding, candidates, { projectId, topK: topK * 4 })
 		        .filter(r => (r.matchType === 'pattern' && r.patternScore >= minPattern) ||
@@ -3902,6 +4142,7 @@ function requireDist () {
 		__exportStar(devbrainCore2.requireTypes(), exports);
 		__exportStar(requireDb(), exports);
 		__exportStar(requireProjectPath(), exports);
+		__exportStar(requireProjectIdentity(), exports);
 		__exportStar(requireGemini(), exports);
 		__exportStar(requireStack(), exports);
 		__exportStar(requireGit(), exports);

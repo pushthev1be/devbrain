@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync } from 'fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, readFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import type { Entry, Project } from './types';
@@ -22,7 +22,7 @@ vi.mock('os', async importOriginal => {
 
 import {
   getLocalDbPath,
-  upsertProject, getProjectByPath, getAllProjects,
+  upsertProject, getProjectByPath, getAllProjects, getProjectByRemote, reassignProject,
   insertEntry, getEntriesByProject, getAllEntriesWithProjects, deleteEntry,
   isCommitProcessed, markCommitProcessed,
   reinforceEntry, bumpRetrievalCounts, bumpRecallCounts, supersedeEntry,
@@ -75,7 +75,7 @@ describe('projects', () => {
     expect(await getProjectByPath('/repo/a')).toMatchObject({ id: 'p1', name: 'proj' });
   });
 
-  it('upserts by path, not by id — same path replaces', async () => {
+  it('replaces a record at the same path even under a new id', async () => {
     await upsertProject(project({ name: 'old' }));
     await upsertProject(project({ id: 'p2', name: 'new' }));
     const all = await getAllProjects();
@@ -93,6 +93,52 @@ describe('projects', () => {
     const all = await getAllProjects();
     expect(all).toHaveLength(1);
     expect(all[0]).toMatchObject({ id: 'p2', path: 'C:\\Users\\me\\repo' });
+  });
+
+  // A project found through its remote is handed back with the path of the
+  // checkout that asked. Writing it back must move that record, not add one.
+  it('updates a known id in place even when its path changed', async () => {
+    await upsertProject(project({ path: '/clone/one' }));
+    await upsertProject(project({ path: '/clone/two', lastSeen: 2000 }));
+    const all = await getAllProjects();
+    expect(all).toHaveLength(1);
+    expect(all[0]).toMatchObject({ id: 'p1', path: '/clone/two', lastSeen: 2000 });
+  });
+
+  it('finds the oldest project recorded with a remote', async () => {
+    await upsertProject(project({ id: 'new', path: '/b', remote: 'github.com/o/r', createdAt: 200 }));
+    await upsertProject(project({ id: 'old', path: '/a', remote: 'github.com/o/r', createdAt: 100 }));
+    await upsertProject(project({ id: 'else', path: '/c', remote: 'github.com/o/x', createdAt: 50 }));
+    expect(await getProjectByRemote('github.com/o/r')).toMatchObject({ id: 'old' });
+    expect(await getProjectByRemote('github.com/o/none')).toBeNull();
+  });
+
+  // Duplicate records of one repo made an entry surfaced from both look "seen
+  // in two projects" — which promotes it to corroborated and earns the
+  // cross-project ranking boost. Folding the records must undo exactly that.
+  it('folds one project into another: entries, seen-in marks, commits, record', async () => {
+    await upsertProject(project({ id: 'keep', path: '/a' }));
+    await upsertProject(project({ id: 'dup', path: '/b' }));
+    await upsertProject(project({ id: 'other', path: '/c' }));
+    await insertEntry(entry({ id: 'moved', projectId: 'dup' }));
+    await insertEntry(entry({ id: 'twice', projectId: 'keep', seenInProjects: ['keep', 'dup'], confidence: 'corroborated' }));
+    await insertEntry(entry({ id: 'really', projectId: 'keep', seenInProjects: ['keep', 'other'], confidence: 'corroborated' }));
+    await insertEntry(entry({ id: 'vouched', projectId: 'keep', seenInProjects: ['dup'], confidence: 'corroborated', reinforcedCount: 1 }));
+    await markCommitProcessed('abc', 'dup');
+
+    expect(await reassignProject('dup', 'keep')).toBe(1);
+
+    const byId = Object.fromEntries((await getAllEntriesWithProjects()).map(e => [e.id, e]));
+    expect(byId.moved.projectId).toBe('keep');
+    expect(byId.twice.seenInProjects).toEqual(['keep']);
+    expect(byId.twice.confidence).toBe('observation');
+    // Seen from a genuinely different project: untouched.
+    expect(byId.really.confidence).toBe('corroborated');
+    // A person confirmed it: not demoted, whatever the count.
+    expect(byId.vouched.confidence).toBe('corroborated');
+    expect((await getAllProjects()).map(p => p.id).sort()).toEqual(['keep', 'other']);
+    const raw = JSON.parse(readFileSync(getLocalDbPath(), 'utf-8'));
+    expect(raw.processedCommits[0].projectId).toBe('keep');
   });
 
   it('sorts getAllProjects by lastSeen descending', async () => {

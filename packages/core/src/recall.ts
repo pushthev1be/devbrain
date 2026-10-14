@@ -63,6 +63,21 @@ export const VOLUNTEER_MIN_SEMANTIC = 0.62;
  *
  * Off for command output. A stack trace is long enough to contain half of any
  * title by accident; failures keep to the literal route.
+ *
+ * Another project's entry must pass both branches at once: most of the words,
+ * AND a title that says the same thing. That measurement was one project's
+ * store. On a real one of 264 entries across four projects, "the stripe webhook
+ * signature check fails in production", asked in this repo, brought back
+ * another project's "Payments silently dead in prod: expired Stripe key" — words
+ * 0.67 and rare words 0.42, inside the range of the right answers (0.60-0.71 and
+ * 0.37-0.52), so no word bar separates it. Its title, 0.10, does. A hint nobody
+ * asked for, about someone else's code, has to agree on more than vocabulary.
+ * On that store, 12 requests describing an entry and 6 about nothing stored:
+ * found 6 of 12 either way, unrelated answered 1 of 6 before and 0 after.
+ *
+ * This only holds once a repository is one project (see projectIdentity.ts).
+ * Measured before that, five of those six right answers sat in a second record
+ * of the same repo and counted as another project's.
  */
 export const VOLUNTEER_MIN_WORDS = 0.6;
 export const VOLUNTEER_MIN_WORDS_WITH_TITLE = 0.4;
@@ -164,9 +179,11 @@ export function recallForFailure(
     // of common words can contain most of a title without being about it.
     if (r.lexical < VOLUNTEER_MIN_RARE_WORDS / 2) return false;
     const words = keywordScore(failure, r.entry);
+    const titleAgrees = r.titleScore >= VOLUNTEER_MIN_TITLE && r.lexical >= VOLUNTEER_MIN_RARE_WORDS;
+    // Another project's entry needs both; see VOLUNTEER_MIN_WORDS.
+    if (!r.sameProject) return words >= VOLUNTEER_MIN_WORDS && titleAgrees;
     return words >= VOLUNTEER_MIN_WORDS ||
-      (words >= VOLUNTEER_MIN_WORDS_WITH_TITLE && r.titleScore >= VOLUNTEER_MIN_TITLE &&
-        r.lexical >= VOLUNTEER_MIN_RARE_WORDS);
+      (words >= VOLUNTEER_MIN_WORDS_WITH_TITLE && titleAgrees);
   };
   return preciseSearch(failure, embedding, candidates, { projectId, topK: topK * 4 })
     .filter(r =>
