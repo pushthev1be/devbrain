@@ -24,10 +24,10 @@ require('./lib/fast-uri-1.js');
 require('./lib/ajv-formats-1.js');
 require('./lib/devbrain-core-1.js');
 require('child_process');
-require('./lib/devbrain-core-2.js');
 require('path');
 require('os');
 require('fs');
+require('./lib/devbrain-core-2.js');
 require('./lib/mongodb-4.js');
 require('./lib/mongodb-1.js');
 require('./lib/mongodb-5.js');
@@ -55,7 +55,7 @@ require('events');
 require('util');
 require('./lib/bson-1.js');
 
-devbrainMcp1.distExports.loadGlobalEnv();
+devbrainMcp1.distExports.usePluginSettings();
 function saveConfirmation(type, title, category, causeArchetype, errorPattern) {
   const cat = category && category !== "other" ? ` ${category}` : "";
   const short = devbrainMcp1.distExports.clip(title, 65);
@@ -819,6 +819,12 @@ Filed under Unfiled: ${repoRoot} is not a project. Pass project_path to file it 
       }
       res.writeHead(404);
       res.end("Not found");
+    });
+    httpServer.on("error", (err) => {
+      if (err.code !== "EADDRINUSE") throw err;
+      console.log(`Port ${PORT} is already in use, most likely by a DevBrain dashboard that is already running.`);
+      console.log(`Open http://localhost:${PORT}. If that is not DevBrain, start this with PORT set to a free port.`);
+      process.exit(0);
     });
     httpServer.listen(PORT, HOST, () => {
       console.log(`DevBrain dashboard  http://localhost:${PORT}`);

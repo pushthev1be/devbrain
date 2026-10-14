@@ -105,6 +105,33 @@ describe('the committed plugin bundles', () => {
     }
   });
 
+  // Anthropic's plugin directory holds a plugin that reads a credential from
+  // the user's machine instead of taking it as a userConfig value. The plugin
+  // build therefore loads no .env file, leaves out the setup wizard that checks
+  // for Gemini keys, and takes MONGODB_URI from its own settings alone.
+  it('reads no credential from the machine', () => {
+    const code = allCode();
+    expect(code, 'a .env loader is bundled').not.toMatch(/dotenv/);
+    expect(code, 'the setup wizard is bundled').not.toMatch(/function writeEnvVars/);
+    expect(code, 'a Gemini or Google key is read'
+    ).not.toMatch(/process\.env\.(GEMINI_API_KEY|GOOGLE_API_KEY|GOOGLE_CLOUD_PROJECT)/);
+    for (const file of BUNDLES) {
+      const entry = readFileSync(join(DIST, file), 'utf-8');
+      expect(entry, `${file} loads ~/.devbrain/.env`).not.toMatch(/loadGlobalEnv\(\)/);
+      expect(entry, `${file} does not take the plugin's settings`).toMatch(/usePluginSettings\(\)/);
+    }
+  });
+
+  // Reading a key in one place and running curl in another is held as a
+  // credential leaving the machine in two steps, even when curl only asks
+  // localhost whether the dashboard is up. The server answers that itself.
+  it('runs no curl from a plugin command', () => {
+    const dir = join(REPO, 'plugin', 'commands');
+    for (const name of readdirSync(dir)) {
+      expect(readFileSync(join(dir, name), 'utf-8'), name).not.toMatch(/\bcurl\b/);
+    }
+  });
+
   // The plugin's hooks are written by hand, not by withDevbrainHooks, so the
   // matcher that keeps Claude Code from starting node for every Read and Edit
   // is checked against the one the hook's own filter is built from.

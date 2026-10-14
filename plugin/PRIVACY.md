@@ -38,7 +38,8 @@ Everything lives under `~/.devbrain/`:
 - `db.json` — your entries and projects, with a lock file beside it so two
   sessions cannot overwrite each other
 - `sessions/` — a small cursor per session, so the same entry is not shown twice
-- `.env` — your own configuration, if you used the CLI's setup
+- `.env` — your own configuration, if you used the CLI's setup. Only the npm
+  CLI reads it; the plugin takes its settings from Claude Code
 - `capture.log` — a local record of when DevBrain asked for something or handed
   something over
 

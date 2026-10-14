@@ -126,6 +126,10 @@ const OMITTED_FROM_PLUGIN = [
   // of what made cli.js larger than mcp.js, and the directory's scan held
   // cli.js as a file it could not inspect while passing the smaller mcp.js.
   { filter: '^inquirer(-autocomplete-prompt)?$', why: 'the interactive terminal UI' },
+  // The setup wizard, and with it every read of a Gemini or Google credential
+  // the CLI makes. The plugin takes its settings from Claude Code, and the
+  // directory holds a plugin whose code reads credentials from the machine.
+  { filter: '^[.]/onboarding$', why: 'the setup wizard' },
 ];
 
 /**
@@ -307,7 +311,12 @@ const bundle = await rollup({
     readableOnly,
     // Read by isNoAiBuild() in core. Set here rather than at run time because it
     // is a property of the artifact, not of the machine running it.
-    replace({ preventAssignment: true, values: { 'process.env.DEVBRAIN_NO_AI': '"1"' } }),
+    // DEVBRAIN_PLUGIN_BUILD the same way, read by the CLI and MCP entry points:
+    // settings come from Claude Code, and code only the npm CLI runs is dropped.
+    replace({ preventAssignment: true, values: {
+      'process.env.DEVBRAIN_NO_AI': '"1"',
+      'process.env.DEVBRAIN_PLUGIN_BUILD': '"1"',
+    } }),
     nodeResolve({ preferBuiltins: true, extensions: ['.ts', '.mjs', '.js', '.cjs', '.json'] }),
     typescript,
     // Compact: the tr46 mapping table rendered with spacing came to 267 KiB.

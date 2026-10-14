@@ -16,7 +16,7 @@ import {
   ENTRY_TYPES, ENTRY_TYPE_NAMES, normalizeType,
   buildDossier, describeStorage, findDuplicate, findTextDuplicate, clip, measureUse,
   filterUnprocessedCommits, listCommitHashes, activeSession, takeAsk,
-  buildGraph, graphSubset, loadGlobalEnv, isNoAiBuild,
+  buildGraph, graphSubset, loadGlobalEnv, usePluginSettings, isNoAiBuild,
   projectForSave, unfiledProject,
 } from '@devbrain/core';
 import type { EntryCategory } from '@devbrain/core';
@@ -31,10 +31,12 @@ type RunAgent = typeof import('./agent').runAgent;
 import { HTML_DASHBOARD } from './dashboard';
 import { bindHost, checkRequest, startupRefusal } from './httpGuard';
 
-// Load config from ~/.devbrain/.env (GEMINI_API_KEY, Vertex AI vars, MONGODB_URI, …).
-// A real environment variable takes precedence, but only when it holds a value:
-// see loadGlobalEnv on why an empty one has to count as absent here.
-loadGlobalEnv();
+// The npm build loads ~/.devbrain/.env (GEMINI_API_KEY, Vertex AI vars,
+// MONGODB_URI, …); a real environment variable takes precedence, but only when
+// it holds a value — see loadGlobalEnv on why an empty one counts as absent.
+// The plugin bundle, where scripts/bundle.mjs sets DEVBRAIN_PLUGIN_BUILD, takes
+// its settings from Claude Code alone: see usePluginSettings.
+if (process.env.DEVBRAIN_PLUGIN_BUILD === '1') usePluginSettings(); else loadGlobalEnv();
 
 function saveConfirmation(
   type: string, title: string,
@@ -925,6 +927,14 @@ const httpServer = createServer(async (req, res) => {
       res.writeHead(404); res.end('Not found');
     });
 
+    // `/dashboard` starts this without checking first, so a second start is the
+    // ordinary case, not a crash: say where the running one is and leave.
+    httpServer.on('error', (err: NodeJS.ErrnoException) => {
+      if (err.code !== 'EADDRINUSE') throw err;
+      console.log(`Port ${PORT} is already in use, most likely by a DevBrain dashboard that is already running.`);
+      console.log(`Open http://localhost:${PORT}. If that is not DevBrain, start this with PORT set to a free port.`);
+      process.exit(0);
+    });
     httpServer.listen(PORT, HOST, () => {
       console.log(`DevBrain dashboard  http://localhost:${PORT}`);
       console.log(`DevBrain MCP        http://localhost:${PORT}/mcp`);

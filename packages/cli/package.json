@@ -12,7 +12,6 @@
   },
   "dependencies": {
     "@devbrain/core": "*",
-    "dotenv": "^16.0.0",
     "inquirer": "^9.3.8",
     "inquirer-autocomplete-prompt": "^3.0.1"
   },

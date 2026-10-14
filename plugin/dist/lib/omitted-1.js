@@ -33,6 +33,16 @@ function getAugmentedNamespace(n) {
 	return a;
 }
 
+var theSetupWizard;
+var hasRequiredTheSetupWizard;
+
+function requireTheSetupWizard () {
+	if (hasRequiredTheSetupWizard) return theSetupWizard;
+	hasRequiredTheSetupWizard = 1;
+	theSetupWizard = {};
+	throw new Error("DevBrain was built without the setup wizard, so the plugin stays inside the file limits Anthropic's plugin directory enforces. Matching on wording and on exact error text still works. Install the devbrain CLI for the full build.");
+}
+
 var theInteractiveTerminalUI;
 var hasRequiredTheInteractiveTerminalUI;
 
@@ -57,3 +67,4 @@ exports.getAugmentedNamespace = getAugmentedNamespace;
 exports.getDefaultExportFromCjs = getDefaultExportFromCjs;
 exports.requireTheADKAgentRoute = requireTheADKAgentRoute;
 exports.requireTheInteractiveTerminalUI = requireTheInteractiveTerminalUI;
+exports.requireTheSetupWizard = requireTheSetupWizard;

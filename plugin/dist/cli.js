@@ -5,13 +5,12 @@ Object.defineProperty(exports, Symbol.toStringTag, { value: 'Module' });
 
 const require$$0$1 = require('child_process');
 const omitted1 = require('./lib/omitted-1.js');
-const dotenv1 = require('./lib/dotenv-1.js');
 const require$$1 = require('path');
 const require$$0 = require('fs');
 const devbrainMcp1 = require('./lib/devbrain-mcp-1.js');
 const nanoid1 = require('./lib/nanoid-1.js');
 const require$$2 = require('os');
-require('crypto');
+const devbrainCli1 = require('./lib/devbrain-cli-1.js');
 require('./lib/devbrain-core-1.js');
 require('./lib/devbrain-core-2.js');
 require('./lib/mongodb-4.js');
@@ -42,10 +41,10 @@ require('./lib/tr46-2.js');
 require('events');
 require('util');
 require('./lib/bson-1.js');
+require('crypto');
 
-dotenv1.requireConfig();
-
-devbrainMcp1.distExports.loadGlobalEnv();
+const PLUGIN_BUILD = true;
+devbrainMcp1.distExports.usePluginSettings();
 const devbrainDir = require$$1.join(require$$2.homedir(), ".devbrain");
 const setupPath = require$$1.join(devbrainDir, "setup.json");
 function isOnboarded() {
@@ -59,34 +58,11 @@ function markOnboarded() {
   if (!require$$0.existsSync(devbrainDir)) require$$0.mkdirSync(devbrainDir, { recursive: true });
   require$$0.writeFileSync(setupPath, JSON.stringify({ onboarded: true, setupAt: Date.now() }), "utf-8");
 }
-const envFilePath = require$$1.join(devbrainDir, ".env");
-function writeEnvVars(vars) {
-  if (!require$$0.existsSync(devbrainDir)) require$$0.mkdirSync(devbrainDir, { recursive: true });
-  const lines = require$$0.existsSync(envFilePath) ? require$$0.readFileSync(envFilePath, "utf-8").replace(/^﻿/, "").split("\n") : [];
-  for (const [key, value] of Object.entries(vars)) {
-    const idx = lines.findIndex((l) => l.trim().startsWith(`${key}=`));
-    if (idx === -1) lines.push(`${key}=${value}`);
-    else lines[idx] = `${key}=${value}`;
-  }
-  require$$0.writeFileSync(envFilePath, `${lines.join("\n").replace(/\n+$/, "")}
-`, "utf-8");
-}
-function isMockMode() {
-  return process.env.DEVBRAIN_MOCK === "true";
-}
-function hasVertexCreds() {
-  return ["true", "1"].includes((process.env.GOOGLE_GENAI_USE_VERTEXAI ?? "").toLowerCase()) && !!process.env.GOOGLE_CLOUD_PROJECT;
-}
-function hasGeminiCreds() {
-  return isMockMode() || hasVertexCreds() || !!process.env.GEMINI_API_KEY || !!process.env.GOOGLE_API_KEY;
-}
-function hasMongoUri() {
-  return !!process.env.MONGODB_URI?.trim();
-}
+devbrainMcp1.distExports.globalEnvPath();
 function explainError(err) {
   const msg = err instanceof Error ? err.message : String(err);
   if (/No Gemini credentials|GOOGLE_CLOUD_PROJECT is not set/i.test(msg))
-    return `No Gemini credentials \u2014 run ${CYAN}devbrain setup${RESET}, or add GEMINI_API_KEY to ${envFilePath}`;
+    return `No Gemini credentials \u2014 run ${devbrainCli1.CYAN}devbrain setup${devbrainCli1.RESET} to add a key.`;
   if (/bad auth|[Aa]uthentication failed/.test(msg))
     return `The database rejected the credentials in MONGODB_URI \u2014 check the username and password.`;
   if (/ENOTFOUND|ECONNREFUSED|ETIMEDOUT|querySrv|[Ss]erver selection/.test(msg))
@@ -95,59 +71,39 @@ function explainError(err) {
 }
 function reportError(err, label = "Error") {
   console.error(`
-  ${RED}${label}:${RESET} ${explainError(err)}
+  ${devbrainCli1.RED}${label}:${devbrainCli1.RESET} ${explainError(err)}
 `);
   if (process.env.DEVBRAIN_DEBUG && err instanceof Error && err.stack) {
-    console.error(`${DIM}${err.stack}${RESET}
+    console.error(`${devbrainCli1.DIM}${err.stack}${devbrainCli1.RESET}
 `);
   }
 }
-const BOLD = "\x1B[1m";
-const DIM = "\x1B[2m";
-const CYAN = "\x1B[36m";
-const GREEN = "\x1B[32m";
-const YELLOW = "\x1B[33m";
-const RED = "\x1B[31m";
-const BLUE = "\x1B[34m";
-const MAGENTA = "\x1B[35m";
-const RESET = "\x1B[0m";
-const BANNER = `${CYAN}
-  \u2588\u2588\u2588\u2588\u2588\u2588\u2557 \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2557   \u2588\u2588\u2557\u2588\u2588\u2588\u2588\u2588\u2588\u2557 \u2588\u2588\u2588\u2588\u2588\u2588\u2557  \u2588\u2588\u2588\u2588\u2588\u2557 \u2588\u2588\u2557\u2588\u2588\u2588\u2557   \u2588\u2588\u2557
-  \u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2554\u2550\u2550\u2550\u2550\u255D\u2588\u2588\u2551   \u2588\u2588\u2551\u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2551\u2588\u2588\u2588\u2588\u2557  \u2588\u2588\u2551
-  \u2588\u2588\u2551  \u2588\u2588\u2551\u2588\u2588\u2588\u2588\u2588\u2557  \u255A\u2588\u2588\u2557 \u2588\u2588\u2554\u255D\u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255D\u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255D\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2551\u2588\u2588\u2551\u2588\u2588\u2554\u2588\u2588\u2557 \u2588\u2588\u2551
-  \u2588\u2588\u2551  \u2588\u2588\u2551\u2588\u2588\u2554\u2550\u2550\u255D   \u255A\u2588\u2588\u2588\u2588\u2554\u255D \u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2551\u2588\u2588\u2551\u2588\u2588\u2551\u255A\u2588\u2588\u2557\u2588\u2588\u2551
-  \u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255D\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557  \u255A\u2588\u2588\u2554\u255D  \u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255D\u2588\u2588\u2551  \u2588\u2588\u2557\u2588\u2588\u2551  \u2588\u2588\u2551\u2588\u2588\u2551\u2588\u2588\u2551 \u255A\u2588\u2588\u2588\u2588\u2551
-  \u255A\u2550\u2550\u2550\u2550\u2550\u255D \u255A\u2550\u2550\u2550\u2550\u2550\u2550\u255D   \u255A\u2550\u255D   \u255A\u2550\u2550\u2550\u2550\u2550\u255D \u255A\u2550\u255D  \u255A\u2550\u255D\u255A\u2550\u255D  \u255A\u2550\u255D\u255A\u2550\u255D\u255A\u2550\u255D  \u255A\u2550\u2550\u2550\u255D${RESET}
-${DIM}                    your developer memory${RESET}`;
 function dim(text) {
-  return `${DIM}${text}${RESET}`;
+  return `${devbrainCli1.DIM}${text}${devbrainCli1.RESET}`;
 }
 function bold(text) {
-  return `${BOLD}${text}${RESET}`;
-}
-function clr() {
-  process.stdout.write("\x1B[2J\x1B[H");
+  return `${devbrainCli1.BOLD}${text}${devbrainCli1.RESET}`;
 }
 function typeCode(type) {
   switch (type) {
     case "bug":
-      return RED;
+      return devbrainCli1.RED;
     case "fix":
     case "solution":
-      return GREEN;
+      return devbrainCli1.GREEN;
     case "stack":
-      return CYAN;
+      return devbrainCli1.CYAN;
     case "decision":
-      return MAGENTA;
+      return devbrainCli1.MAGENTA;
     case "pattern":
     case "lesson":
-      return YELLOW;
+      return devbrainCli1.YELLOW;
     case "anti-pattern":
       return "\x1B[91m";
     case "image":
       return "\x1B[35m";
     default:
-      return BLUE;
+      return devbrainCli1.BLUE;
   }
 }
 function openPath(target) {
@@ -157,23 +113,23 @@ function openPath(target) {
   else exec(`xdg-open "${target}"`);
 }
 function typeDot(type) {
-  return `${typeCode(type)}\u25CF${RESET}`;
+  return `${typeCode(type)}\u25CF${devbrainCli1.RESET}`;
 }
 function spin(text) {
   const frames = ["\u280B", "\u2819", "\u2839", "\u2838", "\u283C", "\u2834", "\u2826", "\u2827", "\u2807", "\u280F"];
   let i = 0;
   const id = setInterval(() => {
-    process.stdout.write(`\r${CYAN}${frames[i++ % frames.length]}${RESET} ${text}`);
+    process.stdout.write(`\r${devbrainCli1.CYAN}${frames[i++ % frames.length]}${devbrainCli1.RESET} ${text}`);
   }, 80);
   return {
     succeed: (msg) => {
       clearInterval(id);
-      process.stdout.write(`\r${GREEN}\u2713${RESET} ${msg}
+      process.stdout.write(`\r${devbrainCli1.GREEN}\u2713${devbrainCli1.RESET} ${msg}
 `);
     },
     fail: (msg) => {
       clearInterval(id);
-      process.stdout.write(`\r${RED}\u2717${RESET} ${msg}
+      process.stdout.write(`\r${devbrainCli1.RED}\u2717${devbrainCli1.RESET} ${msg}
 `);
     },
     stop: () => {
@@ -196,9 +152,9 @@ async function printProjectContext() {
   const cwd = process.cwd();
   const repoRoot = devbrainMcp1.distExports.getRepoRoot(cwd) ?? cwd;
   const project = await devbrainMcp1.distExports.getProjectByPath(repoRoot);
-  console.log(BANNER);
+  console.log(devbrainCli1.BANNER);
   if (!project) {
-    console.log(`  ${YELLOW}No project tracked here.${RESET} Select ${CYAN}Init project${RESET} to start.
+    console.log(`  ${devbrainCli1.YELLOW}No project tracked here.${devbrainCli1.RESET} Select ${devbrainCli1.CYAN}Init project${devbrainCli1.RESET} to start.
 `);
     return;
   }
@@ -211,11 +167,11 @@ async function printProjectContext() {
   const hooksOn = agentHooksInstalled(repoRoot);
   console.log(`  ${bold("Project")}  ${project.name}`);
   console.log(`  ${bold("Stack")}    ${project.stack.join(", ") || "Unknown"}`);
-  console.log(`  ${bold("Hooks")}    ${hooksOn ? `${GREEN}\u2713 Claude Code${RESET}` : `${YELLOW}\u2717 not installed${RESET}  ${DIM}devbrain hooks install${RESET}`}`);
+  console.log(`  ${bold("Hooks")}    ${hooksOn ? `${devbrainCli1.GREEN}\u2713 Claude Code${devbrainCli1.RESET}` : `${devbrainCli1.YELLOW}\u2717 not installed${devbrainCli1.RESET}  ${devbrainCli1.DIM}devbrain hooks install${devbrainCli1.RESET}`}`);
   console.log(`  ${bold("Memory")}   ${entries.length} entries  ${dim(`${bugs} bugs \xB7 ${fixes} fixes \xB7 ${notes} notes`)}  ${dim(`\xB7 ${devbrainMcp1.distExports.describeStorage().kind === "local" ? "local" : "MongoDB"}`)}`);
   if (entries.length > 0) {
     console.log(`
-  ${CYAN}Recent knowledge${RESET}`);
+  ${devbrainCli1.CYAN}Recent knowledge${devbrainCli1.RESET}`);
     entries.slice(0, 4).forEach((e) => {
       const dot = typeDot(e.type);
       const title = e.title.length > 72 ? e.title.slice(0, 72) + "\u2026" : e.title;
@@ -261,29 +217,29 @@ async function handleInit() {
       createdAt: existing?.createdAt ?? Date.now(),
       lastSeen: Date.now()
     });
-    s.succeed(`Registered: ${BOLD}${name}${RESET}`);
+    s.succeed(`Registered: ${devbrainCli1.BOLD}${name}${devbrainCli1.RESET}`);
     console.log(`  Stack: ${stack.join(", ") || "Unknown"}`);
     for (const m of merge?.merged ?? []) {
-      console.log(`  ${GREEN}\u2713${RESET} Merged an earlier record of this repo from ${m.project.path} (${m.entries} entries)`);
+      console.log(`  ${devbrainCli1.GREEN}\u2713${devbrainCli1.RESET} Merged an earlier record of this repo from ${m.project.path} (${m.entries} entries)`);
     }
     if (devbrainMcp1.distExports.isGitRepo(repoRoot)) {
       if (devbrainMcp1.distExports.removeGitHook(repoRoot)) {
-        console.log(`  ${GREEN}\u2713${RESET} Removed the old post-commit hook \u2014 your agent reviews commits now`);
+        console.log(`  ${devbrainCli1.GREEN}\u2713${devbrainCli1.RESET} Removed the old post-commit hook \u2014 your agent reviews commits now`);
       }
       const alsoCleaned = await cleanStaleGitHooks(repoRoot);
       if (alsoCleaned.length) {
-        console.log(`  ${GREEN}\u2713${RESET} Removed the same dead hook from ${alsoCleaned.join(", ")}`);
+        console.log(`  ${devbrainCli1.GREEN}\u2713${devbrainCli1.RESET} Removed the same dead hook from ${alsoCleaned.join(", ")}`);
       }
       unreviewed = (await unreviewedCommits(repoRoot)).length;
     } else {
-      console.log(`  ${YELLOW}\u26A0${RESET}  Not a git repo \u2014 knowledge comes from agent sessions and notes`);
+      console.log(`  ${devbrainCli1.YELLOW}\u26A0${devbrainCli1.RESET}  Not a git repo \u2014 knowledge comes from agent sessions and notes`);
     }
     try {
       const path = agentSettingsPath(repoRoot, false);
       writeAgentSettings(path, devbrainMcp1.distExports.withDevbrainHooks(readAgentSettings(path)));
-      console.log(`  ${GREEN}\u2713${RESET} Claude Code hooks installed \u2014 sessions start briefed, and your agent is asked to record what it fixes`);
+      console.log(`  ${devbrainCli1.GREEN}\u2713${devbrainCli1.RESET} Claude Code hooks installed \u2014 sessions start briefed, and your agent is asked to record what it fixes`);
     } catch (err) {
-      console.log(`  ${YELLOW}\u26A0${RESET}  Could not install Claude Code hooks: ${explainError(err)}`);
+      console.log(`  ${devbrainCli1.YELLOW}\u26A0${devbrainCli1.RESET}  Could not install Claude Code hooks: ${explainError(err)}`);
     }
     const devContextMdPath = require$$1.join(repoRoot, "DEV_CONTEXT.md");
     const devbrainBlock = [
@@ -352,47 +308,47 @@ async function handleInit() {
     ].join("\n");
     if (!require$$0.existsSync(devContextMdPath)) {
       require$$0.writeFileSync(devContextMdPath, devbrainBlock, "utf-8");
-      console.log(`  ${GREEN}\u2713${RESET} Created DEV_CONTEXT.md \u2014 AI Agent will call DevBrain automatically`);
+      console.log(`  ${devbrainCli1.GREEN}\u2713${devbrainCli1.RESET} Created DEV_CONTEXT.md \u2014 AI Agent will call DevBrain automatically`);
     } else {
       const existing2 = require$$0.readFileSync(devContextMdPath, "utf-8");
       const updated = replaceDevbrainBlock(existing2, devbrainBlock);
       if (updated === null) {
         require$$0.writeFileSync(devContextMdPath, existing2.trimEnd() + "\n\n" + devbrainBlock, "utf-8");
-        console.log(`  ${GREEN}\u2713${RESET} Updated DEV_CONTEXT.md \u2014 DevBrain block appended`);
+        console.log(`  ${devbrainCli1.GREEN}\u2713${devbrainCli1.RESET} Updated DEV_CONTEXT.md \u2014 DevBrain block appended`);
       } else if (updated === existing2) {
-        console.log(`  ${DIM}DEV_CONTEXT.md already up to date${RESET}`);
+        console.log(`  ${devbrainCli1.DIM}DEV_CONTEXT.md already up to date${devbrainCli1.RESET}`);
       } else {
         require$$0.writeFileSync(devContextMdPath, updated, "utf-8");
-        console.log(`  ${GREEN}\u2713${RESET} Refreshed DEV_CONTEXT.md \u2014 DevBrain instructions updated`);
+        console.log(`  ${devbrainCli1.GREEN}\u2713${devbrainCli1.RESET} Refreshed DEV_CONTEXT.md \u2014 DevBrain instructions updated`);
       }
     }
     if (DEFAULT_SOURCE_FILES.some((f) => require$$0.existsSync(require$$1.join(repoRoot, f)))) {
       await handleIndex().catch((err) => {
-        console.log(`  ${YELLOW}\u26A0${RESET}  Could not index: ${explainError(err)}`);
+        console.log(`  ${devbrainCli1.YELLOW}\u26A0${devbrainCli1.RESET}  Could not index: ${explainError(err)}`);
       });
     }
     const W2 = Math.min(process.stdout.columns || 80, 80);
-    const bar2 = `${DIM}${"\u2500".repeat(W2)}${RESET}`;
+    const bar2 = `${devbrainCli1.DIM}${"\u2500".repeat(W2)}${devbrainCli1.RESET}`;
     console.log(bar2);
     console.log(`
-  ${BOLD}${CYAN}Give your agent the memory tools${RESET}  ${DIM}(one-time, per machine)${RESET}
+  ${devbrainCli1.BOLD}${devbrainCli1.CYAN}Give your agent the memory tools${devbrainCli1.RESET}  ${devbrainCli1.DIM}(one-time, per machine)${devbrainCli1.RESET}
 `);
     console.log(`  The hooks above brief each session and ask the agent to record what it`);
     console.log(`  fixes. The three tools \u2014 get_context, search_knowledge, save_entry \u2014 come`);
     console.log(`  from the plugin. In Claude Code:
 `);
-    console.log(`    ${CYAN}/plugin marketplace add pushthev1be/devbrain${RESET}`);
-    console.log(`    ${CYAN}/plugin install devbrain@devbrain${RESET}
+    console.log(`    ${devbrainCli1.CYAN}/plugin marketplace add pushthev1be/devbrain${devbrainCli1.RESET}`);
+    console.log(`    ${devbrainCli1.CYAN}/plugin install devbrain@devbrain${devbrainCli1.RESET}
 `);
-    console.log(`  ${DIM}It brings its own hooks, so you can skip ${RESET}${CYAN}devbrain init${RESET}${DIM} in your other repos.${RESET}`);
-    console.log(`  ${DIM}For any other MCP host, point it at a clone:${RESET}`);
-    console.log(`  ${DIM}{"command": "node", "args": ["<clone>/plugin/dist/mcp.js"]}${RESET}
+    console.log(`  ${devbrainCli1.DIM}It brings its own hooks, so you can skip ${devbrainCli1.RESET}${devbrainCli1.CYAN}devbrain init${devbrainCli1.RESET}${devbrainCli1.DIM} in your other repos.${devbrainCli1.RESET}`);
+    console.log(`  ${devbrainCli1.DIM}For any other MCP host, point it at a clone:${devbrainCli1.RESET}`);
+    console.log(`  ${devbrainCli1.DIM}{"command": "node", "args": ["<clone>/plugin/dist/mcp.js"]}${devbrainCli1.RESET}
 `);
     console.log(bar2);
     console.log();
     if (unreviewed > 0) {
-      console.log(`  ${BOLD}Next:${RESET} ${unreviewed} past commit${unreviewed === 1 ? "" : "s"} to learn from. Ask your coding agent:`);
-      console.log(`  ${CYAN}"run devbrain backfill and save what matters"${RESET}
+      console.log(`  ${devbrainCli1.BOLD}Next:${devbrainCli1.RESET} ${unreviewed} past commit${unreviewed === 1 ? "" : "s"} to learn from. Ask your coding agent:`);
+      console.log(`  ${devbrainCli1.CYAN}"run devbrain backfill and save what matters"${devbrainCli1.RESET}
 `);
     }
   } catch (err) {
@@ -428,8 +384,8 @@ async function handleBackfill(args) {
   const project = await devbrainMcp1.distExports.getProjectByPath(repoRoot);
   if (!project) {
     console.log(`
-  ${YELLOW}Not a DevBrain project:${RESET} ${repoRoot}`);
-    console.log(`  ${DIM}Run ${RESET}${CYAN}devbrain init${RESET}${DIM} here first.${RESET}
+  ${devbrainCli1.YELLOW}Not a DevBrain project:${devbrainCli1.RESET} ${repoRoot}`);
+    console.log(`  ${devbrainCli1.DIM}Run ${devbrainCli1.RESET}${devbrainCli1.CYAN}devbrain init${devbrainCli1.RESET}${devbrainCli1.DIM} here first.${devbrainCli1.RESET}
 `);
     return;
   }
@@ -442,20 +398,20 @@ async function handleBackfill(args) {
   if (!forAgent) {
     const open = sessions.filter((f) => devbrainMcp1.distExports.nextSessionChunk(require$$0.readFileSync(f, "utf-8"), devbrainMcp1.distExports.readCursor(require$$1.basename(f, ".jsonl")).line).digest).length;
     console.log(`
-  ${BOLD}Unreviewed history${RESET} ${DIM}\u2014 ${project.name}${RESET}`);
+  ${devbrainCli1.BOLD}Unreviewed history${devbrainCli1.RESET} ${devbrainCli1.DIM}\u2014 ${project.name}${devbrainCli1.RESET}`);
     console.log(`  ${pending.length} commit${pending.length === 1 ? "" : "s"}${pending.length >= BACKFILL_SCAN ? "+" : ""} \xB7 ${open} earlier agent session${open === 1 ? "" : "s"}
 `);
     if (!pending.length && !open) {
-      console.log(`  ${GREEN}\u2713${RESET} Everything has been reviewed.
+      console.log(`  ${devbrainCli1.GREEN}\u2713${devbrainCli1.RESET} Everything has been reviewed.
 `);
       return;
     }
     console.log(`  This is reading material for your coding agent \u2014 it writes the entries,`);
     console.log(`  DevBrain only stores them. Ask it:
 `);
-    console.log(`    ${CYAN}"run devbrain backfill and save what matters"${RESET}
+    console.log(`    ${devbrainCli1.CYAN}"run devbrain backfill and save what matters"${devbrainCli1.RESET}
 `);
-    console.log(`  ${DIM}To read a batch yourself without marking it reviewed: ${RESET}${CYAN}devbrain backfill --print${RESET}
+    console.log(`  ${devbrainCli1.DIM}To read a batch yourself without marking it reviewed: ${devbrainCli1.RESET}${devbrainCli1.CYAN}devbrain backfill --print${devbrainCli1.RESET}
 `);
     return;
   }
@@ -735,23 +691,23 @@ async function handleHooks(args) {
   if (action === "install") {
     writeAgentSettings(path, devbrainMcp1.distExports.withDevbrainHooks(readAgentSettings(path)));
     console.log(`
-  ${GREEN}\u2713${RESET} Claude Code hooks installed for ${scope}`);
-    console.log(`  ${DIM}${path}${RESET}`);
-    console.log(`  ${DIM}Sessions start briefed with project memory, and when the agent fixes or decides`);
-    console.log(`  something without saving it, DevBrain asks it to. Registered projects only.${RESET}`);
-    console.log(`  ${DIM}Restart Claude Code (or run /hooks) for it to pick them up.${RESET}
+  ${devbrainCli1.GREEN}\u2713${devbrainCli1.RESET} Claude Code hooks installed for ${scope}`);
+    console.log(`  ${devbrainCli1.DIM}${path}${devbrainCli1.RESET}`);
+    console.log(`  ${devbrainCli1.DIM}Sessions start briefed with project memory, and when the agent fixes or decides`);
+    console.log(`  something without saving it, DevBrain asks it to. Registered projects only.${devbrainCli1.RESET}`);
+    console.log(`  ${devbrainCli1.DIM}Restart Claude Code (or run /hooks) for it to pick them up.${devbrainCli1.RESET}
 `);
     return;
   }
   if (action === "uninstall") {
     writeAgentSettings(path, devbrainMcp1.distExports.withoutDevbrainHooks(readAgentSettings(path)));
     console.log(`
-  ${GREEN}\u2713${RESET} DevBrain hooks removed from ${scope}
+  ${devbrainCli1.GREEN}\u2713${devbrainCli1.RESET} DevBrain hooks removed from ${scope}
 `);
     return;
   }
   console.log(`
-  ${BOLD}Agent hooks${RESET}`);
+  ${devbrainCli1.BOLD}Agent hooks${devbrainCli1.RESET}`);
   for (const [label, p] of [["project", agentSettingsPath(repoRoot, false)], ["global ", agentSettingsPath(repoRoot, true)]]) {
     let events = [];
     try {
@@ -759,16 +715,16 @@ async function handleHooks(args) {
     } catch {
       events = ["(unreadable settings file)"];
     }
-    console.log(`  ${label}  ${events.length ? `${GREEN}${events.join(", ")}${RESET}` : `${DIM}not installed${RESET}`}`);
+    console.log(`  ${label}  ${events.length ? `${devbrainCli1.GREEN}${events.join(", ")}${devbrainCli1.RESET}` : `${devbrainCli1.DIM}not installed${devbrainCli1.RESET}`}`);
   }
   if (require$$0.existsSync(captureLogPath)) {
     const recent = require$$0.readFileSync(captureLogPath, "utf-8").trimEnd().split("\n").slice(-12);
     console.log(`
-  ${BOLD}Recent DevBrain prompts${RESET} ${DIM}(${captureLogPath})${RESET}`);
-    for (const l of recent) console.log(`  ${DIM}${l}${RESET}`);
+  ${devbrainCli1.BOLD}Recent DevBrain prompts${devbrainCli1.RESET} ${devbrainCli1.DIM}(${captureLogPath})${devbrainCli1.RESET}`);
+    for (const l of recent) console.log(`  ${devbrainCli1.DIM}${l}${devbrainCli1.RESET}`);
   } else {
     console.log(`
-  ${DIM}Nothing logged yet.${RESET}`);
+  ${devbrainCli1.DIM}Nothing logged yet.${devbrainCli1.RESET}`);
   }
   console.log();
 }
@@ -780,9 +736,9 @@ async function handleIndex(fileArg, opts = {}) {
   const file = candidates.find((f) => require$$0.existsSync(require$$1.join(repoRoot, f)));
   if (!file) {
     console.log(`
-  ${YELLOW}No source file to index.${RESET}`);
-    console.log(`  ${DIM}Looked for: ${candidates.join(", ")} in ${repoRoot}${RESET}`);
-    console.log(`  ${DIM}Name one explicitly: ${RESET}${CYAN}devbrain index docs/ENGINEERING.md${RESET}
+  ${devbrainCli1.YELLOW}No source file to index.${devbrainCli1.RESET}`);
+    console.log(`  ${devbrainCli1.DIM}Looked for: ${candidates.join(", ")} in ${repoRoot}${devbrainCli1.RESET}`);
+    console.log(`  ${devbrainCli1.DIM}Name one explicitly: ${devbrainCli1.RESET}${devbrainCli1.CYAN}devbrain index docs/ENGINEERING.md${devbrainCli1.RESET}
 `);
     return;
   }
@@ -797,10 +753,10 @@ async function handleIndex(fileArg, opts = {}) {
   const plan = devbrainMcp1.distExports.planIndex(sections, existing, file, { force: opts.force });
   console.log(`
   ${bold(`Indexing ${file}`)}  ${dim(`${sections.length} sections`)}`);
-  console.log(`  ${DIM}${plan.added.length} new \xB7 ${plan.updated.length} changed \xB7 ${plan.unchanged} unchanged \xB7 ${plan.removed.length} gone${RESET}
+  console.log(`  ${devbrainCli1.DIM}${plan.added.length} new \xB7 ${plan.updated.length} changed \xB7 ${plan.unchanged} unchanged \xB7 ${plan.removed.length} gone${devbrainCli1.RESET}
 `);
   if (!plan.added.length && !plan.updated.length && !plan.removed.length) {
-    console.log(`  ${GREEN}\u2713${RESET} Already up to date.
+    console.log(`  ${devbrainCli1.GREEN}\u2713${devbrainCli1.RESET} Already up to date.
 `);
     return;
   }
@@ -813,7 +769,7 @@ async function handleIndex(fileArg, opts = {}) {
   };
   for (const section of plan.added) {
     await devbrainMcp1.distExports.insertEntry(devbrainMcp1.distExports.entryForSection(section, project, file, { id: nanoid1.nanoid(), embedding: await embedFor(section) }));
-    console.log(`  ${GREEN}+${RESET} ${typeCode(section.type)}${section.type}${RESET}  ${devbrainMcp1.distExports.clip(section.title, 62)}`);
+    console.log(`  ${devbrainCli1.GREEN}+${devbrainCli1.RESET} ${typeCode(section.type)}${section.type}${devbrainCli1.RESET}  ${devbrainMcp1.distExports.clip(section.title, 62)}`);
   }
   for (const { section, entry } of plan.updated) {
     await devbrainMcp1.distExports.deleteEntry(entry.id);
@@ -822,7 +778,7 @@ async function handleIndex(fileArg, opts = {}) {
       embedding: await embedFor(section),
       createdAt: entry.createdAt
     }));
-    console.log(`  ${YELLOW}~${RESET} ${typeCode(section.type)}${section.type}${RESET}  ${devbrainMcp1.distExports.clip(section.title, 62)}  ${DIM}(source changed)${RESET}`);
+    console.log(`  ${devbrainCli1.YELLOW}~${devbrainCli1.RESET} ${typeCode(section.type)}${section.type}${devbrainCli1.RESET}  ${devbrainMcp1.distExports.clip(section.title, 62)}  ${devbrainCli1.DIM}(source changed)${devbrainCli1.RESET}`);
   }
   for (const entry of plan.removed) {
     const id = nanoid1.nanoid();
@@ -837,10 +793,10 @@ async function handleIndex(fileArg, opts = {}) {
       confidence: "observation"
     });
     await devbrainMcp1.distExports.supersedeEntry(entry.id, id);
-    console.log(`  ${RED}-${RESET} ${devbrainMcp1.distExports.clip(entry.title, 62)}  ${DIM}(removed from source)${RESET}`);
+    console.log(`  ${devbrainCli1.RED}-${devbrainCli1.RESET} ${devbrainMcp1.distExports.clip(entry.title, 62)}  ${devbrainCli1.DIM}(removed from source)${devbrainCli1.RESET}`);
   }
   console.log(`
-  ${GREEN}${bold("Indexed.")}${RESET} ${DIM}${file} stays the source \u2014 edit it there and re-run to update.${RESET}
+  ${devbrainCli1.GREEN}${bold("Indexed.")}${devbrainCli1.RESET} ${devbrainCli1.DIM}${file} stays the source \u2014 edit it there and re-run to update.${devbrainCli1.RESET}
 `);
 }
 const ERROR_SIGNALS = [
@@ -887,11 +843,11 @@ function extractFailure(output) {
 async function handleRun(argv) {
   if (argv.length === 0) {
     console.log(`
-  ${BOLD}devbrain run${RESET} ${MAGENTA}<command>${RESET}`);
-    console.log(`  ${DIM}Runs the command. If it fails, searches your memory for the error.${RESET}
+  ${devbrainCli1.BOLD}devbrain run${devbrainCli1.RESET} ${devbrainCli1.MAGENTA}<command>${devbrainCli1.RESET}`);
+    console.log(`  ${devbrainCli1.DIM}Runs the command. If it fails, searches your memory for the error.${devbrainCli1.RESET}
 `);
-    console.log(`  ${CYAN}devbrain run npm test${RESET}`);
-    console.log(`  ${CYAN}devbrain run npm run build${RESET}
+    console.log(`  ${devbrainCli1.CYAN}devbrain run npm test${devbrainCli1.RESET}`);
+    console.log(`  ${devbrainCli1.CYAN}devbrain run npm run build${devbrainCli1.RESET}
 `);
     process.exitCode = 1;
     return;
@@ -934,15 +890,15 @@ async function handleRun(argv) {
     if (hits.length === 0) return;
     const W = Math.min(process.stdout.columns || 80, 80);
     console.log(`
-${DIM}${"\u2500".repeat(W)}${RESET}`);
-    console.log(`  ${CYAN}${bold("DevBrain")}${RESET} \u2014 this looked familiar:`);
-    console.log(`  ${DIM}matched on: ${failure.slice(0, 68)}${RESET}
+${devbrainCli1.DIM}${"\u2500".repeat(W)}${devbrainCli1.RESET}`);
+    console.log(`  ${devbrainCli1.CYAN}${bold("DevBrain")}${devbrainCli1.RESET} \u2014 this looked familiar:`);
+    console.log(`  ${devbrainCli1.DIM}matched on: ${failure.slice(0, 68)}${devbrainCli1.RESET}
 `);
     hits.forEach((r, i) => {
       const type = devbrainMcp1.distExports.normalizeType(r.entry.type);
-      console.log(`  ${BOLD}${i + 1}.${RESET} ${typeCode(type)}[${type}]${RESET} ${r.entry.title}`);
-      console.log(`     ${DIM}${r.project.name} \xB7 ${devbrainMcp1.distExports.timeAgo(r.entry.createdAt)} \xB7 ${r.matchType === "pattern" ? "exact match" : devbrainMcp1.distExports.similarityLabel(r.similarity)}${RESET}`);
-      if (r.entry.errorPattern) console.log(`     ${DIM}error:${RESET} ${r.entry.errorPattern.slice(0, 100)}`);
+      console.log(`  ${devbrainCli1.BOLD}${i + 1}.${devbrainCli1.RESET} ${typeCode(type)}[${type}]${devbrainCli1.RESET} ${r.entry.title}`);
+      console.log(`     ${devbrainCli1.DIM}${r.project.name} \xB7 ${devbrainMcp1.distExports.timeAgo(r.entry.createdAt)} \xB7 ${r.matchType === "pattern" ? "exact match" : devbrainMcp1.distExports.similarityLabel(r.similarity)}${devbrainCli1.RESET}`);
+      if (r.entry.errorPattern) console.log(`     ${devbrainCli1.DIM}error:${devbrainCli1.RESET} ${r.entry.errorPattern.slice(0, 100)}`);
       for (const line of wrap(r.entry.content.slice(0, 400), 70)) console.log(`     ${line}`);
       console.log();
     });
@@ -951,7 +907,7 @@ ${DIM}${"\u2500".repeat(W)}${RESET}`);
     });
     await devbrainMcp1.distExports.bumpRecallCounts(matched, { query: failure }).catch(() => {
     });
-    console.log(`${DIM}${"\u2500".repeat(W)}${RESET}
+    console.log(`${devbrainCli1.DIM}${"\u2500".repeat(W)}${devbrainCli1.RESET}
 `);
   } catch {
   } finally {
@@ -978,28 +934,28 @@ async function handleSearch(query) {
     });
     if (results.length === 0) {
       console.log(`
-  ${YELLOW}No matches found${RESET} for "${query}"
+  ${devbrainCli1.YELLOW}No matches found${devbrainCli1.RESET} for "${query}"
 `);
       return;
     }
     await devbrainMcp1.distExports.bumpRetrievalCounts(results.map((r) => r.entry.id), currentProject?.id).catch(() => {
     });
-    const catLabel = classification.category !== "other" ? `  ${DIM}[${classification.category}]${RESET}` : "";
+    const catLabel = classification.category !== "other" ? `  ${devbrainCli1.DIM}[${classification.category}]${devbrainCli1.RESET}` : "";
     console.log(`
   ${bold("Results for:")} "${query}"${catLabel}
 `);
     results.forEach((r, i) => {
       const typeColor = typeCode(r.entry.type);
-      const matchColor = r.matchType === "pattern" ? GREEN : r.similarity >= 0.82 ? GREEN : r.similarity >= 0.72 ? YELLOW : DIM;
-      const matchLabel = r.matchType === "pattern" ? `${GREEN}pattern match${RESET}` : devbrainMcp1.distExports.similarityLabel(r.similarity);
-      const confBadge = r.entry.confidence === "confirmed" ? ` ${GREEN}\u2713${RESET}` : r.entry.confidence === "corroborated" ? ` ${YELLOW}~${RESET}` : "";
-      const catBadge = r.categoryMatch ? ` ${CYAN}[${r.entry.category}]${RESET}` : "";
-      const xpBadge = (r.entry.seenInProjects?.length ?? 0) >= 2 ? ` ${YELLOW}\xD7${r.entry.seenInProjects.length} projects${RESET}` : "";
-      console.log(`  ${BOLD}${i + 1}.${RESET} ${r.entry.title}${confBadge}${xpBadge}`);
-      console.log(`     ${typeColor}[${r.entry.type}]${RESET}  ${matchColor}${matchLabel}${RESET}${catBadge}  ${dim(r.project.name)}  ${dim(devbrainMcp1.distExports.timeAgo(r.entry.createdAt))}`);
-      if (r.entry.errorPattern) console.log(`     ${DIM}pattern: ${r.entry.errorPattern.slice(0, 80)}${RESET}`);
-      if (r.entry.causeArchetype) console.log(`     ${DIM}archetype: ${r.entry.causeArchetype.slice(0, 100)}${RESET}`);
-      console.log(`     ${DIM}\u2192${RESET} ${r.entry.content}`);
+      const matchColor = r.matchType === "pattern" ? devbrainCli1.GREEN : r.similarity >= 0.82 ? devbrainCli1.GREEN : r.similarity >= 0.72 ? devbrainCli1.YELLOW : devbrainCli1.DIM;
+      const matchLabel = r.matchType === "pattern" ? `${devbrainCli1.GREEN}pattern match${devbrainCli1.RESET}` : devbrainMcp1.distExports.similarityLabel(r.similarity);
+      const confBadge = r.entry.confidence === "confirmed" ? ` ${devbrainCli1.GREEN}\u2713${devbrainCli1.RESET}` : r.entry.confidence === "corroborated" ? ` ${devbrainCli1.YELLOW}~${devbrainCli1.RESET}` : "";
+      const catBadge = r.categoryMatch ? ` ${devbrainCli1.CYAN}[${r.entry.category}]${devbrainCli1.RESET}` : "";
+      const xpBadge = (r.entry.seenInProjects?.length ?? 0) >= 2 ? ` ${devbrainCli1.YELLOW}\xD7${r.entry.seenInProjects.length} projects${devbrainCli1.RESET}` : "";
+      console.log(`  ${devbrainCli1.BOLD}${i + 1}.${devbrainCli1.RESET} ${r.entry.title}${confBadge}${xpBadge}`);
+      console.log(`     ${typeColor}[${r.entry.type}]${devbrainCli1.RESET}  ${matchColor}${matchLabel}${devbrainCli1.RESET}${catBadge}  ${dim(r.project.name)}  ${dim(devbrainMcp1.distExports.timeAgo(r.entry.createdAt))}`);
+      if (r.entry.errorPattern) console.log(`     ${devbrainCli1.DIM}pattern: ${r.entry.errorPattern.slice(0, 80)}${devbrainCli1.RESET}`);
+      if (r.entry.causeArchetype) console.log(`     ${devbrainCli1.DIM}archetype: ${r.entry.causeArchetype.slice(0, 100)}${devbrainCli1.RESET}`);
+      console.log(`     ${devbrainCli1.DIM}\u2192${devbrainCli1.RESET} ${r.entry.content}`);
       if (r.entry.tags.length) console.log(`     ${dim("tags: " + r.entry.tags.join(", "))}`);
       console.log();
     });
@@ -1028,7 +984,7 @@ async function handleNote(text, inq, extra = {}) {
   const cwd = process.cwd();
   const repoRoot = devbrainMcp1.distExports.getRepoRoot(cwd) ?? cwd;
   const { project, unfiled } = await devbrainMcp1.distExports.projectForSave(repoRoot);
-  if (unfiled) console.log(`  ${DIM}Not inside a project, so this goes to Unfiled. Run it from the repo it is about to file it there.${RESET}`);
+  if (unfiled) console.log(`  ${devbrainCli1.DIM}Not inside a project, so this goes to Unfiled. Run it from the repo it is about to file it there.${devbrainCli1.RESET}`);
   const { type, content } = parseQuickSave(text);
   const s = spin("Saving...");
   try {
@@ -1044,10 +1000,10 @@ async function handleNote(text, inq, extra = {}) {
       if (nearDupes.length > 0) {
         const top = nearDupes[0];
         s.stop();
-        const confLabel = top.entry.confidence === "confirmed" ? ` ${GREEN}[confirmed]${RESET}` : top.entry.confidence === "corroborated" ? ` ${YELLOW}[corroborated]${RESET}` : "";
+        const confLabel = top.entry.confidence === "confirmed" ? ` ${devbrainCli1.GREEN}[confirmed]${devbrainCli1.RESET}` : top.entry.confidence === "corroborated" ? ` ${devbrainCli1.YELLOW}[corroborated]${devbrainCli1.RESET}` : "";
         console.log(`
-  ${YELLOW}Similar ${type} found${RESET}${confLabel}`);
-        console.log(`  ${DIM}\u2192${RESET} ${top.entry.title.slice(0, 80)}`);
+  ${devbrainCli1.YELLOW}Similar ${type} found${devbrainCli1.RESET}${confLabel}`);
+        console.log(`  ${devbrainCli1.DIM}\u2192${devbrainCli1.RESET} ${top.entry.title.slice(0, 80)}`);
         console.log();
         const { action } = await inq.prompt([{
           type: "list",
@@ -1055,20 +1011,20 @@ async function handleNote(text, inq, extra = {}) {
           message: "Reinforce existing entry or save as new?",
           prefix: " ",
           choices: [
-            { name: `${GREEN}Reinforce${RESET}  ${DIM}boost confidence on existing entry${RESET}`, value: "reinforce" },
-            { name: `${CYAN}Save new${RESET}    ${DIM}keep both as separate observations${RESET}`, value: "new" }
+            { name: `${devbrainCli1.GREEN}Reinforce${devbrainCli1.RESET}  ${devbrainCli1.DIM}boost confidence on existing entry${devbrainCli1.RESET}`, value: "reinforce" },
+            { name: `${devbrainCli1.CYAN}Save new${devbrainCli1.RESET}    ${devbrainCli1.DIM}keep both as separate observations${devbrainCli1.RESET}`, value: "new" }
           ]
         }]);
         if (action === "reinforce") {
           await devbrainMcp1.distExports.reinforceEntry(top.entry.id);
           const conf = top.entry.confidence === "confirmed" ? "confirmed" : top.entry.confidence === "corroborated" ? "confirmed" : "corroborated";
-          console.log(`  ${GREEN}\u2713${RESET} Reinforced  ${DIM}[${type}] \u2192 ${conf}${RESET}
+          console.log(`  ${devbrainCli1.GREEN}\u2713${devbrainCli1.RESET} Reinforced  ${devbrainCli1.DIM}[${type}] \u2192 ${conf}${devbrainCli1.RESET}
 `);
           return;
         }
         const newS = spin("Saving...");
         await devbrainMcp1.distExports.insertEntry({ id: nanoid1.nanoid(), projectId: project.id, type, title: devbrainMcp1.distExports.clip(content, 120), content, tags: [], embedding, createdAt: Date.now(), confidence: "observation" });
-        newS.succeed(`Saved  ${DIM}[${type}]${RESET}`);
+        newS.succeed(`Saved  ${devbrainCli1.DIM}[${type}]${devbrainCli1.RESET}`);
         console.log();
         return;
       }
@@ -1079,8 +1035,8 @@ async function handleNote(text, inq, extra = {}) {
           const top = related[0];
           s.stop();
           console.log(`
-  ${MAGENTA}Related decision found${RESET}`);
-          console.log(`  ${DIM}\u2192${RESET} ${top.entry.title.slice(0, 80)}`);
+  ${devbrainCli1.MAGENTA}Related decision found${devbrainCli1.RESET}`);
+          console.log(`  ${devbrainCli1.DIM}\u2192${devbrainCli1.RESET} ${top.entry.title.slice(0, 80)}`);
           console.log();
           const { action } = await inq.prompt([{
             type: "list",
@@ -1088,21 +1044,21 @@ async function handleNote(text, inq, extra = {}) {
             message: "Does this new decision supersede the old one?",
             prefix: " ",
             choices: [
-              { name: `${MAGENTA}Supersede${RESET}  ${DIM}mark old as superseded, save new as current${RESET}`, value: "supersede" },
-              { name: `${CYAN}Independent${RESET}  ${DIM}save as a separate decision${RESET}`, value: "new" }
+              { name: `${devbrainCli1.MAGENTA}Supersede${devbrainCli1.RESET}  ${devbrainCli1.DIM}mark old as superseded, save new as current${devbrainCli1.RESET}`, value: "supersede" },
+              { name: `${devbrainCli1.CYAN}Independent${devbrainCli1.RESET}  ${devbrainCli1.DIM}save as a separate decision${devbrainCli1.RESET}`, value: "new" }
             ]
           }]);
           if (action === "supersede") {
             const newId = nanoid1.nanoid();
             await devbrainMcp1.distExports.insertEntry({ id: newId, projectId: project.id, type, title: devbrainMcp1.distExports.clip(content, 120), content, tags: [], embedding, createdAt: Date.now(), confidence: "observation" });
             await devbrainMcp1.distExports.supersedeEntry(top.entry.id, newId);
-            console.log(`  ${GREEN}\u2713${RESET} Saved new decision  ${DIM}old marked superseded${RESET}
+            console.log(`  ${devbrainCli1.GREEN}\u2713${devbrainCli1.RESET} Saved new decision  ${devbrainCli1.DIM}old marked superseded${devbrainCli1.RESET}
 `);
             return;
           }
           const newS = spin("Saving...");
           await devbrainMcp1.distExports.insertEntry({ id: nanoid1.nanoid(), projectId: project.id, type, title: devbrainMcp1.distExports.clip(content, 120), content, tags: [], embedding, createdAt: Date.now(), confidence: "observation" });
-          newS.succeed(`Saved  ${DIM}[${type}]${RESET}`);
+          newS.succeed(`Saved  ${devbrainCli1.DIM}[${type}]${devbrainCli1.RESET}`);
           console.log();
           return;
         }
@@ -1116,7 +1072,7 @@ async function handleNote(text, inq, extra = {}) {
     const known = !!dupe && dupe.entry.id !== extra.fixes?.trim();
     if (known) {
       s.stop();
-      console.log(`  ${DIM}Already known \u2014 near-duplicate of an existing entry, not saved.${RESET}
+      console.log(`  ${devbrainCli1.DIM}Already known \u2014 near-duplicate of an existing entry, not saved.${devbrainCli1.RESET}
 `);
       return;
     }
@@ -1143,15 +1099,15 @@ async function handleNote(text, inq, extra = {}) {
       ...closes ? { fixes: closes.id } : {}
     });
     if (inq) {
-      console.log(`  ${GREEN}\u2713${RESET} Saved  ${DIM}[${type}]${RESET}
+      console.log(`  ${devbrainCli1.GREEN}\u2713${devbrainCli1.RESET} Saved  ${devbrainCli1.DIM}[${type}]${devbrainCli1.RESET}
 `);
     } else {
-      s.succeed(`Saved  ${DIM}[${type}]${RESET}`);
+      s.succeed(`Saved  ${devbrainCli1.DIM}[${type}]${devbrainCli1.RESET}`);
       console.log();
     }
-    if (closes) console.log(`  ${DIM}Closes: ${devbrainMcp1.distExports.clip(closes.title, 70)}${RESET}
+    if (closes) console.log(`  ${devbrainCli1.DIM}Closes: ${devbrainMcp1.distExports.clip(closes.title, 70)}${devbrainCli1.RESET}
 `);
-    else if (wants) console.log(`  ${DIM}No entry with id ${wants}, so nothing was linked.${RESET}
+    else if (wants) console.log(`  ${devbrainCli1.DIM}No entry with id ${wants}, so nothing was linked.${devbrainCli1.RESET}
 `);
   } catch (err) {
     s.fail("Failed to save");
@@ -1187,7 +1143,7 @@ async function handleProject(nameArg, opts = {}) {
   const projects = await devbrainMcp1.distExports.getAllProjects();
   if (projects.length === 0) {
     console.log(`
-  ${YELLOW}No projects registered yet.${RESET} Run ${CYAN}devbrain init${RESET} in a repo.
+  ${devbrainCli1.YELLOW}No projects registered yet.${devbrainCli1.RESET} Run ${devbrainCli1.CYAN}devbrain init${devbrainCli1.RESET} in a repo.
 `);
     return;
   }
@@ -1197,17 +1153,17 @@ async function handleProject(nameArg, opts = {}) {
     const matches = projects.filter((p) => p.name.toLowerCase().includes(q));
     if (matches.length === 0) {
       console.log(`
-  ${YELLOW}No project matching${RESET} "${nameArg.trim()}"
+  ${devbrainCli1.YELLOW}No project matching${devbrainCli1.RESET} "${nameArg.trim()}"
 `);
-      console.log(`  ${DIM}Known projects:${RESET} ${projects.map((p) => p.name).join(", ")}
+      console.log(`  ${devbrainCli1.DIM}Known projects:${devbrainCli1.RESET} ${projects.map((p) => p.name).join(", ")}
 `);
       return;
     }
     if (matches.length > 1) {
       console.log(`
-  ${YELLOW}Several projects match${RESET} "${nameArg.trim()}"
+  ${devbrainCli1.YELLOW}Several projects match${devbrainCli1.RESET} "${nameArg.trim()}"
 `);
-      matches.forEach((p) => console.log(`  ${CYAN}${p.name}${RESET}  ${DIM}${p.path}${RESET}`));
+      matches.forEach((p) => console.log(`  ${devbrainCli1.CYAN}${p.name}${devbrainCli1.RESET}  ${devbrainCli1.DIM}${p.path}${devbrainCli1.RESET}`));
       console.log();
       return;
     }
@@ -1216,10 +1172,10 @@ async function handleProject(nameArg, opts = {}) {
     project = projects.find((p) => devbrainMcp1.distExports.sameProjectPath(p.path, repoRoot)) ?? null;
     if (!project) {
       console.log(`
-  ${YELLOW}This directory isn't a registered project.${RESET}
+  ${devbrainCli1.YELLOW}This directory isn't a registered project.${devbrainCli1.RESET}
 `);
-      console.log(`  ${DIM}Run ${RESET}${CYAN}devbrain init${RESET}${DIM} here, or name one:${RESET}`);
-      projects.forEach((p) => console.log(`  ${CYAN}devbrain project ${p.name}${RESET}  ${DIM}${p.path}${RESET}`));
+      console.log(`  ${devbrainCli1.DIM}Run ${devbrainCli1.RESET}${devbrainCli1.CYAN}devbrain init${devbrainCli1.RESET}${devbrainCli1.DIM} here, or name one:${devbrainCli1.RESET}`);
+      projects.forEach((p) => console.log(`  ${devbrainCli1.CYAN}devbrain project ${p.name}${devbrainCli1.RESET}  ${devbrainCli1.DIM}${p.path}${devbrainCli1.RESET}`));
       console.log();
       return;
     }
@@ -1232,38 +1188,38 @@ async function handleProject(nameArg, opts = {}) {
     const files = devbrainMcp1.distExports.dossierFiles(dossier);
     for (const f of files) require$$0.writeFileSync(require$$1.join(outDir, f.path), f.contents, "utf-8");
     console.log(`
-  ${GREEN}\u2713${RESET} Wrote ${files.length} file${files.length === 1 ? "" : "s"} for ${bold(project.name)}`);
-    files.forEach((f) => console.log(`  ${DIM}${require$$1.join(outDir, f.path)}${RESET}`));
+  ${devbrainCli1.GREEN}\u2713${devbrainCli1.RESET} Wrote ${files.length} file${files.length === 1 ? "" : "s"} for ${bold(project.name)}`);
+    files.forEach((f) => console.log(`  ${devbrainCli1.DIM}${require$$1.join(outDir, f.path)}${devbrainCli1.RESET}`));
     console.log();
     openPath(outDir);
     return;
   }
   console.log();
-  console.log(`  ${BOLD}${CYAN}${project.name}${RESET}`);
-  console.log(`  ${DIM}Stack   ${RESET}${project.stack.join(" \xB7 ") || "not detected"}`);
-  console.log(`  ${DIM}Path    ${RESET}${project.path}`);
-  console.log(`  ${DIM}Memory  ${RESET}${dossier.total} ${dossier.total === 1 ? "entry" : "entries"}` + (dossier.lastEntryAt ? `  ${DIM}\xB7 last ${devbrainMcp1.distExports.timeAgo(dossier.lastEntryAt)}${RESET}` : "") + (dossier.supersededCount ? `  ${DIM}\xB7 ${dossier.supersededCount} superseded${RESET}` : ""));
+  console.log(`  ${devbrainCli1.BOLD}${devbrainCli1.CYAN}${project.name}${devbrainCli1.RESET}`);
+  console.log(`  ${devbrainCli1.DIM}Stack   ${devbrainCli1.RESET}${project.stack.join(" \xB7 ") || "not detected"}`);
+  console.log(`  ${devbrainCli1.DIM}Path    ${devbrainCli1.RESET}${project.path}`);
+  console.log(`  ${devbrainCli1.DIM}Memory  ${devbrainCli1.RESET}${dossier.total} ${dossier.total === 1 ? "entry" : "entries"}` + (dossier.lastEntryAt ? `  ${devbrainCli1.DIM}\xB7 last ${devbrainMcp1.distExports.timeAgo(dossier.lastEntryAt)}${devbrainCli1.RESET}` : "") + (dossier.supersededCount ? `  ${devbrainCli1.DIM}\xB7 ${dossier.supersededCount} superseded${devbrainCli1.RESET}` : ""));
   if (dossier.total === 0) {
     console.log(`
-  ${DIM}Nothing recorded yet. Ask your coding agent to ${RESET}${CYAN}run devbrain backfill${RESET}${DIM} and save what matters.${RESET}
+  ${devbrainCli1.DIM}Nothing recorded yet. Ask your coding agent to ${devbrainCli1.RESET}${devbrainCli1.CYAN}run devbrain backfill${devbrainCli1.RESET}${devbrainCli1.DIM} and save what matters.${devbrainCli1.RESET}
 `);
     return;
   }
   console.log();
   for (const section of dossier.sections) {
-    console.log(`  ${BOLD}${section.heading}${RESET}  ${DIM}(${section.entries.length})${RESET}`);
+    console.log(`  ${devbrainCli1.BOLD}${section.heading}${devbrainCli1.RESET}  ${devbrainCli1.DIM}(${section.entries.length})${devbrainCli1.RESET}`);
     for (const entry of section.entries.slice(0, 8)) {
       const type = devbrainMcp1.distExports.normalizeType(entry.type);
       const title = entry.title.length > 66 ? `${entry.title.slice(0, 66)}\u2026` : entry.title;
-      const flags = entry.supersededBy ? ` ${YELLOW}[superseded]${RESET}` : "";
-      console.log(`    ${typeDot(type)} ${title}${flags}  ${DIM}${devbrainMcp1.distExports.timeAgo(entry.createdAt)}${RESET}`);
+      const flags = entry.supersededBy ? ` ${devbrainCli1.YELLOW}[superseded]${devbrainCli1.RESET}` : "";
+      console.log(`    ${typeDot(type)} ${title}${flags}  ${devbrainCli1.DIM}${devbrainMcp1.distExports.timeAgo(entry.createdAt)}${devbrainCli1.RESET}`);
     }
     if (section.entries.length > 8) {
-      console.log(`    ${DIM}\u2026 ${section.entries.length - 8} more${RESET}`);
+      console.log(`    ${devbrainCli1.DIM}\u2026 ${section.entries.length - 8} more${devbrainCli1.RESET}`);
     }
     console.log();
   }
-  console.log(`  ${DIM}Full write-up: ${RESET}${CYAN}devbrain project${nameArg ? ` ${nameArg}` : ""} --write${RESET}${DIM} (one .md per section)${RESET}
+  console.log(`  ${devbrainCli1.DIM}Full write-up: ${devbrainCli1.RESET}${devbrainCli1.CYAN}devbrain project${nameArg ? ` ${nameArg}` : ""} --write${devbrainCli1.RESET}${devbrainCli1.DIM} (one .md per section)${devbrainCli1.RESET}
 `);
 }
 async function handleContext(query) {
@@ -1291,31 +1247,31 @@ async function handleContext(query) {
   });
   console.log();
   for (const line of text.split("\n")) {
-    if (line.startsWith("# ")) console.log(`${BOLD}${CYAN}${line}${RESET}`);
+    if (line.startsWith("# ")) console.log(`${devbrainCli1.BOLD}${devbrainCli1.CYAN}${line}${devbrainCli1.RESET}`);
     else if (line.startsWith("## ")) console.log(`
-${BOLD}${line}${RESET}`);
+${devbrainCli1.BOLD}${line}${devbrainCli1.RESET}`);
     else if (line.startsWith("## Cross-Project")) console.log(`
-${BOLD}${YELLOW}${line}${RESET}`);
+${devbrainCli1.BOLD}${devbrainCli1.YELLOW}${line}${devbrainCli1.RESET}`);
     else if (line.startsWith("## Anti-Patterns")) console.log(`
-${BOLD}${"\x1B[91m"}${line}${RESET}`);
-    else if (/^\d+\. \[bug\]/.test(line)) console.log(`  ${RED}${line}${RESET}`);
-    else if (/^\d+\. \[fix\]/.test(line)) console.log(`  ${GREEN}${line}${RESET}`);
-    else if (/^\d+\. \[/.test(line)) console.log(`  ${CYAN}${line}${RESET}`);
-    else if (line.startsWith("- ")) console.log(`  ${DIM}${line}${RESET}`);
+${devbrainCli1.BOLD}${"\x1B[91m"}${line}${devbrainCli1.RESET}`);
+    else if (/^\d+\. \[bug\]/.test(line)) console.log(`  ${devbrainCli1.RED}${line}${devbrainCli1.RESET}`);
+    else if (/^\d+\. \[fix\]/.test(line)) console.log(`  ${devbrainCli1.GREEN}${line}${devbrainCli1.RESET}`);
+    else if (/^\d+\. \[/.test(line)) console.log(`  ${devbrainCli1.CYAN}${line}${devbrainCli1.RESET}`);
+    else if (line.startsWith("- ")) console.log(`  ${devbrainCli1.DIM}${line}${devbrainCli1.RESET}`);
     else if (line.startsWith("   \u2192 ")) console.log(`  ${line}`);
-    else if (line.startsWith("   tags:")) console.log(`  ${DIM}${line}${RESET}`);
-    else if (line.startsWith("   ")) console.log(`  ${DIM}${line}${RESET}`);
+    else if (line.startsWith("   tags:")) console.log(`  ${devbrainCli1.DIM}${line}${devbrainCli1.RESET}`);
+    else if (line.startsWith("   ")) console.log(`  ${devbrainCli1.DIM}${line}${devbrainCli1.RESET}`);
     else console.log(line);
   }
   console.log();
   if (project) {
     const siblingRecent = all.filter((e) => e.projectId !== project.id && !e.supersededBy).sort((a, b) => b.createdAt - a.createdAt).slice(0, 3);
     if (siblingRecent.length > 0) {
-      console.log(`${BOLD}${YELLOW}\u{1F4E2} Team Updates (from Sibling Projects)${RESET}`);
+      console.log(`${devbrainCli1.BOLD}${devbrainCli1.YELLOW}\u{1F4E2} Team Updates (from Sibling Projects)${devbrainCli1.RESET}`);
       siblingRecent.forEach((e) => {
         const typeColor = typeCode(e.type);
-        console.log(`  \u2022 ${typeColor}[${e.type}]${RESET} ${e.title} ${DIM}(${e.project.name} \xB7 ${devbrainMcp1.distExports.timeAgo(e.createdAt)})${RESET}`);
-        console.log(`    ${DIM}\u2192 ${e.content.slice(0, 100)}${e.content.length > 100 ? "..." : ""}${RESET}`);
+        console.log(`  \u2022 ${typeColor}[${e.type}]${devbrainCli1.RESET} ${e.title} ${devbrainCli1.DIM}(${e.project.name} \xB7 ${devbrainMcp1.distExports.timeAgo(e.createdAt)})${devbrainCli1.RESET}`);
+        console.log(`    ${devbrainCli1.DIM}\u2192 ${e.content.slice(0, 100)}${e.content.length > 100 ? "..." : ""}${devbrainCli1.RESET}`);
       });
       console.log();
     }
@@ -1323,30 +1279,30 @@ ${BOLD}${"\x1B[91m"}${line}${RESET}`);
 }
 function showEntryDetail(entry) {
   const typeColor = typeCode(entry.type);
-  const sep = `${DIM}${"\u2500".repeat(62)}${RESET}`;
-  const confBadge = entry.confidence === "confirmed" ? `  ${GREEN}\u2713 confirmed${RESET}` : entry.confidence === "corroborated" ? `  ${YELLOW}~ corroborated${RESET}` : "";
+  const sep = `${devbrainCli1.DIM}${"\u2500".repeat(62)}${devbrainCli1.RESET}`;
+  const confBadge = entry.confidence === "confirmed" ? `  ${devbrainCli1.GREEN}\u2713 confirmed${devbrainCli1.RESET}` : entry.confidence === "corroborated" ? `  ${devbrainCli1.YELLOW}~ corroborated${devbrainCli1.RESET}` : "";
   console.log(`
   ${sep}`);
-  console.log(`  ${typeColor}${BOLD} ${entry.type.toUpperCase()} ${RESET}  ${BOLD}${entry.project.name}${RESET}  ${dim(entry.project.stack.join(", "))}  ${dim(devbrainMcp1.distExports.timeAgo(entry.createdAt))}${confBadge}`);
+  console.log(`  ${typeColor}${devbrainCli1.BOLD} ${entry.type.toUpperCase()} ${devbrainCli1.RESET}  ${devbrainCli1.BOLD}${entry.project.name}${devbrainCli1.RESET}  ${dim(entry.project.stack.join(", "))}  ${dim(devbrainMcp1.distExports.timeAgo(entry.createdAt))}${confBadge}`);
   if (entry.tags.length) console.log(`  ${dim("tags: " + entry.tags.join(", "))}`);
-  if (entry.supersededBy) console.log(`  ${YELLOW}[SUPERSEDED]${RESET}`);
+  if (entry.supersededBy) console.log(`  ${devbrainCli1.YELLOW}[SUPERSEDED]${devbrainCli1.RESET}`);
   console.log(`  ${sep}`);
   if (entry.type === "image") {
     console.log(`
-  ${BOLD}Image Path${RESET}`);
-    console.log(`  ${CYAN}${entry.title}${RESET}
+  ${devbrainCli1.BOLD}Image Path${devbrainCli1.RESET}`);
+    console.log(`  ${devbrainCli1.CYAN}${entry.title}${devbrainCli1.RESET}
 `);
     if (entry.content && entry.content !== entry.title) {
-      console.log(`  ${BOLD}Description${RESET}`);
+      console.log(`  ${devbrainCli1.BOLD}Description${devbrainCli1.RESET}`);
       console.log(`  ${entry.content}
 `);
     }
   } else {
     console.log(`
-  ${BOLD}Problem${RESET}`);
+  ${devbrainCli1.BOLD}Problem${devbrainCli1.RESET}`);
     console.log(`  ${entry.title}
 `);
-    console.log(`  ${BOLD}Solution${RESET}`);
+    console.log(`  ${devbrainCli1.BOLD}Solution${devbrainCli1.RESET}`);
     const words = entry.content.split(" ");
     let line_ = "  ";
     for (const word of words) {
@@ -1366,7 +1322,7 @@ async function handleBrowse(inquirer) {
   const all = await devbrainMcp1.distExports.getAllEntriesWithProjects();
   if (all.length === 0) {
     console.log(`
-  ${YELLOW}No entries yet.${RESET} Make commits or add notes to start building your knowledge base.
+  ${devbrainCli1.YELLOW}No entries yet.${devbrainCli1.RESET} Make commits or add notes to start building your knowledge base.
 `);
     return;
   }
@@ -1377,14 +1333,14 @@ async function handleBrowse(inquirer) {
       ...sorted.map((e, i) => {
         const typeColor = typeCode(e.type);
         const title = e.title.length > 50 ? e.title.slice(0, 50) + "\u2026" : e.title.padEnd(51);
-        const badge = e.confidence === "confirmed" ? `${GREEN}\u2713${RESET} ` : e.confidence === "corroborated" ? `${YELLOW}~${RESET} ` : "  ";
+        const badge = e.confidence === "confirmed" ? `${devbrainCli1.GREEN}\u2713${devbrainCli1.RESET} ` : e.confidence === "corroborated" ? `${devbrainCli1.YELLOW}~${devbrainCli1.RESET} ` : "  ";
         const imgIcon = e.type === "image" ? "\u{1F4F7} " : "";
         return {
-          name: `${typeColor}${e.type.padEnd(8)}${RESET} ${badge}${imgIcon}${title}  ${dim(e.project.name + " \xB7 " + devbrainMcp1.distExports.timeAgo(e.createdAt))}`,
+          name: `${typeColor}${e.type.padEnd(8)}${devbrainCli1.RESET} ${badge}${imgIcon}${title}  ${dim(e.project.name + " \xB7 " + devbrainMcp1.distExports.timeAgo(e.createdAt))}`,
           value: i
         };
       }),
-      { name: `${DIM}\u2190 Back${RESET}`, value: -1 }
+      { name: `${devbrainCli1.DIM}\u2190 Back${devbrainCli1.RESET}`, value: -1 }
     ];
     let idx;
     try {
@@ -1403,13 +1359,13 @@ async function handleBrowse(inquirer) {
       browsing = false;
       break;
     }
-    clr();
+    devbrainCli1.clr();
     const selected = sorted[idx];
     showEntryDetail(selected);
     const actionChoices = [
       { name: "\u2190 Back to list", value: "list" },
-      ...selected.type === "image" ? [{ name: `${CYAN}\u{1F4F7} Open image${RESET}`, value: "open-image" }] : [],
-      { name: `${DIM}Main menu${RESET}`, value: "menu" }
+      ...selected.type === "image" ? [{ name: `${devbrainCli1.CYAN}\u{1F4F7} Open image${devbrainCli1.RESET}`, value: "open-image" }] : [],
+      { name: `${devbrainCli1.DIM}Main menu${devbrainCli1.RESET}`, value: "menu" }
     ];
     let next;
     try {
@@ -1427,9 +1383,9 @@ async function handleBrowse(inquirer) {
       browsing = false;
     } else if (next === "open-image") {
       openPath(selected.content || selected.title);
-      clr();
+      devbrainCli1.clr();
     } else {
-      clr();
+      devbrainCli1.clr();
     }
   }
 }
@@ -1439,7 +1395,7 @@ async function handleDelete(inquirer) {
   const active = all.filter((e) => !e.supersededBy).sort((a, b) => b.createdAt - a.createdAt);
   if (active.length === 0) {
     console.log(`
-  ${YELLOW}No entries to delete.${RESET}
+  ${devbrainCli1.YELLOW}No entries to delete.${devbrainCli1.RESET}
 `);
     return;
   }
@@ -1447,10 +1403,10 @@ async function handleDelete(inquirer) {
   try {
     const choices = [
       ...active.map((e, i) => ({
-        name: `${typeCode(e.type)}[${e.type}]${RESET} ${e.title.slice(0, 55).padEnd(56)} ${dim(e.project.name + " \xB7 " + devbrainMcp1.distExports.timeAgo(e.createdAt))}`,
+        name: `${typeCode(e.type)}[${e.type}]${devbrainCli1.RESET} ${e.title.slice(0, 55).padEnd(56)} ${dim(e.project.name + " \xB7 " + devbrainMcp1.distExports.timeAgo(e.createdAt))}`,
         value: i
       })),
-      { name: `${DIM}\u2190 Cancel${RESET}`, value: -1 }
+      { name: `${devbrainCli1.DIM}\u2190 Cancel${devbrainCli1.RESET}`, value: -1 }
     ];
     const res = await inq.prompt([{ type: "list", name: "idx", message: "Select entry to delete:", choices, pageSize: 14 }]);
     idx = res.idx;
@@ -1460,8 +1416,8 @@ async function handleDelete(inquirer) {
   if (idx === -1) return;
   const selected = active[idx];
   console.log(`
-  ${RED}${BOLD}${selected.title.slice(0, 80)}${RESET}`);
-  console.log(`  ${DIM}[${selected.type}] \xB7 ${selected.project.name} \xB7 ${devbrainMcp1.distExports.timeAgo(selected.createdAt)}${RESET}
+  ${devbrainCli1.RED}${devbrainCli1.BOLD}${selected.title.slice(0, 80)}${devbrainCli1.RESET}`);
+  console.log(`  ${devbrainCli1.DIM}[${selected.type}] \xB7 ${selected.project.name} \xB7 ${devbrainMcp1.distExports.timeAgo(selected.createdAt)}${devbrainCli1.RESET}
 `);
   try {
     const { confirm } = await inq.prompt([{
@@ -1472,7 +1428,7 @@ async function handleDelete(inquirer) {
       prefix: " "
     }]);
     if (!confirm) {
-      console.log(`  ${DIM}Cancelled.${RESET}
+      console.log(`  ${devbrainCli1.DIM}Cancelled.${devbrainCli1.RESET}
 `);
       return;
     }
@@ -1480,156 +1436,19 @@ async function handleDelete(inquirer) {
     return;
   }
   await devbrainMcp1.distExports.deleteEntry(selected.id);
-  console.log(`  ${GREEN}\u2713${RESET} Deleted
+  console.log(`  ${devbrainCli1.GREEN}\u2713${devbrainCli1.RESET} Deleted
 `);
 }
 async function runOnboarding() {
-  if (!process.stdin.isTTY) {
-    console.log(`
-  ${YELLOW}Setup needs an interactive terminal.${RESET}
-`);
-    console.log(`  ${DIM}Nothing is required to start \u2014 memory defaults to ${RESET}${devbrainMcp1.distExports.getLocalDbPath()}${DIM}.${RESET}`);
-    console.log(`  ${DIM}Commands that save and recall notes already work.${RESET}
-`);
-    console.log(`  Optional, in ${DIM}${envFilePath}${RESET}:`);
-    console.log(`    ${CYAN}GEMINI_API_KEY${RESET}=...              ${DIM}# semantic search instead of keywords${RESET}`);
-    console.log(`    ${CYAN}MONGODB_URI${RESET}=mongodb+srv://...   ${DIM}# optional \u2014 share memory across a team${RESET}
-`);
-    return;
-  }
-  const _inq = omitted1.requireTheInteractiveTerminalUI();
-  const inq = typeof _inq.prompt === "function" ? _inq : _inq.default;
-  clr();
-  console.log(BANNER);
+  const run = omitted1.requireTheSetupWizard().runOnboarding;
+  await run({ markOnboarded, handleInit });
+}
+function pluginSettingsNotice() {
   console.log(`
-  ${BOLD}Welcome to DevBrain.${RESET} Let's get you set up \u2014 takes about 30 seconds.
+  ${devbrainCli1.BOLD}DevBrain's settings live in Claude Code.${devbrainCli1.RESET} Open ${devbrainCli1.CYAN}/plugin${devbrainCli1.RESET}, pick devbrain, and configure it there.`);
+  console.log(`  ${devbrainCli1.DIM}Nothing is required \u2014 memory defaults to ${devbrainCli1.RESET}${devbrainMcp1.distExports.getLocalDbPath()}${devbrainCli1.DIM}.${devbrainCli1.RESET}`);
+  console.log(`  ${devbrainCli1.DIM}A MongoDB connection string there shares one memory across machines or a team.${devbrainCli1.RESET}
 `);
-  const stageHeader = (n, total, label) => `  ${BOLD}${CYAN}[${n}/${total}]${RESET}  ${BOLD}${label}${RESET}`;
-  console.log(stageHeader(1, 3, "Storage"));
-  if (hasMongoUri()) {
-    console.log(`  ${GREEN}\u2713${RESET} MongoDB already configured ${DIM}(MONGODB_URI is set)${RESET}
-`);
-  } else {
-    const { store } = await inq.prompt([{
-      type: "list",
-      name: "store",
-      prefix: " ",
-      message: "Where should DevBrain keep your memory?",
-      choices: [
-        { name: `${GREEN}This machine${RESET}  ${DIM}a JSON file in ~/.devbrain \u2014 no setup, works now${RESET}`, value: "local" },
-        { name: `${CYAN}MongoDB${RESET}       ${DIM}share one memory across a team or machines${RESET}`, value: "mongo" }
-      ]
-    }]);
-    if (store === "mongo") {
-      console.log(`
-  ${DIM}${RESET}${CYAN}https://cloud.mongodb.com${RESET}${DIM} \u2192 create a free cluster \u2192 Connect \u2192 copy the string${RESET}
-`);
-      const { uri } = await inq.prompt([{
-        type: "password",
-        name: "uri",
-        prefix: " ",
-        message: "Paste your MongoDB connection string (or press Enter to stay local):",
-        validate: (v) => !v?.trim() || /^mongodb(\+srv)?:\/\//.test(v.trim()) ? true : "That does not look like a connection string \u2014 it should start with mongodb:// or mongodb+srv://"
-      }]);
-      if (uri?.trim()) {
-        writeEnvVars({ MONGODB_URI: uri.trim() });
-        process.env.MONGODB_URI = uri.trim();
-        console.log(`  ${GREEN}\u2713${RESET} Saved to ${DIM}${envFilePath}${RESET}
-`);
-      } else {
-        console.log(`  ${DIM}Staying local \u2014 ${RESET}${CYAN}${devbrainMcp1.distExports.getLocalDbPath()}${RESET}
-`);
-      }
-    } else {
-      console.log(`  ${GREEN}\u2713${RESET} Local storage \u2014 ${DIM}${devbrainMcp1.distExports.getLocalDbPath()}${RESET}`);
-      console.log(`     ${DIM}Switch later by adding MONGODB_URI to ${envFilePath}${RESET}
-`);
-    }
-  }
-  console.log(stageHeader(2, 3, "Semantic Search (optional)"));
-  console.log(`  ${DIM}DevBrain needs no AI \u2014 your coding agent writes every entry, and search matches keywords.${RESET}`);
-  console.log(`  ${DIM}A Gemini key adds semantic search: matching by meaning, not just words.${RESET}
-`);
-  if (isMockMode()) {
-    console.log(`  ${GREEN}\u2713${RESET} Mock mode (DEVBRAIN_MOCK=true) \u2014 no Gemini calls will be made
-`);
-  } else if (hasVertexCreds()) {
-    console.log(`  ${GREEN}\u2713${RESET} Vertex AI configured (project ${process.env.GOOGLE_CLOUD_PROJECT})
-`);
-  } else if (hasGeminiCreds()) {
-    console.log(`  ${GREEN}\u2713${RESET} Gemini API key already set
-`);
-  } else {
-    const { apiKey } = await inq.prompt([{
-      type: "password",
-      name: "apiKey",
-      message: "Gemini API key (press Enter to skip \u2014 you can add one later):",
-      prefix: " "
-    }]);
-    if (apiKey?.trim()) {
-      writeEnvVars({ GEMINI_API_KEY: apiKey.trim() });
-      process.env.GEMINI_API_KEY = apiKey.trim();
-      console.log(`  ${GREEN}\u2713${RESET} Saved to ${DIM}${envFilePath}${RESET}
-`);
-    } else {
-      console.log(`  ${GREEN}\u2713${RESET} Keyword search ${DIM}\u2014 add GEMINI_API_KEY to ${envFilePath} anytime${RESET}
-`);
-    }
-  }
-  markOnboarded();
-  console.log(stageHeader(3, 3, "This Project"));
-  const repoRoot = devbrainMcp1.distExports.getRepoRoot(process.cwd()) ?? process.cwd();
-  console.log(`  ${DIM}Detected: ${RESET}${BOLD}${devbrainMcp1.distExports.getProjectName(repoRoot)}${RESET}  ${DIM}${repoRoot}${RESET}
-`);
-  const { regProject } = await inq.prompt([{
-    type: "confirm",
-    name: "regProject",
-    message: "Set up DevBrain for this project?",
-    default: true,
-    prefix: " "
-  }]);
-  if (regProject) {
-    await handleInit();
-  } else {
-    console.log(`  ${DIM}Skipped \u2014 run ${RESET}${CYAN}devbrain init${RESET}${DIM} in any project to set it up.${RESET}
-`);
-  }
-  const W = Math.min(process.stdout.columns || 80, 80);
-  const storage = devbrainMcp1.distExports.describeStorage();
-  console.log(`${DIM}${"\u2500".repeat(W)}${RESET}`);
-  console.log(`
-  ${GREEN}${BOLD}DevBrain is ready.${RESET}
-`);
-  console.log(`  ${BOLD}Where your data lives${RESET}`);
-  console.log(`  ${DIM}Memory    ${RESET}${storage.location}${storage.kind === "local" ? ` ${DIM}(local)${RESET}` : ""}`);
-  console.log(`  ${DIM}Config    ${RESET}${envFilePath}
-`);
-  if (!hasGeminiCreds()) {
-    console.log(`  ${DIM}Search matches keywords. For semantic search, add GEMINI_API_KEY to ${envFilePath}.${RESET}
-`);
-  }
-  console.log(`  ${BOLD}Quick reference${RESET}`);
-  console.log(`  ${CYAN}bug: <text>${RESET}   save a bug instantly`);
-  console.log(`  ${CYAN}fix: <text>${RESET}   save a fix instantly`);
-  console.log(`  ${CYAN}/<command>${RESET}    type / to see all commands`);
-  console.log(`  ${CYAN}devbrain setup${RESET} re-run this wizard anytime
-`);
-  console.log(`${DIM}${"\u2500".repeat(W)}${RESET}
-`);
-  let goNow = true;
-  try {
-    const res = await inq.prompt([{
-      type: "confirm",
-      name: "goNow",
-      message: "Open DevBrain now?",
-      default: true,
-      prefix: " "
-    }]);
-    goNow = res.goNow;
-  } catch {
-    goNow = false;
-  }
-  if (goNow) clr();
 }
 const COMMANDS = [
   { value: "/search", desc: "Search memory \u2014 exact error text works best" },
@@ -1666,7 +1485,7 @@ async function runCommand(cmd, arg, inquirer) {
     case "/save": {
       let text = arg;
       if (!text) {
-        process.stdout.write(`  ${DIM}Prefixes: bug: fix: stack: decision: pattern: lesson:${RESET}
+        process.stdout.write(`  ${devbrainCli1.DIM}Prefixes: bug: fix: stack: decision: pattern: lesson:${devbrainCli1.RESET}
 `);
         try {
           const { note } = await inq.prompt([{ type: "input", name: "note", message: "\u{1F4DD} Save:" }]);
@@ -1694,17 +1513,17 @@ async function runCommand(cmd, arg, inquirer) {
       await handleBrowse(inq);
       break;
     case "/clear":
-      clr();
+      devbrainCli1.clr();
       await printProjectContext();
       break;
     case "/exit":
     case "/quit":
-      console.log(`  ${DIM}See you later.${RESET}
+      console.log(`  ${devbrainCli1.DIM}See you later.${devbrainCli1.RESET}
 `);
       process.exit(0);
       break;
     default:
-      console.log(`  ${YELLOW}Unknown command.${RESET} Type / and press Enter to see all commands.
+      console.log(`  ${devbrainCli1.YELLOW}Unknown command.${devbrainCli1.RESET} Type / and press Enter to see all commands.
 `);
   }
   return true;
@@ -1716,7 +1535,7 @@ async function handleInteractive() {
   inquirer.registerPrompt("autocomplete", typeof _ac === "function" ? _ac : _ac.default);
   await printProjectContext();
   const W = Math.min(process.stdout.columns || 80, 80);
-  const sep = `${DIM}${"\u2500".repeat(W)}${RESET}`;
+  const sep = `${devbrainCli1.DIM}${"\u2500".repeat(W)}${devbrainCli1.RESET}`;
   let entryPool = await devbrainMcp1.distExports.getAllEntriesWithProjects();
   const botSep = new inquirer.Separator(sep);
   while (true) {
@@ -1726,7 +1545,7 @@ async function handleInteractive() {
       const { value } = await inquirer.prompt([{
         type: "autocomplete",
         name: "value",
-        message: `${CYAN}devbrain${RESET}`,
+        message: `${devbrainCli1.CYAN}devbrain${devbrainCli1.RESET}`,
         prefix: "",
         suggestOnly: false,
         pageSize: 10,
@@ -1735,7 +1554,7 @@ async function handleInteractive() {
           if (t === "") {
             return [
               botSep,
-              { name: `${DIM}type to search  \xB7  / for commands${RESET}`, value: "__hint__", short: "" }
+              { name: `${devbrainCli1.DIM}type to search  \xB7  / for commands${devbrainCli1.RESET}`, value: "__hint__", short: "" }
             ];
           }
           if (t.startsWith("/")) {
@@ -1748,7 +1567,7 @@ async function handleInteractive() {
                 return [
                   botSep,
                   {
-                    name: `${CYAN}${name}${RESET} ${rest.slice(0, 50)}  ${DIM}${known.desc}${RESET}`,
+                    name: `${devbrainCli1.CYAN}${name}${devbrainCli1.RESET} ${rest.slice(0, 50)}  ${devbrainCli1.DIM}${known.desc}${devbrainCli1.RESET}`,
                     value: `__cmd__${name} ${rest}`,
                     short: t
                   }
@@ -1759,7 +1578,7 @@ async function handleInteractive() {
             return [
               botSep,
               ...(list.length ? list : COMMANDS).map((c) => ({
-                name: `${CYAN}${c.value.padEnd(12)}${RESET}  ${DIM}${c.desc}${RESET}`,
+                name: `${devbrainCli1.CYAN}${c.value.padEnd(12)}${devbrainCli1.RESET}  ${devbrainCli1.DIM}${c.desc}${devbrainCli1.RESET}`,
                 value: `__cmd__${c.value}`,
                 short: c.value
               }))
@@ -1769,15 +1588,15 @@ async function handleInteractive() {
           const hasP = Object.keys(PREFIXES).some((p) => t.toLowerCase().startsWith(p));
           if (hasP) {
             const { type, content } = parseQuickSave(t);
-            rows.push({ name: `${typeDot(type)} Save [${type}]  ${DIM}${content.slice(0, 55)}${RESET}`, value: `__save__${t}`, short: t });
+            rows.push({ name: `${typeDot(type)} Save [${type}]  ${devbrainCli1.DIM}${content.slice(0, 55)}${devbrainCli1.RESET}`, value: `__save__${t}`, short: t });
           } else {
-            rows.push({ name: `${CYAN}\u{1F50D}${RESET}  Search  ${DIM}"${t.slice(0, 55)}"${RESET}`, value: `__search__${t}`, short: t });
+            rows.push({ name: `${devbrainCli1.CYAN}\u{1F50D}${devbrainCli1.RESET}  Search  ${devbrainCli1.DIM}"${t.slice(0, 55)}"${devbrainCli1.RESET}`, value: `__search__${t}`, short: t });
           }
           const lc = t.toLowerCase();
           const matches = entryPool.filter((e) => e.title.toLowerCase().includes(lc)).slice(0, 6);
           for (const e of matches) {
             rows.push({
-              name: `${typeDot(e.type)} ${e.title.slice(0, 52).padEnd(53)}  ${DIM}${e.project.name} \xB7 ${devbrainMcp1.distExports.timeAgo(e.createdAt)}${RESET}`,
+              name: `${typeDot(e.type)} ${e.title.slice(0, 52).padEnd(53)}  ${devbrainCli1.DIM}${e.project.name} \xB7 ${devbrainMcp1.distExports.timeAgo(e.createdAt)}${devbrainCli1.RESET}`,
               value: `__search__${e.title}`,
               short: e.title
             });
@@ -1805,7 +1624,7 @@ async function handleInteractive() {
       try {
         await handleNote(submitted.slice(8), inquirer);
         entryPool = await devbrainMcp1.distExports.getAllEntriesWithProjects();
-        console.log(`  ${DIM}Memory: ${entryPool.length} entries${RESET}
+        console.log(`  ${devbrainCli1.DIM}Memory: ${entryPool.length} entries${devbrainCli1.RESET}
 `);
       } catch {
       }
@@ -1817,13 +1636,27 @@ async function handleInteractive() {
     }
   }
 }
+async function startRepl() {
+  if (!isOnboarded()) {
+    await runOnboarding();
+    if (!isOnboarded()) process.exit(1);
+  }
+  if (!process.stdin.isTTY) {
+    console.log(`
+  ${devbrainCli1.YELLOW}The DevBrain REPL needs an interactive terminal.${devbrainCli1.RESET}`);
+    console.log(`  ${devbrainCli1.DIM}Non-interactively, use ${devbrainCli1.RESET}${devbrainCli1.CYAN}devbrain context${devbrainCli1.RESET}${devbrainCli1.DIM}, ${devbrainCli1.RESET}${devbrainCli1.CYAN}devbrain search${devbrainCli1.RESET}${devbrainCli1.DIM} or ${devbrainCli1.RESET}${devbrainCli1.CYAN}devbrain note${devbrainCli1.RESET}${devbrainCli1.DIM}.${devbrainCli1.RESET}
+`);
+    process.exit(1);
+  }
+  await handleInteractive();
+}
 async function main() {
   const args = process.argv.slice(2);
   const command = args[0] ?? "";
   try {
     switch (command) {
       case "setup":
-        await runOnboarding();
+        if (PLUGIN_BUILD) pluginSettingsNotice();
         break;
       case "init":
         await handleInit();
@@ -1875,49 +1708,38 @@ async function main() {
       case "--help":
       case "-h":
         console.log(`
-${BOLD}${CYAN}DevBrain${RESET} \u2014 memory your coding agent writes, and reads back
+${devbrainCli1.BOLD}${devbrainCli1.CYAN}DevBrain${devbrainCli1.RESET} \u2014 memory your coding agent writes, and reads back
 `);
-        console.log(`  ${BOLD}Set up${RESET}`);
-        console.log(`  ${CYAN}devbrain setup${RESET}            Storage, optional semantic search, this project`);
-        console.log(`  ${CYAN}devbrain init${RESET}             Register a project + Claude Code hooks`);
-        console.log(`  ${CYAN}devbrain hooks${RESET} ${MAGENTA}[install]${RESET}  Brief sessions and prompt the agent to save ${DIM}(--global)${RESET}`);
+        console.log(`  ${devbrainCli1.BOLD}Set up${devbrainCli1.RESET}`);
+        console.log(`  ${devbrainCli1.CYAN}devbrain setup${devbrainCli1.RESET}            Storage, optional semantic search, this project`);
+        console.log(`  ${devbrainCli1.CYAN}devbrain init${devbrainCli1.RESET}             Register a project + Claude Code hooks`);
+        console.log(`  ${devbrainCli1.CYAN}devbrain hooks${devbrainCli1.RESET} ${devbrainCli1.MAGENTA}[install]${devbrainCli1.RESET}  Brief sessions and prompt the agent to save ${devbrainCli1.DIM}(--global)${devbrainCli1.RESET}`);
         console.log(`
-  ${BOLD}Write${RESET}`);
-        console.log(`  ${CYAN}devbrain note${RESET} ${MAGENTA}"<t>"${RESET}       Save  ${DIM}fix: decision: lesson: bug: stack: \u2026${RESET}`);
-        console.log(`  ${CYAN}devbrain backfill${RESET} ${MAGENTA}[n]${RESET}    Unreviewed commits and sessions, for your agent to save from`);
-        console.log(`  ${CYAN}devbrain index${RESET} ${MAGENTA}[file]${RESET}     Index CLAUDE.md as a source of truth`);
+  ${devbrainCli1.BOLD}Write${devbrainCli1.RESET}`);
+        console.log(`  ${devbrainCli1.CYAN}devbrain note${devbrainCli1.RESET} ${devbrainCli1.MAGENTA}"<t>"${devbrainCli1.RESET}       Save  ${devbrainCli1.DIM}fix: decision: lesson: bug: stack: \u2026${devbrainCli1.RESET}`);
+        console.log(`  ${devbrainCli1.CYAN}devbrain backfill${devbrainCli1.RESET} ${devbrainCli1.MAGENTA}[n]${devbrainCli1.RESET}    Unreviewed commits and sessions, for your agent to save from`);
+        console.log(`  ${devbrainCli1.CYAN}devbrain index${devbrainCli1.RESET} ${devbrainCli1.MAGENTA}[file]${devbrainCli1.RESET}     Index CLAUDE.md as a source of truth`);
         console.log(`
-  ${BOLD}Read${RESET}`);
-        console.log(`  ${CYAN}devbrain context${RESET} ${MAGENTA}[task]${RESET}  Ranked project history, as an agent sees it`);
-        console.log(`  ${CYAN}devbrain search${RESET} ${MAGENTA}<q>${RESET}       Search \u2014 exact error text works best`);
-        console.log(`  ${CYAN}devbrain project${RESET} ${MAGENTA}[n]${RESET}      Everything saved about a project ${DIM}(--write: one .md per section)${RESET}`);
-        console.log(`  ${CYAN}devbrain run${RESET} ${MAGENTA}<cmd>${RESET}        Run a command; on failure, show past fixes`);
+  ${devbrainCli1.BOLD}Read${devbrainCli1.RESET}`);
+        console.log(`  ${devbrainCli1.CYAN}devbrain context${devbrainCli1.RESET} ${devbrainCli1.MAGENTA}[task]${devbrainCli1.RESET}  Ranked project history, as an agent sees it`);
+        console.log(`  ${devbrainCli1.CYAN}devbrain search${devbrainCli1.RESET} ${devbrainCli1.MAGENTA}<q>${devbrainCli1.RESET}       Search \u2014 exact error text works best`);
+        console.log(`  ${devbrainCli1.CYAN}devbrain project${devbrainCli1.RESET} ${devbrainCli1.MAGENTA}[n]${devbrainCli1.RESET}      Everything saved about a project ${devbrainCli1.DIM}(--write: one .md per section)${devbrainCli1.RESET}`);
+        console.log(`  ${devbrainCli1.CYAN}devbrain run${devbrainCli1.RESET} ${devbrainCli1.MAGENTA}<cmd>${devbrainCli1.RESET}        Run a command; on failure, show past fixes`);
         console.log(`
-  ${CYAN}devbrain${RESET}                  Interactive REPL`);
+  ${devbrainCli1.CYAN}devbrain${devbrainCli1.RESET}                  Interactive REPL`);
         console.log(`
-  ${DIM}Set DEVBRAIN_DEBUG=1 to see full stack traces on error.${RESET}
+  ${devbrainCli1.DIM}Set DEVBRAIN_DEBUG=1 to see full stack traces on error.${devbrainCli1.RESET}
 `);
         break;
       default:
         if (command && !command.startsWith("-")) {
           console.log(`
-  ${RED}Unknown command:${RESET} ${command}`);
-          console.log(`  ${DIM}Run ${RESET}${CYAN}devbrain --help${RESET}${DIM} to see what's available.${RESET}
+  ${devbrainCli1.RED}Unknown command:${devbrainCli1.RESET} ${command}`);
+          console.log(`  ${devbrainCli1.DIM}Run ${devbrainCli1.RESET}${devbrainCli1.CYAN}devbrain --help${devbrainCli1.RESET}${devbrainCli1.DIM} to see what's available.${devbrainCli1.RESET}
 `);
           process.exit(1);
         }
-        if (!isOnboarded()) {
-          await runOnboarding();
-          if (!isOnboarded()) process.exit(1);
-        }
-        if (!process.stdin.isTTY) {
-          console.log(`
-  ${YELLOW}The DevBrain REPL needs an interactive terminal.${RESET}`);
-          console.log(`  ${DIM}Non-interactively, use ${RESET}${CYAN}devbrain context${RESET}${DIM}, ${RESET}${CYAN}devbrain search${RESET}${DIM} or ${RESET}${CYAN}devbrain note${RESET}${DIM}.${RESET}
-`);
-          process.exit(1);
-        }
-        await handleInteractive();
+        if (PLUGIN_BUILD) pluginSettingsNotice();
         break;
     }
   } catch (err) {
