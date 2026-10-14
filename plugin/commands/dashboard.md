@@ -1,6 +1,6 @@
 ---
 description: Open the DevBrain dashboard — everything saved, as a browsable graph.
-allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/dist/mcp.js" --serve*), Bash(curl -s -o /dev/null *localhost:8080*)
+allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/dist/mcp.js" --serve), Bash(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/health)
 ---
 
 Start the dashboard, if it is not already up.

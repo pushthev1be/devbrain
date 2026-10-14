@@ -1,10 +1,9 @@
 ---
 description: Search this project's memory for a past fix, bug or decision. Exact error text works best.
 argument-hint: <exact error text or a description>
-# Searching is read-only, so it is pre-approved. Both names are listed because
-# the plugin's own server is namespaced, and a user who also has the CLI
-# installed has a project-level `devbrain` server from its .mcp.json.
-allowed-tools: mcp__plugin_devbrain_devbrain__search_knowledge, mcp__devbrain__search_knowledge
+# Searching is read-only, so it is pre-approved. The plugin's own server is
+# namespaced by Claude Code as mcp__plugin_<plugin>_<server>__<tool>.
+allowed-tools: mcp__plugin_devbrain_devbrain__search_knowledge
 ---
 
 Search DevBrain for: $ARGUMENTS

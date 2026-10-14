@@ -14,6 +14,7 @@ dist/
 /plugin/dist/*
 !/plugin/dist/cli.js
 !/plugin/dist/mcp.js
+!/plugin/dist/lib/
 !/plugin/dist/BUILD
 *.js.map
 .env
