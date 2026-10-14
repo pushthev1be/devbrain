@@ -132,10 +132,9 @@ async function printProjectContext() {
   const bugs = entries.filter((e) => e.type === "bug").length;
   const fixes = entries.filter((e) => e.type === "fix").length;
   const notes = entries.filter((e) => e.type === "note").length;
-  const hooksOn = agentHooksInstalled(repoRoot);
   console.log(`  ${bold("Project")}  ${project.name}`);
   console.log(`  ${bold("Stack")}    ${project.stack.join(", ") || "Unknown"}`);
-  console.log(`  ${bold("Hooks")}    ${hooksOn ? `${devbrainCli1.GREEN}\u2713 Claude Code${devbrainCli1.RESET}` : `${devbrainCli1.YELLOW}\u2717 not installed${devbrainCli1.RESET}  ${devbrainCli1.DIM}devbrain hooks install${devbrainCli1.RESET}`}`);
+  console.log(`  ${bold("Hooks")}    ${`${devbrainCli1.GREEN}\u2713 Claude Code${devbrainCli1.RESET}` }`);
   console.log(`  ${bold("Memory")}   ${entries.length} entries  ${dim(`${bugs} bugs \xB7 ${fixes} fixes \xB7 ${notes} notes`)}  ${dim(`\xB7 ${devbrainMcp1.distExports.describeStorage().kind === "local" ? "local" : "MongoDB"}`)}`);
   if (entries.length > 0) {
     console.log(`
@@ -202,12 +201,8 @@ async function handleInit() {
     } else {
       console.log(`  ${devbrainCli1.YELLOW}\u26A0${devbrainCli1.RESET}  Not a git repo \u2014 knowledge comes from agent sessions and notes`);
     }
-    try {
-      const path = agentSettingsPath(repoRoot, false);
-      writeAgentSettings(path, devbrainMcp1.distExports.withDevbrainHooks(readAgentSettings(path)));
-      console.log(`  ${devbrainCli1.GREEN}\u2713${devbrainCli1.RESET} Claude Code hooks installed \u2014 sessions start briefed, and your agent is asked to record what it fixes`);
-    } catch (err) {
-      console.log(`  ${devbrainCli1.YELLOW}\u26A0${devbrainCli1.RESET}  Could not install Claude Code hooks: ${explainError(err)}`);
+    if (PLUGIN_BUILD) {
+      console.log(`  ${devbrainCli1.GREEN}\u2713${devbrainCli1.RESET} Claude Code hooks come with the plugin`);
     }
     const devContextMdPath = require$$1.join(repoRoot, "DEV_CONTEXT.md");
     const devbrainBlock = [
@@ -439,17 +434,8 @@ function captureLog(message) {
   } catch {
   }
 }
-function agentSettingsPath(repoRoot, global) {
-  return global ? require$$1.join(require$$2.homedir(), ".claude", "settings.json") : require$$1.join(repoRoot, ".claude", "settings.local.json");
-}
-function readAgentSettings(path) {
-  if (!require$$0.existsSync(path)) return {};
-  const raw = require$$0.readFileSync(path, "utf-8").replace(/^﻿/, "").trim();
-  return raw ? JSON.parse(raw) : {};
-}
-function writeAgentSettings(path, settings) {
-  require$$0.mkdirSync(require$$1.dirname(path), { recursive: true });
-  require$$0.writeFileSync(path, JSON.stringify(settings, null, 2) + "\n", "utf-8");
+function agentSettings() {
+  return omitted1.requireHookInstallationIntoClaudeCodeSettings();
 }
 function readHookInput() {
   if (process.stdin.isTTY) return Promise.resolve({});
@@ -641,16 +627,8 @@ function transcriptsFor(repoRoot) {
   if (!require$$0.existsSync(dir)) return [];
   return require$$0.readdirSync(dir).filter((f) => f.endsWith(".jsonl")).map((f) => require$$1.join(dir, f)).sort((a, b) => require$$0.statSync(a).mtimeMs - require$$0.statSync(b).mtimeMs);
 }
-function agentHooksInstalled(repoRoot) {
-  for (const global of [false, true]) {
-    try {
-      if (devbrainMcp1.distExports.installedDevbrainHooks(readAgentSettings(agentSettingsPath(repoRoot, global))).length) return true;
-    } catch {
-    }
-  }
-  return false;
-}
 async function handleHooks(args) {
+  const { agentSettingsPath, readAgentSettings, writeAgentSettings } = agentSettings();
   const action = args.find((a) => !a.startsWith("--")) ?? "status";
   const global = args.includes("--global");
   const repoRoot = devbrainMcp1.distExports.getRepoRoot(process.cwd()) ?? process.cwd();
@@ -1658,7 +1636,9 @@ async function main() {
         await handleBackfill(args.slice(1));
         break;
       case "hooks":
-        await handleHooks(args.slice(1));
+        if (PLUGIN_BUILD) console.log(`
+  ${devbrainCli1.DIM}The plugin brings its own hooks; see ${devbrainCli1.RESET}${devbrainCli1.CYAN}/hooks${devbrainCli1.RESET}${devbrainCli1.DIM} in Claude Code.${devbrainCli1.RESET}
+`);
         break;
       // Called by Claude Code, not by people. Never fails.
       case "hook":

@@ -43,6 +43,16 @@ function requireTheFileOpenerAndDevbrainRun () {
 	throw new Error("DevBrain was built without the file opener and devbrain run, so the plugin stays inside the file limits Anthropic's plugin directory enforces. Matching on wording and on exact error text still works. Install the devbrain CLI for the full build.");
 }
 
+var hookInstallationIntoClaudeCodeSettings;
+var hasRequiredHookInstallationIntoClaudeCodeSettings;
+
+function requireHookInstallationIntoClaudeCodeSettings () {
+	if (hasRequiredHookInstallationIntoClaudeCodeSettings) return hookInstallationIntoClaudeCodeSettings;
+	hasRequiredHookInstallationIntoClaudeCodeSettings = 1;
+	hookInstallationIntoClaudeCodeSettings = {};
+	throw new Error("DevBrain was built without hook installation into Claude Code settings, so the plugin stays inside the file limits Anthropic's plugin directory enforces. Matching on wording and on exact error text still works. Install the devbrain CLI for the full build.");
+}
+
 var theSetupWizard;
 var hasRequiredTheSetupWizard;
 
@@ -75,6 +85,7 @@ function requireTheADKAgentRoute () {
 
 exports.getAugmentedNamespace = getAugmentedNamespace;
 exports.getDefaultExportFromCjs = getDefaultExportFromCjs;
+exports.requireHookInstallationIntoClaudeCodeSettings = requireHookInstallationIntoClaudeCodeSettings;
 exports.requireTheADKAgentRoute = requireTheADKAgentRoute;
 exports.requireTheFileOpenerAndDevbrainRun = requireTheFileOpenerAndDevbrainRun;
 exports.requireTheInteractiveTerminalUI = requireTheInteractiveTerminalUI;

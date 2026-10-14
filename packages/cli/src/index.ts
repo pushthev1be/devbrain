@@ -162,7 +162,8 @@ async function printProjectContext(): Promise<void> {
   const bugs  = entries.filter(e => e.type === 'bug').length;
   const fixes = entries.filter(e => e.type === 'fix').length;
   const notes = entries.filter(e => e.type === 'note').length;
-  const hooksOn = agentHooksInstalled(repoRoot);
+  // The plugin's hooks come with it; the npm CLI installs them into settings.
+  const hooksOn = PLUGIN_BUILD || agentSettings().agentHooksInstalled(repoRoot);
 
   console.log(`  ${bold('Project')}  ${project.name}`);
   console.log(`  ${bold('Stack')}    ${project.stack.join(', ') || 'Unknown'}`);
@@ -254,7 +255,10 @@ async function handleInit(): Promise<void> {
 
     // Commits are only half of it: the reasoning lives in the agent session.
     // Local settings, so teammates without DevBrain installed are unaffected.
-    try {
+    if (PLUGIN_BUILD) {
+      console.log(`  ${GREEN}✓${RESET} Claude Code hooks come with the plugin`);
+    } else try {
+      const { agentSettingsPath, readAgentSettings, writeAgentSettings } = agentSettings();
       const path = agentSettingsPath(repoRoot, false);
       writeAgentSettings(path, withDevbrainHooks(readAgentSettings(path)));
       console.log(`  ${GREEN}✓${RESET} Claude Code hooks installed — sessions start briefed, and your agent is asked to record what it fixes`);
@@ -544,23 +548,10 @@ function captureLog(message: string): void {
   } catch { /* logging must never break capture */ }
 }
 
-function agentSettingsPath(repoRoot: string, global: boolean): string {
-  return global
-    ? join(homedir(), '.claude', 'settings.json')
-    : join(repoRoot, '.claude', 'settings.local.json');
-}
-
-function readAgentSettings(path: string): Record<string, unknown> {
-  if (!existsSync(path)) return {};
-  const raw = readFileSync(path, 'utf-8').replace(/^﻿/, '').trim();
-  // Refuse to overwrite a file we cannot parse — it is the user's config.
-  return raw ? JSON.parse(raw) : {};
-}
-
-function writeAgentSettings(path: string, settings: Record<string, unknown>): void {
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
-}
+type AgentSettings = typeof import('./agentSettings');
+/** Loaded only when used: the plugin build leaves agentSettings.ts out. */
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+function agentSettings(): AgentSettings { return require('./agentSettings'); }
 
 /** Hook input on stdin. Bounded wait: a hook must never hang the agent. */
 function readHookInput(): Promise<Record<string, unknown>> {
@@ -857,18 +848,9 @@ function transcriptsFor(repoRoot: string): string[] {
 }
 
 
-/** True when Claude Code runs DevBrain's hooks here, from project or user settings. */
-function agentHooksInstalled(repoRoot: string): boolean {
-  for (const global of [false, true]) {
-    try {
-      if (installedDevbrainHooks(readAgentSettings(agentSettingsPath(repoRoot, global))).length) return true;
-    } catch { /* unreadable settings: treat as not installed */ }
-  }
-  return false;
-}
-
 /** `devbrain hooks [install|uninstall|status] [--global]` */
 async function handleHooks(args: string[]): Promise<void> {
+  const { agentSettingsPath, readAgentSettings, writeAgentSettings } = agentSettings();
   const action = args.find(a => !a.startsWith('--')) ?? 'status';
   const global = args.includes('--global');
   const repoRoot = getRepoRoot(process.cwd()) ?? process.cwd();
@@ -2003,7 +1985,10 @@ async function main(): Promise<void> {
         break;
       }
       case 'backfill': await handleBackfill(args.slice(1));        break;
-      case 'hooks':   await handleHooks(args.slice(1));            break;
+      case 'hooks':
+        if (PLUGIN_BUILD) console.log(`\n  ${DIM}The plugin brings its own hooks; see ${RESET}${CYAN}/hooks${RESET}${DIM} in Claude Code.${RESET}\n`);
+        else await handleHooks(args.slice(1));
+        break;
       // Called by Claude Code, not by people. Never fails.
       case 'hook':    await handleHook(args[1] ?? '');             break;
       case 'help': case '--help': case '-h':
