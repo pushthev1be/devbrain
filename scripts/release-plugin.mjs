@@ -60,9 +60,9 @@ console.log(`  ${branch} @ ${source}, plugin ${version}`);
 step('build and test');
 run('npm run build');
 run('npm test');
-// BUILD is a timestamp and differs on every build; anything else differing
+// BUILD.json is a timestamp and differs on every build; anything else differing
 // means plugin/ was committed without being rebuilt.
-const stale = out("git diff --name-only -- plugin \":(exclude)plugin/dist/BUILD\"");
+const stale = out("git diff --name-only -- plugin \":(exclude)plugin/dist/BUILD.json\"");
 if (stale) {
   stop(`plugin/ was committed stale — a fresh build changes:\n    ${stale.split('\n').join('\n    ')}\n` +
        `  The rebuilt files are left in place: commit them through a pull request, then release.`);

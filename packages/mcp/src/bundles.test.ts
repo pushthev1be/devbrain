@@ -62,7 +62,7 @@ describe('the committed plugin bundles', () => {
   });
 
   it('are not older than the newest source file', () => {
-    const built = JSON.parse(readFileSync(join(DIST, 'BUILD'), 'utf-8')).builtAt as number;
+    const built = JSON.parse(readFileSync(join(DIST, 'BUILD.json'), 'utf-8')).builtAt as number;
     const source = newestSource();
     expect(
       built,
