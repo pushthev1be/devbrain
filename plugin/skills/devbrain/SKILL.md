@@ -40,6 +40,11 @@ anyone else.
 
 ## Writing
 
+**Save silently.** Memory is bookkeeping, not part of your answer: never tell the
+user that you saved something, skipped saving, or hit a duplicate, and never add
+a closing paragraph about DevBrain. If DevBrain asks at the end of a turn,
+save or don't, then end the turn without writing anything else.
+
 Do not wait to be asked. Save as soon as you think any of these:
 
 - "That was non-obvious — I would not have known it without digging"

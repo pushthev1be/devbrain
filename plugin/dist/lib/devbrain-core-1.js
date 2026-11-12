@@ -8,6 +8,7 @@ const devbrainCore2 = require('./devbrain-core-2.js');
 const mongodb4 = require('./mongodb-4.js');
 const nanoid1 = require('./nanoid-1.js');
 const crypto = require('crypto');
+const omitted1 = require('./omitted-1.js');
 
 var dist = {};
 
@@ -1718,7 +1719,7 @@ function requireDb () {
 		        return _db;
 		    const uri = process.env.MONGODB_URI;
 		    if (!uri)
-		        throw new Error('MONGODB_URI is not set. Add it to ~/.devbrain/.env');
+		        throw new Error('MONGODB_URI is not set.');
 		    const { MongoClient, ServerApiVersion } = loadMongo();
 		    client = new MongoClient(uri, {
 		        serverApi: { version: ServerApiVersion.v1, strict: false, deprecationErrors: true },
@@ -4089,88 +4090,15 @@ function requireGraph () {
 	return graph;
 }
 
-var env = {};
+var pluginSettings = {};
 
-var hasRequiredEnv;
+var hasRequiredPluginSettings;
 
-function requireEnv () {
-	if (hasRequiredEnv) return env;
-	hasRequiredEnv = 1;
-	// Reading ~/.devbrain/.env, which is where `devbrain setup` puts MONGODB_URI,
-	// GEMINI_API_KEY and the Vertex AI variables. The npm CLI only: the plugin build
-	// reads its settings from Claude Code instead, through usePluginSettings.
-	//
-	// This lived twice, copied between the CLI and the MCP server, which is how the
-	// two drifted into disagreeing about a case neither of them was tested on.
-	Object.defineProperty(env, "__esModule", { value: true });
-	env.parseEnvFile = parseEnvFile;
-	env.globalEnvPath = globalEnvPath;
-	env.loadGlobalEnv = loadGlobalEnv;
-	env.usePluginSettings = usePluginSettings;
-	const fs_1 = require$$0;
-	const os_1 = require$$2;
-	const path_1 = require$$1;
-	/** Parse `.env` text into pairs. Blank lines and `#` comments are skipped. */
-	function parseEnvFile(text) {
-	    const out = {};
-	    // Strip a UTF-8 BOM: Notepad and PowerShell's `>` both write one, and it
-	    // would otherwise become part of the first key's name.
-	    for (const line of text.replace(/^﻿/, '').split('\n')) {
-	        const trimmed = line.trim();
-	        if (!trimmed || trimmed.startsWith('#'))
-	            continue;
-	        const [k, ...rest] = trimmed.split('=');
-	        const key = k?.trim();
-	        // A value may legitimately contain '=' — a Mongo URI usually does.
-	        if (key && rest.length)
-	            out[key] = rest.join('=').trim();
-	    }
-	    return out;
-	}
-	/**
-	 * True when an environment variable carries no usable value.
-	 *
-	 * An empty string has to count as absent, and this is not a nicety. A launcher
-	 * that substitutes a value the user never filled in sets the variable to ""
-	 * rather than leaving it out: the Claude Code plugin manifest passes
-	 * `MONGODB_URI: "${user_config.mongodb_uri}"`, and leaving that optional field
-	 * blank — the default, and what the field's own description recommends — sets
-	 * it to the empty string.
-	 *
-	 * With a `=== undefined` check, "" counted as "the user set this deliberately",
-	 * so the configured MONGODB_URI in ~/.devbrain/.env was never loaded, and
-	 * db.ts's own `!uri.trim()` test then quietly chose local JSON storage. The
-	 * plugin installed, connected, answered every call and found nothing, with no
-	 * error anywhere. Reproduced directly: `MONGODB_URI="" devbrain search
-	 * "Illegal return statement"` printed "No matches found" where the same search
-	 * without the variable found the entry.
-	 */
-	function unset(value) {
-	    return value === undefined || value.trim() === '';
-	}
-	/** Path of the config file `devbrain setup` writes. */
-	function globalEnvPath() {
-	    return (0, path_1.join)((0, os_1.homedir)(), '.devbrain', '.env');
-	}
-	/**
-	 * Load ~/.devbrain/.env into process.env.
-	 *
-	 * A real environment variable wins over the file, so `MONGODB_URI=… devbrain …`
-	 * and a container's injected config both still override it — but only when it
-	 * actually carries a value. Returns the names of the keys it set.
-	 */
-	function loadGlobalEnv(path = globalEnvPath()) {
-	    if (!(0, fs_1.existsSync)(path))
-	        return [];
-	    const applied = [];
-	    for (const [key, value] of Object.entries(parseEnvFile((0, fs_1.readFileSync)(path, 'utf-8')))) {
-	        if (unset(process.env[key])) {
-	            process.env[key] = value;
-	            applied.push(key);
-	        }
-	    }
-	    return applied;
-	}
+function requirePluginSettings () {
+	if (hasRequiredPluginSettings) return pluginSettings;
+	hasRequiredPluginSettings = 1;
+	Object.defineProperty(pluginSettings, "__esModule", { value: true });
+	pluginSettings.usePluginSettings = usePluginSettings;
 	/**
 	 * In the Claude Code plugin, take the database from the plugin's own settings
 	 * and from nothing else on the machine.
@@ -4183,13 +4111,16 @@ function requireEnv () {
 	 * app's database. Anthropic's plugin directory holds a plugin that reads a
 	 * credential from the machine rather than from a value the user chose to share.
 	 *
+	 * Kept apart from globalEnv.ts, the ~/.devbrain/.env loader, so the plugin
+	 * build can leave that module out entirely and still have this.
+	 *
 	 * Unset in both means local storage, the same as an empty option.
 	 */
 	function usePluginSettings(env = process.env) {
 	    env.MONGODB_URI = env.CLAUDE_PLUGIN_OPTION_MONGODB_URI ?? env.DEVBRAIN_MONGODB_URI ?? '';
 	}
 	
-	return env;
+	return pluginSettings;
 }
 
 var hasRequiredDist;
@@ -4234,7 +4165,8 @@ function requireDist () {
 		__exportStar(requireStuck(), exports);
 		__exportStar(requireGraph(), exports);
 		__exportStar(requireRedact(), exports);
-		__exportStar(requireEnv(), exports);
+		__exportStar(omitted1.requireTheDevbrainEnvLoader(), exports);
+		__exportStar(requirePluginSettings(), exports);
 		
 	} (dist));
 	return dist;

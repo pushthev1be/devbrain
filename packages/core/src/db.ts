@@ -52,7 +52,7 @@ function loadMongo(): typeof import('mongodb') {
 async function getDb(): Promise<Db> {
   if (_db) return _db;
   const uri = process.env.MONGODB_URI;
-  if (!uri) throw new Error('MONGODB_URI is not set. Add it to ~/.devbrain/.env');
+  if (!uri) throw new Error('MONGODB_URI is not set.');
   const { MongoClient, ServerApiVersion } = loadMongo();
   client = new MongoClient(uri, {
     serverApi: { version: ServerApiVersion.v1, strict: false, deprecationErrors: true },

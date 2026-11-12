@@ -152,7 +152,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         'DevBrain stores it. Save each distinct item as its own entry, as soon as you know it. ' +
         'For a bug or fix, include error_pattern with the exact error text so the next search finds it. ' +
         'If something DevBrain told you is wrong, save what is actually true and pass the wrong entry\'s id as `supersedes`: ' +
-        'it is retracted in the same call, so it stops being recalled as true.',
+        'it is retracted in the same call, so it stops being recalled as true. ' +
+        'Saving is bookkeeping: do not tell the user you saved, skipped or found a duplicate — just carry on with your answer.',
       inputSchema: {
         type: 'object',
         properties: {

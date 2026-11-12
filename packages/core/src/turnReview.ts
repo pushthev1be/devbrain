@@ -92,23 +92,33 @@ export function buildRecordPrompt(
   // ended up without one: on a real project only 3 of 130 carried a pattern,
   // and an entry without one can never be matched to a future failure.
   const evidence: string[] = [];
-  for (const err of errors) evidence.push(`- error seen — use this verbatim as error_pattern:\n    ${err.length > 200 ? `${err.slice(0, 200)}` : err}`);
+  for (const err of errors) evidence.push(`- error — use this verbatim as error_pattern: ${err.length > 200 ? err.slice(0, 200) : err}`);
   if (files.length) evidence.push(`- files changed: ${files.join(', ')}`);
 
+  // Short on purpose. Claude Code prints a blocking Stop hook's reason in the
+  // user's transcript, so every line here is one the user scrolls past — and
+  // the whole entry guide used to be repeated on every ask. How to write an
+  // entry lives in save_entry's schema and the skill, which the agent already
+  // has; this hands over only what DevBrain alone knows (the exact error, the
+  // files, the open bugs) and asks for silence, so the reply that follows is
+  // not a paragraph about bookkeeping either.
   return [
-    'DevBrain: this stretch of work looks like it established something worth remembering, and nothing was saved for it yet.',
-    ...(evidence.length ? ['', ...evidence] : []),
-    '',
-    'You did the work, so you write the record — DevBrain only stores it. For each distinct, non-obvious item',
-    '(usually one, at most three), call the DevBrain `save_entry` tool',
-    ...ENTRY_GUIDE,
+    'DevBrain: nothing saved for this stretch yet.',
+    ...evidence,
     ...buildNoErrorHint(events),
     ...buildFixHint(openBugs),
-    '',
-    'If it was routine (a typo, an obvious change) or DevBrain already has it, save nothing.',
-    'Either way, keep it brief: one short line to the user, then stop.',
+    'If it established something non-obvious, call `save_entry` (one entry per item, at most three). If it was routine or already known, save nothing.',
+    QUIET,
   ].join('\n');
 }
+
+/**
+ * The closing line of every ask. Saving is bookkeeping: whether the agent saved
+ * or chose not to, the user gains nothing from hearing about it, and a reply
+ * that narrates it buries the answer to what they actually asked.
+ */
+export const QUIET =
+  'Do this silently: write nothing to the user about DevBrain or saving, whether you save or not. Then end your turn.';
 
 /**
  * What to ask for when the stretch contains no error at all.
@@ -138,21 +148,16 @@ export function buildNoErrorHint(events: DigestEvent[]): string[] {
   if (events.some(e => e.kind === 'error')) return [];
   const edited = events.some(e => e.kind === 'edit');
 
+  // Two lines, not twelve: this is shown to the user too (see buildRecordPrompt).
+  // What survives is what the type counts showed was missing — that a no-error
+  // stretch is a decision or a lesson, and that a decision needs what was
+  // turned down — plus the guard against an invented error_pattern.
   return [
-    '',
-    edited
-      ? 'Nothing failed in this stretch, so there is no root cause to write and no error to quote.'
-      : 'No code changed and nothing failed in this stretch, so there is nothing here to write up as a fix.',
-    'If something is worth keeping it is one of these, and each needs a different thing from you:',
-    '- `decision` — what you chose, **what you turned down, and why**. The rejected option is the',
-    '  part that cannot be recovered later: without it the entry cannot be re-judged when the',
-    '  trade-off changes, and it reads as though nothing else was considered.',
-    '- `lesson` — what looked true and was not, and what is actually true.',
-    '- `pattern` / `anti-pattern` — the shape worth repeating, or the one to stop reaching for.',
-    'Leave `error_pattern` off entirely. There was no error, and a plausible-looking one invented',
-    'here would match every future failure of that shape and identify none of them.',
-    'If the choice was obvious, or forced, or already recorded, save nothing — this is the case',
-    'where saving nothing is the common answer.',
+    (edited
+      ? 'Nothing failed in this stretch, so there is no fix to write'
+      : 'No code changed and nothing failed, so there is no fix to write') +
+      ': only a `decision` (what you chose, what you turned down, and why) or a `lesson` is worth keeping.',
+    'Leave `error_pattern` off — there was no error. If the choice was obvious, forced or already recorded, save nothing.',
   ];
 }
 
@@ -166,9 +171,7 @@ export function buildNoErrorHint(events: DigestEvent[]): string[] {
 export function buildFixHint(openBugs: { id: string; title: string }[]): string[] {
   if (!openBugs.length) return [];
   return [
-    '',
-    'You recorded these earlier this session and nothing has closed them yet.',
-    'If this stretch fixed one, pass its id as `fixes` — both entries stay, linked:',
+    'Open bugs from this session — if this stretch fixed one, pass its id as `fixes`:',
     ...openBugs.slice(0, 3).map(b => `  ${b.id}  ${b.title.slice(0, 70)}`),
   ];
 }
