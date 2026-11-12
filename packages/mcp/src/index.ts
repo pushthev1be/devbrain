@@ -614,7 +614,7 @@ const httpServer = createServer(async (req, res) => {
 
       if (req.method === 'GET' && url === '/api/project') {
         try {
-          const id = new URL(req.url ?? '', 'http://x').searchParams.get('id');
+          const id = new URL(req.url ?? '', 'http://localhost').searchParams.get('id');
           if (!id) { json(res, 400, { error: 'id is required' }); return; }
           const project = (await getAllProjects()).find(p => p.id === id);
           if (!project) { json(res, 404, { error: 'project not found' }); return; }
@@ -712,7 +712,7 @@ const httpServer = createServer(async (req, res) => {
       // few edges needs to say which kinds are missing rather than look broken.
       if (url.startsWith('/api/graph') && req.method === 'GET') {
         try {
-          const id = new URL(req.url ?? '', 'http://x').searchParams.get('id');
+          const id = new URL(req.url ?? '', 'http://localhost').searchParams.get('id');
           if (!id) { json(res, 400, { error: 'id is required' }); return; }
           const all = (await getAllEntriesWithProjects()).filter(e => e.projectId === id);
           const graph = buildGraph(graphSubset(all));
