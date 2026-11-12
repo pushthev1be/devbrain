@@ -1,7 +1,7 @@
 ---
 description: Review commits and sessions DevBrain has not learned from yet, and save what matters.
 argument-hint: [how many]
-allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" backfill*)
+allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" backfill)
 ---
 
 Run the bundled CLI:
@@ -10,8 +10,8 @@ Run the bundled CLI:
 node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" backfill
 ```
 
-Append a count if one was given in $ARGUMENTS; otherwise run it bare and take
-the default.
+Run it bare to take the default. If $ARGUMENTS gives a count, append it; that
+exact command is not pre-approved, so Claude Code asks before running it.
 
 What comes back is unreviewed history — commits and past sessions DevBrain has
 stored nothing about. It is raw material, not entries. For each one, decide

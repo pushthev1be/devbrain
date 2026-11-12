@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin.json",
   "name": "devbrain",
   "displayName": "DevBrain",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "description": "Persistent memory for your coding agent. It writes down what it fixes and decides as it works, and reads it back before the next task. Matches on wording and on exact error text, with no model and no account needed.",
   "author": {
     "name": "DevBrain"
@@ -42,8 +42,8 @@
         "${CLAUDE_PLUGIN_ROOT}/dist/mcp.js"
       ],
       "env": {
-        "DEVBRAIN_MONGODB_URI": "${user_config.mongodb_uri}",
-        "DEVBRAIN_TOKEN": "${user_config.dashboard_token}"
+        "CLAUDE_PLUGIN_OPTION_MONGODB_URI": "${user_config.mongodb_uri}",
+        "CLAUDE_PLUGIN_OPTION_DASHBOARD_TOKEN": "${user_config.dashboard_token}"
       }
     }
   }
