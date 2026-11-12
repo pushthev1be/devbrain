@@ -112,6 +112,10 @@ describe('the committed plugin bundles', () => {
   it('reads no credential from the machine', () => {
     const code = allCode();
     expect(code, 'a .env loader is bundled').not.toMatch(/dotenv/);
+    // Not called is not enough: v0.2.5 shipped the loader unused and the
+    // directory still blocked it. Its path and its file read must be absent.
+    expect(code, 'the ~/.devbrain/.env loader is bundled').not.toMatch(/['"]\.env['"]/);
+    expect(code, 'the ~/.devbrain/.env loader is bundled').not.toMatch(/function loadGlobalEnv/);
     expect(code, 'the setup wizard is bundled').not.toMatch(/function writeEnvVars/);
     expect(code, 'a Gemini or Google key is read'
     ).not.toMatch(/process\.env\.(GEMINI_API_KEY|GOOGLE_API_KEY|GOOGLE_CLOUD_PROJECT)/);

@@ -73,6 +73,17 @@ function requireTheInteractiveTerminalUI () {
 	throw new Error("DevBrain was built without the interactive terminal UI, so the plugin stays inside the file limits Anthropic's plugin directory enforces. Matching on wording and on exact error text still works. Install the devbrain CLI for the full build.");
 }
 
+var theDevbrainEnvLoader;
+var hasRequiredTheDevbrainEnvLoader;
+
+function requireTheDevbrainEnvLoader () {
+	if (hasRequiredTheDevbrainEnvLoader) return theDevbrainEnvLoader;
+	hasRequiredTheDevbrainEnvLoader = 1;
+	const omitted = () => { throw new Error("DevBrain was built without the ~/.devbrain/.env loader, so the plugin stays inside the file limits Anthropic's plugin directory enforces. Matching on wording and on exact error text still works. Install the devbrain CLI for the full build."); };
+	theDevbrainEnvLoader = { parseEnvFile: omitted, globalEnvPath: omitted, loadGlobalEnv: omitted };
+	return theDevbrainEnvLoader;
+}
+
 var theADKAgentRoute;
 var hasRequiredTheADKAgentRoute;
 
@@ -87,6 +98,7 @@ exports.getAugmentedNamespace = getAugmentedNamespace;
 exports.getDefaultExportFromCjs = getDefaultExportFromCjs;
 exports.requireHookInstallationIntoClaudeCodeSettings = requireHookInstallationIntoClaudeCodeSettings;
 exports.requireTheADKAgentRoute = requireTheADKAgentRoute;
+exports.requireTheDevbrainEnvLoader = requireTheDevbrainEnvLoader;
 exports.requireTheFileOpenerAndDevbrainRun = requireTheFileOpenerAndDevbrainRun;
 exports.requireTheInteractiveTerminalUI = requireTheInteractiveTerminalUI;
 exports.requireTheSetupWizard = requireTheSetupWizard;

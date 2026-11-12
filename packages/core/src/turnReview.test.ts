@@ -88,7 +88,7 @@ describe('buildRecordPrompt', () => {
   it('shows each distinct error once and names files briefly', () => {
     const { events } = parseTranscript(jsonl(failing, failing, edit, edit));
     const prompt = buildRecordPrompt(events);
-    expect(prompt.match(/error seen/g)).toHaveLength(1);
+    expect(prompt.match(/use this verbatim as error_pattern/g)).toHaveLength(1);
     expect(prompt).toContain('files changed: src/db.ts');
   });
 });

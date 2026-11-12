@@ -26,7 +26,6 @@ function markOnboarded() {
   if (!require$$0.existsSync(devbrainDir)) require$$0.mkdirSync(devbrainDir, { recursive: true });
   require$$0.writeFileSync(setupPath, JSON.stringify({ onboarded: true, setupAt: Date.now() }), "utf-8");
 }
-devbrainMcp1.distExports.globalEnvPath();
 function explainError(err) {
   const msg = err instanceof Error ? err.message : String(err);
   if (/No Gemini credentials|GOOGLE_CLOUD_PROJECT is not set/i.test(msg))

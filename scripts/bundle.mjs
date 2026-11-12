@@ -138,6 +138,15 @@ const OMITTED_FROM_PLUGIN = [
   // plugin brings its own, and the directory holds code that reads
   // ~/.claude/settings.json and writes commands into it.
   { filter: '^[.]/agentSettings$', why: 'hook installation into Claude Code settings' },
+  // The ~/.devbrain/.env loader, where `devbrain setup` keeps MONGODB_URI and
+  // GEMINI_API_KEY. The entry points never call it in this build, but dead code
+  // is still code to the directory's scan: v0.2.5 was blocked with "ask the user
+  // for the value through a userConfig option instead of reading it from their
+  // machine" while this sat in the bundle unused. Core's index re-exports it at
+  // load, so the stub has to load cleanly and fail only when called -- hence
+  // `exports`, which gives each name a function that throws instead.
+  { filter: '^[.]/globalEnv$', why: 'the ~/.devbrain/.env loader',
+    exports: ['parseEnvFile', 'globalEnvPath', 'loadGlobalEnv'] },
 ];
 
 /**
@@ -164,14 +173,21 @@ const stubOmitted = {
       id === join(root, 'omitted', `${why.replace(/\W+/g, '-')}.cjs`));
     if (!hit) return null;
     const why = hit.why;
-    // CommonJS, so the commonjs plugin defers it to the require() that asks for
-    // it -- every omitted module is required lazily. As an ES module Rollup
-    // would hoist it and it would throw while the bundle is still loading.
-    return `module.exports = {};\nthrow new Error(${JSON.stringify(
+    const message = JSON.stringify(
       `DevBrain was built without ${why}, so the plugin stays inside the file ` +
       `limits Anthropic's plugin directory enforces. Matching on wording and on ` +
       `exact error text still works. Install the devbrain CLI for the full build.`,
-    )});`;
+    );
+    // A module required eagerly (re-exported from an index) cannot throw at
+    // load, so each export it is known for becomes a function that does.
+    if (hit.exports) {
+      return `const omitted = () => { throw new Error(${message}); };\n` +
+        `module.exports = { ${hit.exports.map(n => `${n}: omitted`).join(', ')} };`;
+    }
+    // CommonJS, so the commonjs plugin defers it to the require() that asks for
+    // it -- every omitted module is required lazily. As an ES module Rollup
+    // would hoist it and it would throw while the bundle is still loading.
+    return `module.exports = {};\nthrow new Error(${message});`;
   },
 };
 

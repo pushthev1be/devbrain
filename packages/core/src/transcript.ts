@@ -56,7 +56,7 @@ const READ_COMMAND = /^\s*(?:cd\s+\S+\s*&&\s*)?(?:cat|sed\s+-n|head|tail|less|gr
  * evidence. Matched on the opening phrases rather than the word "DevBrain",
  * which an application is free to print for its own reasons.
  */
-const SELF_VOICE = /DevBrain: (?:step back|this stretch of work|this failure matches)|# DevBrain backfill/;
+const SELF_VOICE = /DevBrain: (?:step back|this stretch of work|nothing saved for this stretch|this failure matches)|# DevBrain backfill/;
 
 /**
  * True when output is DevBrain quoting an error back, or a command printing an

@@ -14,7 +14,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, writeFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { parseEnvFile, loadGlobalEnv, globalEnvPath, usePluginSettings } from './env';
+import { parseEnvFile, loadGlobalEnv, globalEnvPath } from './globalEnv';
+import { usePluginSettings } from './pluginSettings';
 
 const KEY = 'DEVBRAIN_ENV_TEST_URI';
 let dir: string;

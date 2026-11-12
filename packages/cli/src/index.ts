@@ -25,7 +25,7 @@ import {
   looksLikeError, isReadOnlyCommand, isEchoedOutput, isGenericFailureLine, recallForFailure, formatRecallForAgent,
   withDevbrainHooks, withoutDevbrainHooks, installedDevbrainHooks,
   nextSessionChunk, formatBackfillBatch, commitExcerpt, BACKFILL_BATCH_BUDGET,
-  sameProjectPath, loadGlobalEnv, globalEnvPath, usePluginSettings, looksLikeProject, formatFirstSession,
+  sameProjectPath, loadGlobalEnv, usePluginSettings, looksLikeProject, formatFirstSession,
   mergeDuplicateProjects, projectForSave,
 } from '@devbrain/core';
 import type { Entry, Project, EntryCategory } from '@devbrain/core';
@@ -63,9 +63,7 @@ function markOnboarded(): void {
   writeFileSync(setupPath, JSON.stringify({ onboarded: true, setupAt: Date.now() }), 'utf-8');
 }
 
-// ─── credentials ──────────────────────────────────────────────────────────────
-
-const envFilePath = globalEnvPath();
+// ─── errors ───────────────────────────────────────────────────────────────────
 
 // Map a raw error onto something a user can act on. Driver and SDK messages are
 // accurate but unreadable; the common config failures get a next step instead.
