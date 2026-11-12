@@ -439,7 +439,7 @@ Filed under Unfiled: ${repoRoot} is not a project. Pass project_path to file it 
       }
       if (req.method === "GET" && url === "/api/project") {
         try {
-          const id = new URL(req.url ?? "", "http://x").searchParams.get("id");
+          const id = new URL(req.url ?? "", "http://localhost").searchParams.get("id");
           if (!id) {
             json(res, 400, { error: "id is required" });
             return;
@@ -545,7 +545,7 @@ Filed under Unfiled: ${repoRoot} is not a project. Pass project_path to file it 
       }
       if (url.startsWith("/api/graph") && req.method === "GET") {
         try {
-          const id = new URL(req.url ?? "", "http://x").searchParams.get("id");
+          const id = new URL(req.url ?? "", "http://localhost").searchParams.get("id");
           if (!id) {
             json(res, 400, { error: "id is required" });
             return;

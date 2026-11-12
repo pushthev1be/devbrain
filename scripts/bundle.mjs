@@ -418,7 +418,7 @@ console.log(
 // A stamp the test compares against the newest source file, so "the bundles are
 // stale" is a failing test rather than something noticed in production.
 writeFileSync(
-  join(outDir, 'BUILD'),
+  join(outDir, 'BUILD.json'),
   JSON.stringify({ builtAt: Date.now() }, null, 2) + '\n',
 );
-console.log('plugin/dist/BUILD stamped');
+console.log('plugin/dist/BUILD.json stamped');

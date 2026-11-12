@@ -1,6 +1,5 @@
 ---
 description: Open the DevBrain dashboard — everything saved, as a browsable graph.
-allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/dist/mcp.js" --serve)
 ---
 
 Start the dashboard **in the background** — it is a server and never exits, so

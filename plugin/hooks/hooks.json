@@ -1,4 +1,5 @@
 {
+  "description": "DevBrain's five triggers. Three of them exist to make memory get read, which was the half that did not happen on its own.",
   "hooks": {
     "SessionStart": [
       {

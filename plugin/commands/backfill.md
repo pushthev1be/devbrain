@@ -1,7 +1,6 @@
 ---
 description: Review commits and sessions DevBrain has not learned from yet, and save what matters.
 argument-hint: [how many]
-allowed-tools: Bash(node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" backfill)
 ---
 
 Run the bundled CLI:
