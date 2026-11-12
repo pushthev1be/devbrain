@@ -108,10 +108,20 @@ describe('usePluginSettings', () => {
     expect(env.MONGODB_URI).toBe(chosen);
   });
 
-  it('takes the variable plugin.json sets for the MCP server', () => {
+  it('ignores the old DEVBRAIN_MONGODB_URI name: options arrive only as CLAUDE_PLUGIN_OPTION_*', () => {
     const env: NodeJS.ProcessEnv = { MONGODB_URI: machine, DEVBRAIN_MONGODB_URI: chosen };
     usePluginSettings(env);
-    expect(env.MONGODB_URI).toBe(chosen);
+    expect(env.MONGODB_URI).toBe('');
+  });
+
+  it('takes the dashboard token from its option, never a DEVBRAIN_TOKEN the machine has', () => {
+    const fromMachine: NodeJS.ProcessEnv = { DEVBRAIN_TOKEN: 'someone-elses-secret' };
+    usePluginSettings(fromMachine);
+    expect(fromMachine.DEVBRAIN_TOKEN).toBe('');
+
+    const fromOption: NodeJS.ProcessEnv = { DEVBRAIN_TOKEN: 'someone-elses-secret', CLAUDE_PLUGIN_OPTION_DASHBOARD_TOKEN: 'chosen' };
+    usePluginSettings(fromOption);
+    expect(fromOption.DEVBRAIN_TOKEN).toBe('chosen');
   });
 
   it('keeps an option left blank blank, which means local storage', () => {
